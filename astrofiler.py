@@ -180,7 +180,7 @@ if __name__ == "__main__":
 
     log_formatter = logging.Formatter('%(asctime)s %(levelname)s:%(message)s')
     log_handler = RotatingFileHandler(
-        'astrofile.log',
+        'astrofiler.log',
         mode='a',
         maxBytes=1024*1024*5, # 5 MB
         backupCount=5,
