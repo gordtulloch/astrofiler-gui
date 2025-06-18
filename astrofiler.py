@@ -10,8 +10,7 @@ from config import Config
 import warnings
 warnings.filterwarnings("ignore")
 
-VERSION="1.0.1"
-DEBUG = True
+VERSION="0.0.1"
 
 class astrofiler(object):
     def __init__(self):
