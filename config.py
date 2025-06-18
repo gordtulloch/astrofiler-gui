@@ -16,8 +16,8 @@ class Config():
         if not os.path.exists(self.file_path):
             logger.info("Config file not found, creating with defaults.")
             self.config['DEFAULT'] = {
-                'SOURCE'    : '/home/gtulloch/Projects/astrofiler/SOURCE',     # Where the source files are stored
-                'REPO'      : '/home/gtulloch/Projects/astrofiler/REPOSITORY', # Where the repository is stored
+                'SOURCE'    : '/home/gtulloch/REPOSITORY.source/',     # Where the source files are stored
+                'REPO'      : '/home/gtulloch/REPOSITORY.target/', # Where the repository is stored
             }
             with open(self.file_path, 'w') as configfile:
                 self.config.write(configfile)
