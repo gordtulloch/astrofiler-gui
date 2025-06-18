@@ -6,36 +6,19 @@ from datetime import datetime,timedelta
 import os
 from math import cos,sin 
 from astropy.io import fits
+from config import Config
+import warnings
+warnings.filterwarnings("ignore")
 
-# Set up python logging to astrofile.log
-import logging
-
-logging.basicConfig(
-    filename='astrofile.log',
-    filemode='a',
-    format='%(asctime)s %(levelname)s:%(message)s',
-    level=logging.INFO
-    class=logging.handlers.RotatingFileHandler,
-    maxBytes=1024*1024*5, # 5 MB
-    backupCount=5,
-    formatter=standard,
-    encoding='utf-8')
-
+VERSION="1.0.1"
 DEBUG = True
 
 class astrofiler(object):
     def __init__(self):
-        self.sourceFolder=self.config.get('ppsourcepath')
-        self.repoFolder=self.config.get('pprepopath')
+        self.config=Config()
+        self.sourceFolder=self.config.get('SOURCE')
+        self.repoFolder=self.config.get('REPO')
         logging.info("Post Processing object initialized")
-
-    #################################################################################################################
-    ## submitFileToDB - this function submits a fits file to the database                                          ##
-    #################################################################################################################
-    # Not currently implemented, but this is where you would submit the fits file to the database
-    def submitFileToDB(self,fileName,hdr):
-        pass
-
 
     #################################################################################################################
     ## registerFitsImage - this functioncalls a function to registers each fits files in the database              ##
@@ -187,11 +170,30 @@ class astrofiler(object):
                     logging.warning("File added to repo - "+str(os.path.join(root, file)))
                 else:
                     logging.warning("File not added to repo - "+str(os.path.join(root, file)))
-        return true
+        return True
 
-if main.__name__ == "__main__":
-    print("Astrofiler V1.0 by Gord Tulloch gord.tulloch@gmail.com")
+if __name__ == "__main__":
+    print("Astrofiler "+VERSION+" by Gord Tulloch gord.tulloch@gmail.com")
+    
+    # Set up python logging to astrofile.log
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    log_formatter = logging.Formatter('%(asctime)s %(levelname)s:%(message)s')
+    log_handler = RotatingFileHandler(
+        'astrofile.log',
+        mode='a',
+        maxBytes=1024*1024*5, # 5 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    log_handler.setFormatter(log_formatter)
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(log_handler)
+
     logging.info("Starting astrofiler")
+    
     # Initialize the astrofiler object
     astrofiler = astrofiler()
     # Register the fits images
