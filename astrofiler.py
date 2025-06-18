@@ -56,7 +56,7 @@ class astrofiler(object):
                 return False
 
             ############## L I G H T S ################################################################
-            if (hdr["IMAGETYP"]=="Light"):
+            if (hdr["IMAGETYP"].upper()=="LIGHT"):
                 # Adjust the WCS for the image
                 if "CD1_1" not in hdr:
                     if "CDELT1" in hdr:
