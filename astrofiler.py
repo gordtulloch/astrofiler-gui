@@ -77,8 +77,8 @@ class astrofiler(object):
                 # Standardize the object name and create a new file name
                 if ("OBJECT" in hdr):
                     # Standardize object name, remove spaces and underscores
-                    objectName=hdr["OBJECT"].replace(' ', '').replace('_', '')
-                    hdr.append(('OBJECT', objectName, 'Adjusted via MCP'), end=True)
+                    objectName=hdr["OBJECT"].replace(' ', '').replace('_', '').upper()
+                    hdr.append(('OBJECT', objectName, 'Adjusted via Astrofiler'), end=True)
                     hdul.flush()  # changes are written back to original.fits
                     
                     if ("FILTER" in hdr):
@@ -91,7 +91,7 @@ class astrofiler(object):
                     logging.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
                     return False
             ############## F L A T S #############################################################################            
-            elif hdr["IMAGETYP"]=="Flat":
+            elif hdr["IMAGETYP"].upper()=="FLAT":
                 if ("FILTER" in hdr):
                     newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
@@ -100,31 +100,31 @@ class astrofiler(object):
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             
             ############## D A R K S / B I A S E S ################################################################   
-            elif hdr["IMAGETYP"]=="Dark" or hdr["IMAGETYP"]=="Bias":
-                newName="{0}-{1}-{1}-{2}-{3}s-{4}x{5}-t{6}.fits".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+            elif hdr["IMAGETYP"].upper()=="DARK" or hdr["IMAGETYP"].upper()=="BIAS":
+                newName="{0}-{1}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             else:
-                logging.warning("File not processed as IMAGETYP -"+hdr["IMAGETYP"]+"- not recognized: "+str(os.path.join(root, file)))
+                logging.warning("File not processed as IMAGETYP="+hdr["IMAGETYP"]+" not recognized: "+str(os.path.join(root, file)))
             hdul.close()
             newPath=""
 
             ######################################################################################################
             # Create the folder structure (if needed)
             fitsDate=dateobj.strftime("%Y%m%d")
-            if (hdr["IMAGETYP"]=="Light"):
+            if (hdr["IMAGETYP"].upper()=="LIGHT"):
                 newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(hdr["OBJECT"].replace(" ", ""),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
-            elif hdr["IMAGETYP"]=="Dark ":
+            elif hdr["IMAGETYP"].upper()=="DARK ":
                 newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["EXPTIME"],fitsDate)
-            elif hdr["IMAGETYP"]=="Flat":
+            elif hdr["IMAGETYP"].upper()=="FLAT":
                 if ("FILTER" in hdr):
                     newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate)
                 else:
                     newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate)
-            elif hdr["IMAGETYP"]=="Bias":
+            elif hdr["IMAGETYP"].upper()=="BIAS":
                 newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             else:
