@@ -1,1 +1,6 @@
 astropy
+peewee
+numpy
+matplotlib
+pytz
+PySide6
