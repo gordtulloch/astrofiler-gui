@@ -1,6 +1,14 @@
 # Log files
 *.log
 
+# Database files
+*.sqlite3
+*.sqlite
+*.db
+
+# Ini files
+*.ini
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
