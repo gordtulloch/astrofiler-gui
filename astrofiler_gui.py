@@ -267,9 +267,11 @@ class SequencesTab(QWidget):
         
         # Controls
         controls_layout = QHBoxLayout()
-        self.update_button = QPushButton("Update")
+        self.update_button = QPushButton("Update Lights")
+        self.update_calibrations_button = QPushButton("Update Calibrations")
         
         controls_layout.addWidget(self.update_button)
+        controls_layout.addWidget(self.update_calibrations_button)
         controls_layout.addStretch()
         
         # Sequences list
@@ -291,17 +293,29 @@ class SequencesTab(QWidget):
         
         # Connect signals
         self.update_button.clicked.connect(self.update_sequences)
+        self.update_calibrations_button.clicked.connect(self.update_calibration_sequences)
     
     def update_sequences(self):
-        """Update sequences by running createSequences method."""
+        """Update light sequences by running createLightSequences method."""
         try:
             self.fits_file_handler = fitsProcessing()
-            self.fits_file_handler.createSequences()
+            created_sequences = self.fits_file_handler.createLightSequences()
             self.load_sequences_data()
-            QMessageBox.information(self, "Success", "Sequences updated successfully!")
+            QMessageBox.information(self, "Success", f"Light sequences updated successfully! Created {len(created_sequences)} sequences.")
         except Exception as e:
-            logger.error(f"Error updating sequences: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to update sequences: {e}")
+            logger.error(f"Error updating light sequences: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to update light sequences: {e}")
+
+    def update_calibration_sequences(self):
+        """Update calibration sequences by running createCalibrationSequences method."""
+        try:
+            self.fits_file_handler = fitsProcessing()
+            created_sequences = self.fits_file_handler.createCalibrationSequences()
+            self.load_sequences_data()
+            QMessageBox.information(self, "Success", f"Calibration sequences updated successfully! Created {len(created_sequences)} sequences.")
+        except Exception as e:
+            logger.error(f"Error updating calibration sequences: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to update calibration sequences: {e}")
 
     def load_sequences_data(self):
         """Load sequence data from the database and populate the tree widget."""
