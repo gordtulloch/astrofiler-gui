@@ -1,7 +1,0 @@
-# Testing requirements for AstroFiler
-pytest>=7.0.0
-pytest-qt>=4.0.0
-pytest-cov>=4.0.0
-pytest-mock>=3.10.0
-pytest-xvfb>=2.0.0  # For headless GUI testing on Linux
-coverage>=6.0.0
