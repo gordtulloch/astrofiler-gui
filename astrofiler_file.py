@@ -234,45 +234,9 @@ class fitsProcessing:
                     if currCount % 10 == 0:
                         logging.info(f"Processed {currCount} files so far...")
                     registeredFiles.append(newFitsFileId)
-                    self.createThumbnail(newFitsFileId)
                 else:
                     logging.warning("File not added to repo - no IMAGETYP card - "+str(os.path.join(root, file)))
         return registeredFiles
-
-    #################################################################################################################
-    ## createThumbnail - this function creates a thumbnail image for a fits file and saves it to the repository    ##
-    #################################################################################################################
-    def createThumbnail(self,fitsFileId):
-        # Load the fits file
-        fits_file = FitsFileModel.get_or_none(FitsFileModel.fitsFileId == fitsFileId)
-        if not fits_file:
-            logging.info(f"Thumbnail failed - couldn't find fits file in db: {fitsFileId}")
-            return
-        
-        # Read the data from the fits file
-        try:
-            with fits.open(fits_file.fitsFileName) as hdul:
-                data = hdul[0].data
-        except Exception as e:
-            logging.info(f"Thumbnail failed - unable to read fits file on disk: {e}")
-            return
-        
-        # Create a thumbnail image
-        thumbnail_data = data[::10, ::10]
-
-        # Stretch the image to 0-100
-        thumbnail_data = (thumbnail_data - np.min(thumbnail_data)) / (np.max(thumbnail_data) - np.min(thumbnail_data)) * 100
-        
-        # Save the thumbnail image as a JPG file
-        thumbnail_path = os.path.join(self.repoFolder+'Thumbnails/', f'thumbnail_{fits_file.fitsFileId}.jpg')
-
-        try:
-            plt.imsave(thumbnail_path, thumbnail_data, cmap='gray')
-            logging.info(f"Thumbnail image saved to: {thumbnail_path}")
-        except Exception as e:
-            logging.info(f"Failed to save thumbnail image: {e}")
-        
-        return
 
     #################################################################################################################
     ## createLightSequences - this function creates sequences for all Light files not currently assigned to one    ##
