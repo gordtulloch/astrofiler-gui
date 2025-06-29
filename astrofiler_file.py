@@ -134,19 +134,24 @@ class fitsProcessing:
                 else:
                     logging.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
                     return False
-            ############## F L A T S #############################################################################            
+            ############## F L A T S ##################################################################            
             elif "Flat" in hdr["IMAGETYP"]:
                 if ("FILTER" in hdr):
-                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
-                    newName=newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                    newName=newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             
-            ############## D A R K S / B I A S E S ################################################################   
-            elif "Dark" in hdr["IMAGETYP"] or "Bias" in hdr["IMAGETYP"]:
-                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+            ############## D A R K S ##################################################################   
+            elif "Dark" in hdr["IMAGETYP"]:
+                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Dark",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+            ############## B I A S E S ################################################################   
+            elif "Bias" in hdr["IMAGETYP"]:
+                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Bias",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+
             else:
                 logging.warning("File not processed as IMAGETYP -"+hdr["IMAGETYP"]+"- not recognized: "+str(os.path.join(root, file)))
             hdul.close()
@@ -260,28 +265,13 @@ class fitsProcessing:
         return
 
     #################################################################################################################
-    ## createSequences - this function creates sequences for all files not currently assigned to one          ##
-    #################################################################################################################
-    def createSequences(self):
-        logging.info("Creating sequences for light files")
-        # Create light sequences
-        createdSequences = self.createLightSequences()
-        logging.info("Created "+str(len(createdSequences))+" light sequences")
-        
-        # Create calibration sequences
-        createdCalibrationSequences = self.createCalibrationSequences()
-        logging.info("Created "+str(len(createdCalibrationSequences))+" calibration sequences")
-        
-        return
-
-    #################################################################################################################
     ## createLightSequences - this function creates sequences for all Light files not currently assigned to one    ##
     #################################################################################################################
     def createLightSequences(self):
         sequencesCreated=[]
         
         # Query for all fits files that are not assigned to a sequence
-        unassigned_files = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType == "Light")
+        unassigned_files = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Light"))
         
         # How many unassigned_files are there?
         logging.info("createSequences found "+str(len(unassigned_files))+" unassigned files to sequence")
@@ -302,7 +292,7 @@ class fitsProcessing:
                                                     fitsSequenceObjectName=currentFitsFile.fitsFileObject,
                                                     fitsSequenceTelescope=currentFitsFile.fitsFileTelescop,
                                                     fitsSequenceImager=currentFitsFile.fitsFileInstrument,
-                                                    fitsSequenceDate=currentFitsFile.fitsFileDate.replace(tzinfo=pytz.UTC),
+                                                    fitsSequenceDate=currentFitsFile.fitsFileDate,
                                                     fitsMasterBias=None,fitsMasterDark=None,fitsMasterFlat=None)
                     sequencesCreated.append(currentSequenceId)
                     logging.info("New sequence created for "+str(newFitsSequence.fitsSequenceId))
@@ -336,9 +326,9 @@ class fitsProcessing:
         createdCalibrationSequences=[]
         
         # Query for all calibration files that are not assigned to a sequence
-        unassignedBiases = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType == "Bias")
-        unassignedDarks  = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType == "Dark")
-        unassignedFlats  = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType == "Flat")
+        unassignedBiases = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Bias"))
+        unassignedDarks  = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Dark"))
+        unassignedFlats  = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Flat"))
         
         # How many unassigned_files are there?
         logging.info("createCalibrationSequences found "+str(len(unassignedBiases))+" unassigned Bias calibration files to sequence")
@@ -351,10 +341,10 @@ class fitsProcessing:
                         
         for biasFitsFile in unassignedBiases:
             if not self.sameDay(biasFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=biasFitsFile.fitsFileDate.strftime('%Y-%m-%d')
+                currDate=datetime.strptime(biasFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
                 uuidStr=uuid.uuid4() # New sequence
                 newFitsSequence=fitsSequenceModel.create(fitsSequenceId=uuidStr,
-                                                fitsSequenceDate=biasFitsFile.fitsFileDate.replace(tzinfo=pytz.UTC),
+                                                fitsSequenceDate=biasFitsFile.fitsFileDate,
                                                 fitsSequenceObjectName='Flat',
                                                 fitsMasterBias=None,
                                                 fitsMasterDark=None,
@@ -364,15 +354,16 @@ class fitsProcessing:
             biasFitsFile.save()   
             logging.info("Set sequence for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
             createdCalibrationSequences.append(uuidStr)
-              # Dark calibration files
+        
+        # Dark calibration files
         currDate="0001-01-01"
         uuidStr=uuid.uuid4()
         for darkFitsFile in unassignedDarks:
             if not self.sameDay(darkFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=darkFitsFile.fitsFileDate.strftime('%Y-%m-%d')
+                currDate=datetime.strptime(darkFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
                 uuidStr=uuid.uuid4() # New sequence
                 newFitsSequence=fitsSequenceModel.create(fitsSequenceId=uuidStr,
-                                                fitsSequenceDate=darkFitsFile.fitsFileDate.replace(tzinfo=pytz.UTC),
+                                                fitsSequenceDate=darkFitsFile.fitsFileDate,
                                                 fitsSequenceObjectName='Dark',
                                                 fitsMasterBias=None,
                                                 fitsMasterDark=None,
@@ -388,10 +379,10 @@ class fitsProcessing:
         uuidStr=uuid.uuid4()
         for flatFitsFile in unassignedFlats:
             if not self.sameDay(flatFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=flatFitsFile.fitsFileDate.strftime('%Y-%m-%d')
+                currDate=datetime.strptime(flatFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
                 uuidStr=uuid.uuid4() # New sequence
                 newFitsSequence=fitsSequenceModel.create(fitsSequenceId=uuidStr,
-                                fitsSequenceDate=flatFitsFile.fitsFileDate.replace(tzinfo=pytz.UTC),
+                                fitsSequenceDate=flatFitsFile.fitsFileDate,
                                 fitsSequenceObjectName='Flat',
                                 fitsMasterBias=None,
                                 fitsMasterDark=None,
@@ -410,3 +401,4 @@ class fitsProcessing:
     #################################################################################################################
     def calibrateFitsImage(self,targetFitsFile):
         pass
+    

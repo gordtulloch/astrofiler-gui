@@ -252,7 +252,23 @@ class ImagesTab(QWidget):
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
 
     def clear_files(self):
-        self.file_tree.clear()
+        """Clear the file tree and delete all fitsSequence and fitsFile records from the database."""
+        try:
+            # Clear the tree widget
+            self.file_tree.clear()
+            
+            # Delete all fitsSequence records from the database
+            deleted_sequences = FitsSequenceModel.delete().execute()
+            
+            # Delete all fitsFile records from the database
+            deleted_files = FitsFileModel.delete().execute()
+            
+            logger.info(f"Deleted {deleted_sequences} sequence records and {deleted_files} file records from database")
+            QMessageBox.information(self, "Success", f"Repository cleared! Deleted {deleted_sequences} sequence records and {deleted_files} file records from database.")
+            
+        except Exception as e:
+            logger.error(f"Error clearing repository: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to clear repository: {e}")
 
 
 class SequencesTab(QWidget):
@@ -356,7 +372,7 @@ class SequencesTab(QWidget):
                 QMessageBox.warning(self, "Error", f"Failed to load sequences data: {e}")
 
 
-class ViewsTab(QWidget):
+class MergeTab(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
@@ -364,51 +380,252 @@ class ViewsTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
         
-        # View controls
-        controls_layout = QHBoxLayout()
-        self.view_type = QComboBox()
-        self.view_type.addItems(["List View", "Grid View", "Detail View"])
-        self.filter_button = QPushButton("Apply Filter")
-        self.export_button = QPushButton("Export View")
+        # Main content area
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
         
-        controls_layout.addWidget(QLabel("View Type:"))
-        controls_layout.addWidget(self.view_type)
-        controls_layout.addWidget(self.filter_button)
-        controls_layout.addWidget(self.export_button)
-        controls_layout.addStretch()
+        # Title
+        title_label = QLabel("Object Name Merge Tool")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
         
-        # Main view area with splitter
-        splitter = QSplitter(Qt.Horizontal)
+        # Instructions
+        instructions = QLabel(
+            "This tool allows you to merge object names in the database. "
+            "All instances of the 'From' object name will be changed to the 'To' object name. "
+            "Optionally, you can also rename the actual files on disk."
+        )
+        instructions.setWordWrap(True)
+        instructions.setStyleSheet("padding: 10px; background-color: rgba(255, 255, 255, 0.1); border-radius: 5px; margin: 10px 0px;")
+        main_layout.addWidget(instructions)
         
-        # Left panel - filters/options
-        filter_widget = QWidget()
-        filter_layout = QVBoxLayout(filter_widget)
-        filter_group = QGroupBox("Filters")
-        filter_form = QFormLayout(filter_group)
+        # Form group
+        form_group = QGroupBox("Merge Settings")
+        form_layout = QFormLayout(form_group)
         
-        self.name_filter = QLineEdit()
-        self.size_filter = QSpinBox()
-        self.size_filter.setMaximum(999999)
-        self.type_filter = QComboBox()
-        self.type_filter.addItems(["All", "Images", "Documents", "Videos"])
+        # From field
+        self.from_field = QLineEdit()
+        self.from_field.setPlaceholderText("Enter the object name to change from...")
+        form_layout.addRow("From Object:", self.from_field)
         
-        filter_form.addRow("Name contains:", self.name_filter)
-        filter_form.addRow("Min size (KB):", self.size_filter)
-        filter_form.addRow("File type:", self.type_filter)
+        # To field
+        self.to_field = QLineEdit()
+        self.to_field.setPlaceholderText("Enter the object name to change to...")
+        form_layout.addRow("To Object:", self.to_field)
         
-        filter_layout.addWidget(filter_group)
-        filter_layout.addStretch()
+        # Change filenames checkbox
+        self.change_filenames = QCheckBox("Change filenames on disk")
+        self.change_filenames.setToolTip("If checked, actual files on disk will be renamed to match the new object name")
+        form_layout.addRow("", self.change_filenames)
         
-        # Right panel - main view
-        self.main_view = QListWidget()
-        self.main_view.addItem("No files loaded")
+        main_layout.addWidget(form_group)
         
-        splitter.addWidget(filter_widget)
-        splitter.addWidget(self.main_view)
-        splitter.setSizes([200, 600])  # Set initial sizes
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.preview_button = QPushButton("Preview Changes")
+        self.merge_button = QPushButton("Execute Merge")
+        self.clear_button = QPushButton("Clear Fields")
         
-        layout.addLayout(controls_layout)
-        layout.addWidget(splitter)
+        self.preview_button.clicked.connect(self.preview_merge)
+        self.merge_button.clicked.connect(self.execute_merge)
+        self.clear_button.clicked.connect(self.clear_fields)
+        
+        button_layout.addWidget(self.preview_button)
+        button_layout.addWidget(self.merge_button)
+        button_layout.addWidget(self.clear_button)
+        button_layout.addStretch()
+        
+        main_layout.addLayout(button_layout)
+        
+        # Results area
+        self.results_text = QTextEdit()
+        self.results_text.setReadOnly(True)
+        self.results_text.setMaximumHeight(200)
+        self.results_text.setPlaceholderText("Results and status messages will appear here...")
+        main_layout.addWidget(self.results_text)
+        
+        main_layout.addStretch()
+        layout.addWidget(main_widget)
+    
+    def clear_fields(self):
+        """Clear all input fields and results"""
+        self.from_field.clear()
+        self.to_field.clear()
+        self.change_filenames.setChecked(False)
+        self.results_text.clear()
+    
+    def preview_merge(self):
+        """Preview what changes would be made without executing them"""
+        from_object = self.from_field.text().strip()
+        to_object = self.to_field.text().strip()
+        
+        if not from_object or not to_object:
+            QMessageBox.warning(self, "Input Error", "Please enter both From and To object names.")
+            return
+        
+        if from_object == to_object:
+            QMessageBox.information(self, "No Changes", "From and To object names are identical. No changes needed.")
+            return
+        
+        try:
+            # Check if From object exists
+            from_files = FitsFileModel.select().where(FitsFileModel.fitsFileObject == from_object)
+            from_count = len(from_files)
+            
+            if from_count == 0:
+                QMessageBox.warning(self, "Object Not Found", f"No files found with object name '{from_object}'.")
+                return
+            
+            # Check if To object exists
+            to_files = FitsFileModel.select().where(FitsFileModel.fitsFileObject == to_object)
+            to_count = len(to_files)
+            
+            # Display preview
+            preview_text = f"PREVIEW - No changes will be made:\n\n"
+            preview_text += f"From Object: '{from_object}' ({from_count} files)\n"
+            preview_text += f"To Object: '{to_object}' ({to_count} files)\n\n"
+            
+            if to_count > 0:
+                preview_text += f"After merge: '{to_object}' will have {from_count + to_count} files total\n\n"
+            else:
+                preview_text += f"After merge: '{to_object}' will be created with {from_count} files\n\n"
+            
+            preview_text += "Database changes:\n"
+            preview_text += f"- {from_count} FITS file records will have their object name changed\n"
+            
+            if self.change_filenames.isChecked():
+                preview_text += f"- {from_count} files on disk will be renamed\n"
+            else:
+                preview_text += "- Files on disk will NOT be renamed\n"
+            
+            self.results_text.setPlainText(preview_text)
+            
+        except Exception as e:
+            logger.error(f"Error during preview: {e}")
+            QMessageBox.warning(self, "Preview Error", f"Error during preview: {e}")
+    
+    def execute_merge(self):
+        """Execute the actual merge operation"""
+        from_object = self.from_field.text().strip()
+        to_object = self.to_field.text().strip()
+        change_files = self.change_filenames.isChecked()
+        
+        if not from_object or not to_object:
+            QMessageBox.warning(self, "Input Error", "Please enter both From and To object names.")
+            return
+        
+        if from_object == to_object:
+            QMessageBox.information(self, "No Changes", "From and To object names are identical. No changes needed.")
+            return
+        
+        # Confirm with user
+        msg = f"Are you sure you want to merge '{from_object}' into '{to_object}'?\n\n"
+        if change_files:
+            msg += "This will change database records AND rename files on disk.\n"
+        else:
+            msg += "This will change database records only.\n"
+        msg += "\nThis action cannot be undone!"
+        
+        reply = QMessageBox.question(self, "Confirm Merge", msg, 
+                                   QMessageBox.Yes | QMessageBox.No, 
+                                   QMessageBox.No)
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        try:
+            # Get files to merge
+            files_to_merge = FitsFileModel.select().where(FitsFileModel.fitsFileObject == from_object)
+            
+            if len(files_to_merge) == 0:
+                QMessageBox.warning(self, "Object Not Found", f"No files found with object name '{from_object}'.")
+                return
+            
+            merged_count = 0
+            renamed_count = 0
+            errors = []
+            
+            result_text = f"MERGE EXECUTION RESULTS:\n\n"
+            result_text += f"From: '{from_object}' → To: '{to_object}'\n"
+            result_text += f"Change filenames: {'Yes' if change_files else 'No'}\n\n"
+            
+            for fits_file in files_to_merge:
+                try:
+                    old_filename = fits_file.fitsFileName
+                    
+                    # Update database record
+                    fits_file.fitsFileObject = to_object
+                    
+                    # If changing filenames, update the filename in database and rename actual file
+                    if change_files and old_filename and os.path.exists(old_filename):
+                        # Create new filename by replacing the object name
+                        path_parts = old_filename.split('/')
+                        old_file_part = path_parts[-1]  # Get just the filename
+                        
+                        # Replace the from_object with to_object in the filename
+                        new_file_part = old_file_part.replace(from_object.replace(" ", "_"), to_object.replace(" ", "_"))
+                        new_filename = '/'.join(path_parts[:-1] + [new_file_part])
+                        
+                        # Rename the actual file
+                        if old_filename != new_filename:
+                            if not os.path.exists(new_filename):
+                                os.rename(old_filename, new_filename)
+                                fits_file.fitsFileName = new_filename
+                                renamed_count += 1
+                            else:
+                                errors.append(f"Cannot rename {old_filename} - target file already exists")
+                    
+                    fits_file.save()
+                    merged_count += 1
+                    
+                except Exception as e:
+                    errors.append(f"Error processing {fits_file.fitsFileName}: {str(e)}")
+            
+            # Update sequences that reference the old object name
+            sequences_updated = 0
+            try:
+                from astrofiler_db import fitsSequence as FitsSequenceModel
+                sequences = FitsSequenceModel.select().where(FitsSequenceModel.fitsSequenceObjectName == from_object)
+                for sequence in sequences:
+                    sequence.fitsSequenceObjectName = to_object
+                    sequence.save()
+                    sequences_updated += 1
+            except Exception as e:
+                errors.append(f"Error updating sequences: {str(e)}")
+            
+            result_text += f"Database records updated: {merged_count}\n"
+            if change_files:
+                result_text += f"Files renamed on disk: {renamed_count}\n"
+            result_text += f"Sequences updated: {sequences_updated}\n"
+            
+            if errors:
+                result_text += f"\nErrors encountered:\n"
+                for error in errors:
+                    result_text += f"- {error}\n"
+            
+            result_text += f"\nMerge completed successfully!"
+            
+            self.results_text.setPlainText(result_text)
+            
+            # Show success message
+            if errors:
+                QMessageBox.warning(self, "Merge Completed with Errors", 
+                                  f"Merge completed but {len(errors)} errors occurred. Check results for details.")
+            else:
+                QMessageBox.information(self, "Merge Successful", 
+                                      f"Successfully merged {merged_count} records from '{from_object}' to '{to_object}'.")
+            
+            logger.info(f"Object merge completed: {from_object} → {to_object}, {merged_count} records, {renamed_count} files renamed")
+            
+        except Exception as e:
+            error_msg = f"Error during merge execution: {e}"
+            logger.error(error_msg)
+            QMessageBox.critical(self, "Merge Error", error_msg)
+            self.results_text.setPlainText(f"ERROR: {error_msg}")
 
 
 class ConfigTab(QWidget):
@@ -496,10 +713,24 @@ class ConfigTab(QWidget):
         try:
             config = configparser.ConfigParser()
             
+            # Get paths and ensure they end with a slash
+            source_path = self.source_path.text().strip()
+            repo_path = self.repo_path.text().strip()
+            
+            # Automatically append slash if not present
+            if source_path and not source_path.endswith('/') and not source_path.endswith('\\'):
+                source_path += '/'
+            if repo_path and not repo_path.endswith('/') and not repo_path.endswith('\\'):
+                repo_path += '/'
+            
+            # Update the GUI fields with the corrected paths
+            self.source_path.setText(source_path)
+            self.repo_path.setText(repo_path)
+            
             # Save the path settings directly to DEFAULT section
             config['DEFAULT'] = {
-                'source': self.source_path.text(),
-                'repo': self.repo_path.text(),
+                'source': source_path,
+                'repo': repo_path,
                 'refresh_on_startup': str(self.refresh_on_startup.isChecked()),
                 'theme': self.theme.currentText(),
                 'font_size': str(self.font_size.value()),
@@ -754,13 +985,13 @@ class AstroFilerGUI(QWidget):
         # Create and add tabs
         self.images_tab = ImagesTab()
         self.sequences_tab = SequencesTab()
-        self.views_tab = ViewsTab()
+        self.merge_tab = MergeTab()
         self.config_tab = ConfigTab()
         self.about_tab = AboutTab()
         
         self.tab_widget.addTab(self.images_tab, "Images")
         self.tab_widget.addTab(self.sequences_tab, "Sequences")
-        self.tab_widget.addTab(self.views_tab, "Views")
+        self.tab_widget.addTab(self.merge_tab, "Merge")
         self.tab_widget.addTab(self.config_tab, "Config")
         self.tab_widget.addTab(self.about_tab, "About")
         
@@ -800,3 +1031,9 @@ class AstroFilerGUI(QWidget):
             self.config_tab.font_size.setValue(settings['font_size'])
         if 'grid_size' in settings:
             self.config_tab.grid_size.setValue(settings['grid_size'])
+
+    def showEvent(self, event):
+        """Handle show events to reload data when tab regains focus"""
+        super().showEvent(event)
+        # Reload FITS data when tab becomes visible
+        self.images_tab.load_fits_data()

@@ -14,7 +14,7 @@ class BaseModel(pw.Model):
 class fitsFile(BaseModel):
     fitsFileId = pw.TextField(primary_key=True)
     fitsFileName = pw.TextField(null=True)
-    fitsFileDate = pw.TextField(null=True)
+    fitsFileDate = pw.DateField(null=True)
     fitsFileCalibrated = pw.IntegerField(null=True)
     fitsFileType = pw.TextField(null=True)
     fitsFileStacked = pw.IntegerField(null=True)
@@ -32,7 +32,7 @@ class fitsFile(BaseModel):
 class fitsSequence(BaseModel):
     fitsSequenceId = pw.TextField(primary_key=True)
     fitsSequenceObjectName = pw.TextField(null=True)
-    fitsSequenceDate = pw.TextField(null=True)
+    fitsSequenceDate = pw.DateField(null=True)
     fitsSequenceTelescope = pw.TextField(null=True)
     fitsSequenceImager = pw.TextField(null=True)
     fitsMasterBias = pw.TextField(null=True)
