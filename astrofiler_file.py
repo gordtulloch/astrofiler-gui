@@ -45,17 +45,18 @@ class fitsProcessing:
     def submitFileToDB(self,fileName,hdr):
         if "DATE-OBS" in hdr:
             # Create new fitsFile record
+            logging.info("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
             if "OBJECT" in hdr:
                 newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
                             fitsFileObject=hdr["OBJECT"],fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
-                            fitsFileInstrument=hdr["INSTRUME"],
+                            fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", None),
                             fitsFileSequence=None)
             else:
                 newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
                             fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
-                            fitsFileInstrument=hdr["INSTRUME"],
+                            fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", "OSC"),
                             fitsFileSequence=None)
             return newfile.fitsFileId
         else:
@@ -122,14 +123,14 @@ class fitsProcessing:
                 if ("OBJECT" in hdr):
                     # Standardize object name, remove spaces and underscores
                     objectName=hdr["OBJECT"].replace(' ', '').replace('_', '')
-                    hdr.append(('OBJECT', objectName, 'Adjusted via MCP'), end=True)
+                    hdr.append(('OBJECT', objectName, 'Adjusted via Astrofiler'), end=True)
                     hdul.flush()  # changes are written back to original.fits
                     
                     if ("FILTER" in hdr):
                         newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"].replace(" ", "_"),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                     else:
-                        newName=newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"].replace(" ", "_"),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"].replace(" ", "_"),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
                     logging.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
@@ -140,7 +141,7 @@ class fitsProcessing:
                     newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
-                    newName=newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             
             ############## D A R K S ##################################################################   
@@ -164,17 +165,17 @@ class fitsProcessing:
                 newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(hdr["OBJECT"].replace(" ", ""),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             elif "Dark" in hdr["IMAGETYP"]:
-                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Dark",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["EXPTIME"],fitsDate)
             elif "Flat" in hdr["IMAGETYP"]:
                 if ("FILTER" in hdr):
-                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate)
                 else:
-                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate)
             elif hdr["IMAGETYP"]=="Bias":
-                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format(hdr["IMAGETYP"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             else:
                 logging.warning("File not processed as IMAGETYP not recognized: "+str(os.path.join(root, file)))
@@ -184,14 +185,23 @@ class fitsProcessing:
                 os.makedirs (newPath)
 
             # If we can add the file to the database move it to the repo
+            logging.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName.replace(" ", "_"))
             newFitsFileId=self.submitFileToDB(newPath+newName.replace(" ", "_"),hdr)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
-                    logging.info("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
+                    logging.debug("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
+                    # Move the file to the new location
+                    try:
+                        shutil.move(os.path.join(root, file), newPath+newName)
+                    except shutil.Error as e:
+                        logging.error("Shutil error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
+                        return None
+                    except OSError as e:
+                        logging.error("OS error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
+                        return None
+                    logging.debug("File successfully moved to repo - "+newPath+newName)
                 else:
-                    logging.warning("File already exists in repo - "+newPath+newName)
-                    newName=newName.replace(".fits","_dup.fits")
-                    logging.info("Renaming file to "+newName)              
+                    logging.warning("File already exists in repo, no changes - "+newPath+newName)
             else:
                 logging.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
         else:
@@ -217,7 +227,7 @@ class fitsProcessing:
 
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
             for file in files:
-                logging.info("Processing file "+os.path.join(root, file))
+                logging.info("Processing file "+file+" in "+root)
                 if (newFitsFileId := self.registerFitsImage(root,file,moveFiles)) != None:
                     # Add the file to the list of registered files
                     currCount += 1
@@ -236,7 +246,7 @@ class fitsProcessing:
         # Load the fits file
         fits_file = FitsFileModel.get_or_none(FitsFileModel.fitsFileId == fitsFileId)
         if not fits_file:
-            logging.info(f"Failed to load fits file: {fitsFileId}")
+            logging.info(f"Thumbnail failed - couldn't find fits file in db: {fitsFileId}")
             return
         
         # Read the data from the fits file
@@ -244,7 +254,7 @@ class fitsProcessing:
             with fits.open(fits_file.fitsFileName) as hdul:
                 data = hdul[0].data
         except Exception as e:
-            logging.info(f"Failed to read fits file: {e}")
+            logging.info(f"Thumbnail failed - unable to read fits file on disk: {e}")
             return
         
         # Create a thumbnail image
