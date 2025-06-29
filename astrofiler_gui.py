@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
-                               QMessageBox)
-from PySide6.QtGui import QPixmap, QFont
+                               QMessageBox, QScrollArea)
+from PySide6.QtGui import QPixmap, QFont, QTextCursor
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSequence as FitsSequenceModel
 
@@ -76,24 +76,27 @@ class ImagesTab(QWidget):
         self.load_repo_button = QPushButton("Load Repo")
         self.sync_repo_button = QPushButton("Sync Repo")
         self.clear_button = QPushButton("Clear Repo")
+        self.refresh_button = QPushButton("Refresh")
         
         controls_layout.addWidget(self.load_repo_button)
         controls_layout.addWidget(self.sync_repo_button)
         controls_layout.addWidget(self.clear_button)
+        controls_layout.addWidget(self.refresh_button)
         controls_layout.addStretch()
           # File list
         self.file_tree = QTreeWidget()
-        self.file_tree.setHeaderLabels(["Object", "Type", "Date", "Exposure", "Telescope", "Instrument", "Temperature", "Filename"])
+        self.file_tree.setHeaderLabels(["Object", "Type", "Date", "Exposure", "Filter", "Telescope", "Instrument", "Temperature", "Filename"])
         
         # Set column widths for better display
         self.file_tree.setColumnWidth(0, 120)  # Object
         self.file_tree.setColumnWidth(1, 80)   # Type
         self.file_tree.setColumnWidth(2, 150)  # Date
         self.file_tree.setColumnWidth(3, 80)   # Exposure
-        self.file_tree.setColumnWidth(4, 120)  # Telescope
-        self.file_tree.setColumnWidth(5, 120)  # Instrument
-        self.file_tree.setColumnWidth(6, 100)  # Temperature
-        self.file_tree.setColumnWidth(7, 200)  # Filename
+        self.file_tree.setColumnWidth(4, 80)   # Filter
+        self.file_tree.setColumnWidth(5, 120)  # Telescope
+        self.file_tree.setColumnWidth(6, 120)  # Instrument
+        self.file_tree.setColumnWidth(7, 100)  # Temperature
+        self.file_tree.setColumnWidth(8, 200)  # Filename
         
         layout.addLayout(controls_layout)
         layout.addWidget(self.file_tree)
@@ -102,6 +105,8 @@ class ImagesTab(QWidget):
         self.load_repo_button.clicked.connect(self.load_repo)
         self.sync_repo_button.clicked.connect(self.sync_repo)
         self.clear_button.clicked.connect(self.clear_files)
+        self.refresh_button.clicked.connect(self.load_fits_data)
+        self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
     
     def load_repo(self):
         """Load the repository by running registerFitsImages."""
@@ -162,7 +167,7 @@ class ImagesTab(QWidget):
                 # Make parent item bold and slightly different color
                 font = parent_item.font(0)
                 font.setBold(True)
-                for col in range(8):
+                for col in range(9):
                     parent_item.setFont(col, font)
 
                 # Add sub-parent items for each date
@@ -176,6 +181,7 @@ class ImagesTab(QWidget):
                     date_item.setText(5, "")
                     date_item.setText(6, "")
                     date_item.setText(7, "")
+                    date_item.setText(8, "")
 
                     # Add child items for each file
                     for fits_file in files:
@@ -203,23 +209,24 @@ class ImagesTab(QWidget):
                         else:
                             child_item.setText(3, "N/A")
 
-                        child_item.setText(4, fits_file.fitsFileTelescop or "N/A")  # Telescope
-                        child_item.setText(5, fits_file.fitsFileInstrument or "N/A")  # Instrument
+                        child_item.setText(4, fits_file.fitsFileFilter or "N/A")  # Filter
+                        child_item.setText(5, fits_file.fitsFileTelescop or "N/A")  # Telescope
+                        child_item.setText(6, fits_file.fitsFileInstrument or "N/A")  # Instrument
 
                         # Format temperature
                         temp = fits_file.fitsFileCCDTemp or ""
                         if temp:
-                            child_item.setText(6, f"{temp}°C")  # Temperature
+                            child_item.setText(7, f"{temp}°C")  # Temperature
                         else:
-                            child_item.setText(6, "N/A")
+                            child_item.setText(7, "N/A")
 
                         # Extract just the filename from the full path for display
                         filename = fits_file.fitsFileName or ""
                         if filename:
                             filename = os.path.basename(filename)
-                            child_item.setText(7, filename)  # Filename
+                            child_item.setText(8, filename)  # Filename
                         else:
-                            child_item.setText(7, "N/A")
+                            child_item.setText(8, "N/A")
 
                         # Store the full database record for potential future use
                         child_item.setData(0, Qt.UserRole, fits_file.fitsFileId)
@@ -230,14 +237,14 @@ class ImagesTab(QWidget):
                     # Add date item to parent
                     parent_item.addChild(date_item)
 
-                    # Expand the date item to show children by default
-                    date_item.setExpanded(True)
+                    # Keep the date item collapsed by default
+                    date_item.setExpanded(False)
 
                 # Add parent item to tree
                 self.file_tree.addTopLevelItem(parent_item)
 
-                # Expand the parent item to show children by default
-                parent_item.setExpanded(True)
+                # Keep the parent item collapsed by default
+                parent_item.setExpanded(False)
 
             total_files = len(fits_files)
             total_objects = len(objects_dict)
@@ -269,6 +276,57 @@ class ImagesTab(QWidget):
         except Exception as e:
             logger.error(f"Error clearing repository: {e}")
             QMessageBox.warning(self, "Error", f"Failed to clear repository: {e}")
+
+    def on_item_double_clicked(self, item, column):
+        """Handle double-click on tree widget items"""
+        # Check if the item has a stored file ID (indicating it's a FITS file, not a parent/date item)
+        file_id = item.data(0, Qt.UserRole)
+        if file_id is not None:
+            try:
+                # Get the FITS file record from the database
+                fits_file = FitsFileModel.get_by_id(file_id)
+                if fits_file and fits_file.fitsFileName:
+                    self.launch_external_viewer(fits_file.fitsFileName)
+                else:
+                    QMessageBox.warning(self, "File Not Found", "The FITS file path is not available.")
+            except Exception as e:
+                logger.error(f"Error retrieving FITS file: {e}")
+                QMessageBox.warning(self, "Error", f"Failed to retrieve file information: {e}")
+    
+    def launch_external_viewer(self, file_path):
+        """Launch external FITS viewer with the specified file"""
+        # Get the main GUI instance to access config settings
+        main_window = self.window()
+        if hasattr(main_window, 'config_tab') and hasattr(main_window.config_tab, 'fits_viewer_path'):
+            viewer_path = main_window.config_tab.fits_viewer_path.text().strip()
+            
+            if not viewer_path:
+                QMessageBox.warning(self, "No Viewer Configured", 
+                                  "Please configure an external FITS viewer in the Config tab.")
+                return
+            
+            if not os.path.exists(viewer_path):
+                QMessageBox.warning(self, "Viewer Not Found", 
+                                  f"The configured FITS viewer was not found: {viewer_path}")
+                return
+            
+            if not os.path.exists(file_path):
+                QMessageBox.warning(self, "File Not Found", 
+                                  f"The FITS file was not found: {file_path}")
+                return
+            
+            try:
+                import subprocess
+                # Launch the external viewer with the file path as argument
+                subprocess.Popen([viewer_path, file_path])
+                logger.info(f"Launched external FITS viewer: {viewer_path} with file: {file_path}")
+            except Exception as e:
+                logger.error(f"Error launching external viewer: {e}")
+                QMessageBox.warning(self, "Launch Error", 
+                                  f"Failed to launch external viewer: {str(e)}")
+        else:
+            QMessageBox.warning(self, "Configuration Error", 
+                              "Unable to access FITS viewer configuration.")
 
 
 class SequencesTab(QWidget):
@@ -419,6 +477,7 @@ class MergeTab(QWidget):
         
         # Change filenames checkbox
         self.change_filenames = QCheckBox("Change filenames on disk")
+        self.change_filenames.setChecked(True)  # Default to true
         self.change_filenames.setToolTip("If checked, actual files on disk will be renamed to match the new object name")
         form_layout.addRow("", self.change_filenames)
         
@@ -685,6 +744,21 @@ class ConfigTab(QWidget):
         display_layout.addRow("Font Size:", self.font_size)
         display_layout.addRow("Grid Icon Size:", self.grid_size)
         
+        # External Tools settings group
+        tools_group = QGroupBox("External Tools")
+        tools_layout = QFormLayout(tools_group)
+        
+        # FITS Viewer Path with file picker
+        fits_viewer_layout = QHBoxLayout()
+        self.fits_viewer_path = QLineEdit()
+        self.fits_viewer_path.setPlaceholderText("Select external FITS file viewer...")
+        self.fits_viewer_button = QPushButton("Browse...")
+        self.fits_viewer_button.clicked.connect(self.browse_fits_viewer)
+        fits_viewer_layout.addWidget(self.fits_viewer_path)
+        fits_viewer_layout.addWidget(self.fits_viewer_button)
+        
+        tools_layout.addRow("FITS Viewer:", fits_viewer_layout)
+        
         # Action buttons
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Settings")
@@ -700,6 +774,7 @@ class ConfigTab(QWidget):
         
         layout.addWidget(general_group)
         layout.addWidget(display_group)
+        layout.addWidget(tools_group)
         layout.addStretch()
         layout.addLayout(button_layout)
         
@@ -734,7 +809,8 @@ class ConfigTab(QWidget):
                 'refresh_on_startup': str(self.refresh_on_startup.isChecked()),
                 'theme': self.theme.currentText(),
                 'font_size': str(self.font_size.value()),
-                'grid_size': str(self.grid_size.value())
+                'grid_size': str(self.grid_size.value()),
+                'fits_viewer_path': self.fits_viewer_path.text().strip()
             }
             
             # Write to the astrofiler.ini file
@@ -779,6 +855,10 @@ class ConfigTab(QWidget):
             if config.has_option('DEFAULT', 'grid_size'):
                 grid_size = config.getint('DEFAULT', 'grid_size')
                 self.grid_size.setValue(grid_size)
+            
+            if config.has_option('DEFAULT', 'fits_viewer_path'):
+                fits_viewer_path = config.get('DEFAULT', 'fits_viewer_path')
+                self.fits_viewer_path.setText(fits_viewer_path)
                 
             logger.info("Settings loaded from astrofiler.ini!")
             
@@ -795,6 +875,7 @@ class ConfigTab(QWidget):
         self.theme.setCurrentIndex(0)
         self.font_size.setValue(10)
         self.grid_size.setValue(64)
+        self.fits_viewer_path.setText("")
     
     def browse_source_path(self):
         """Open directory dialog for source path"""
@@ -815,6 +896,17 @@ class ConfigTab(QWidget):
         )
         if directory:
             self.repo_path.setText(directory)
+    
+    def browse_fits_viewer(self):
+        """Open file dialog for FITS viewer executable"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select FITS Viewer Executable",
+            self.fits_viewer_path.text() or os.path.expanduser("~"),
+            "Executable Files (*.exe);;All Files (*)" if os.name == 'nt' else "All Files (*)"
+        )
+        if file_path:
+            self.fits_viewer_path.setText(file_path)
     
     def on_theme_changed(self, theme_name):
         """Handle theme changes"""
@@ -961,6 +1053,84 @@ class AboutTab(QWidget):
         self.load_background_image()
 
 
+class LogTab(QWidget):
+    """Tab for displaying and managing log files"""
+    
+    def __init__(self):
+        super().__init__()
+        self.log_file_path = "astrofiler.log"
+        self.init_ui()
+        self.load_log_content()
+    
+    def init_ui(self):
+        """Initialize the log tab UI"""
+        layout = QVBoxLayout(self)
+        
+        # Controls layout with Clear button
+        controls_layout = QHBoxLayout()
+        self.clear_button = QPushButton("Clear")
+        self.clear_button.clicked.connect(self.clear_log)
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.load_log_content)
+        
+        controls_layout.addWidget(self.clear_button)
+        controls_layout.addWidget(self.refresh_button)
+        controls_layout.addStretch()  # Push buttons to the left
+        
+        # Log display area with horizontal and vertical scrolling
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setLineWrapMode(QTextEdit.NoWrap)  # Enable horizontal scrolling
+        self.log_text.setFont(QFont("Courier", 9))  # Monospace font for logs
+        
+        layout.addLayout(controls_layout)
+        layout.addWidget(self.log_text)
+    
+    def load_log_content(self):
+        """Load the current log file content into the text area"""
+        try:
+            if os.path.exists(self.log_file_path):
+                with open(self.log_file_path, 'r', encoding='utf-8') as file:
+                    content = file.read()
+                    self.log_text.setPlainText(content)
+                    # Scroll to the bottom to show latest entries
+                    cursor = self.log_text.textCursor()
+                    cursor.movePosition(QTextCursor.MoveOperation.End)
+                    self.log_text.setTextCursor(cursor)
+                    logger.info("Log content loaded successfully")
+            else:
+                self.log_text.setPlainText("Log file not found.")
+                logger.warning(f"Log file not found: {self.log_file_path}")
+        except Exception as e:
+            self.log_text.setPlainText(f"Error loading log file: {str(e)}")
+            logger.error(f"Error loading log file: {e}")
+    
+    def clear_log(self):
+        """Clear the log file by deleting it and creating an empty file"""
+        try:
+            if os.path.exists(self.log_file_path):
+                os.remove(self.log_file_path)
+            
+            # Create an empty log file
+            with open(self.log_file_path, 'w', encoding='utf-8') as file:
+                pass
+            
+            # Clear the display
+            self.log_text.clear()
+            
+            # Log this action (this will recreate the log file with the first entry)
+            logger.info("Log file cleared by user")
+            
+            # Reload to show the new log entry
+            self.load_log_content()
+            
+            QMessageBox.information(self, "Success", "Log file cleared successfully!")
+            
+        except Exception as e:
+            logger.error(f"Error clearing log file: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to clear log file: {str(e)}")
+
+
 class AstroFilerGUI(QWidget):
     """Main GUI class that encapsulates the entire AstroFiler application interface"""
     
@@ -988,11 +1158,13 @@ class AstroFilerGUI(QWidget):
         self.merge_tab = MergeTab()
         self.config_tab = ConfigTab()
         self.about_tab = AboutTab()
+        self.log_tab = LogTab()
         
         self.tab_widget.addTab(self.images_tab, "Images")
         self.tab_widget.addTab(self.sequences_tab, "Sequences")
         self.tab_widget.addTab(self.merge_tab, "Merge")
         self.tab_widget.addTab(self.config_tab, "Config")
+        self.tab_widget.addTab(self.log_tab, "Log")
         self.tab_widget.addTab(self.about_tab, "About")
         
         layout.addWidget(self.tab_widget)

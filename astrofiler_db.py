@@ -27,6 +27,7 @@ class fitsFile(BaseModel):
     fitsFileInstrument = pw.TextField(null=True)
     fitsFileGain = pw.TextField(null=True)
     fitsFileOffset = pw.TextField(null=True)
+    fitsFileFilter = pw.TextField(null=True)
     fitsFileSequence = pw.TextField(null=True)
 
 class fitsSequence(BaseModel):
