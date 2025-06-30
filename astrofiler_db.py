@@ -34,6 +34,7 @@ class fitsFile(BaseModel):
 class fitsSession(BaseModel):
     fitsSessionId = pw.TextField(primary_key=True)
     fitsSessionObjectName = pw.TextField(null=True)
+    fitsSessionDate = pw.DateField(null=True)
     fitsSessionTelescope = pw.TextField(null=True)
     fitsSessionImager = pw.TextField(null=True)
     fitsBiasSession = pw.TextField(null=True)

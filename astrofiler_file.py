@@ -340,7 +340,7 @@ class fitsProcessing:
                                                     fitsSessionTelescope=currentFitsFile.fitsFileTelescop,
                                                     fitsSessionImager=currentFitsFile.fitsFileInstrument,
                                                     fitsSessionDate=currentFitsFile.fitsFileDate,
-                                                    fitsMasterBias=None,fitsMasterDark=None,fitsMasterFlat=None)
+                                                    fitsBias=None,fitsMasterDark=None,fitsMasterFlat=None)
                     sessionsCreated.append(currentSessionId)
                     logging.info("New session created for "+str(newFitsSession.fitsSessionId))
                 except IntegrityError as e:
@@ -404,14 +404,15 @@ class fitsProcessing:
                     return createdCalibrationSessions
             
             if not self.sameDay(biasFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=datetime.strptime(biasFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
+                logging.info("Current date for bias is "+biasFitsFile.fitsFileDate)
+                currDate=biasFitsFile.fitsFileDate.strftime('%Y-%m-%d')
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                                 fitsSessionDate=biasFitsFile.fitsFileDate,
                                                 fitsSessionObjectName='Bias',
-                                                fitsMasterBias=None,
-                                                fitsMasterDark=None,
-                                                fitsMasterFlat=None)
+                                                fitsBiasSession=None,
+                                                fitsDarkSession=None,
+                                                fitsFlatSession=None)
                 logging.info("New date for bias "+currDate) 
             biasFitsFile.fitsFileSession=uuidStr
             biasFitsFile.save()   
@@ -432,14 +433,15 @@ class fitsProcessing:
                     return createdCalibrationSessions
             
             if not self.sameDay(darkFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=datetime.strptime(darkFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
+                currDate=darkFitsFile.fitsFileDate.strftime('%Y-%m-%d')
+                logging.info("Current date for dark is "+darkFitsFile.fitsFileDate)
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                                 fitsSessionDate=darkFitsFile.fitsFileDate,
                                                 fitsSessionObjectName='Dark',
-                                                fitsMasterBias=None,
-                                                fitsMasterDark=None,
-                                                fitsMasterFlat=None)
+                                                fitsBiasSession=None,
+                                                fitsDarkSession=None,
+                                                fitsFlatSession=None)
                 logging.info("New date "+currDate) 
             darkFitsFile.fitsFileSession=uuidStr
             darkFitsFile.save()   
@@ -460,14 +462,15 @@ class fitsProcessing:
                     return createdCalibrationSessions
             
             if not self.sameDay(flatFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=datetime.strptime(flatFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
+                currDate=flatFitsFile.fitsFileDate.strftime('%Y-%m-%d')
+                logging.info("Current date for flat is "+flatFitsFile.fitsFileDate)
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                 fitsSessionDate=flatFitsFile.fitsFileDate,
                                 fitsSessionObjectName='Flat',
-                                fitsMasterBias=None,
-                                fitsMasterDark=None,
-                                fitsMasterFlat=None)
+                                fitsBiasSession=None,
+                                fitsDarkSession=None,
+                                fitsFlatSession=None)
                 logging.info("New date "+currDate) 
             flatFitsFile.fitsFileSession=uuidStr
             flatFitsFile.save()   
