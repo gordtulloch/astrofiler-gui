@@ -43,7 +43,7 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 
 ### Getting Started
 
-1. **Install Astrofile **  
+1. **Install Astrofile**  
 
 A. **Clone the repository:**
    ```bash
@@ -79,9 +79,14 @@ C. **Run the application:**
    python astrofiler.py
    ```  
 
-2. **Load Repository**: Use the Config tab to set your FITS file directory
-3. **Scan Files**: Click "Load Repository" to scan and catalog your files
-4. **Browse**: Use the Images tab to explore your organized file collection
+2. **Load Repository**: Use the Config tab to set your FITS file directories. 
+
+**Source Path**: Where new files to be added to the repository are located
+**Repository Path**: Where all repository files are moved to
+
+3. **Scan Files**: In the Images tab, click "Load Repo" to scan and catalog your files. You can also rescan your repo using the "Sync Repo" button, clear the Repo (does not delete files) with the "Clear Repo" button (which you can then reload with "Sync Repo") or refresh the list.  
+
+4. **Open Files**: If you have specified an external FITS file viewer (I Like the ASIFitsView program from the ASIStudio product, free from ASI at https://www.zwoastro.com/software/) if you double-click any image it will be opened in that viewer.
 
 ### Main Interface
 
