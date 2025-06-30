@@ -109,24 +109,133 @@ class ImagesTab(QWidget):
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
     
     def load_repo(self):
-        """Load the repository by running registerFitsImages."""
+        """Load the repository by running registerFitsImages with progress dialog."""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        import time
+        
+        progress_dialog = None
+        was_cancelled = False
+        
         try:
+            # Create progress dialog first
+            progress_dialog = QProgressDialog("Scanning for FITS files...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Loading Repository")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.setValue(0)  # Set initial value
+            progress_dialog.show()
+            QApplication.processEvents()  # Process events to show dialog
+            
+            # Small delay to ensure dialog is visible
+            time.sleep(0.1)
+            
             self.fits_file_handler = fitsProcessing()
-            self.fits_file_handler.registerFitsImages(moveFiles=True)
-            self.load_fits_data()
-            QMessageBox.information(self, "Success", "Repository loaded successfully!")
+            
+            def update_progress(current, total, filename):
+                """Progress callback function"""
+                nonlocal was_cancelled
+                try:
+                    logging.info(f"Progress callback called: {current}/{total} - {filename}")
+                    
+                    # Don't check cancellation if already cancelled
+                    if was_cancelled:
+                        logging.info("Already cancelled, returning False")
+                        return False
+                    
+                    # Check if dialog was cancelled before updating
+                    if progress_dialog and progress_dialog.wasCanceled():
+                        logging.info("User cancelled the operation")
+                        was_cancelled = True
+                        return False  # Signal to stop processing
+                    
+                    if progress_dialog:
+                        progress = int((current / total) * 100) if total > 0 else 0
+                        progress_dialog.setValue(progress)
+                        progress_dialog.setLabelText(f"Processing {current}/{total}: {os.path.basename(filename)}")
+                        QApplication.processEvents()  # Keep UI responsive
+                        
+                        # Check again after processing events
+                        if progress_dialog.wasCanceled():
+                            logging.info("User cancelled the operation during update")
+                            was_cancelled = True
+                            return False
+                    
+                    logging.info(f"Progress callback returning True for {filename}")
+                    return True  # Continue processing
+                except Exception as e:
+                    logging.error(f"Error in progress callback: {e}")
+                    return True  # Continue on callback errors
+            
+            # Run the processing with progress callback
+            logging.info("Starting registerFitsImages with progress callback")
+            registered_files = self.fits_file_handler.registerFitsImages(moveFiles=True, progress_callback=update_progress)
+            logging.info(f"registerFitsImages completed, registered {len(registered_files)} files")
+            
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
+            # Check if operation was cancelled or completed normally
+            if was_cancelled:
+                QMessageBox.information(self, "Cancelled", "Repository loading was cancelled by user.")
+                logging.info("Operation was cancelled by user")
+            elif len(registered_files) == 0:
+                QMessageBox.information(self, "No Files", "No FITS files found to process in the source directory.")
+                logging.info("No FITS files found to process")
+            else:
+                self.load_fits_data()
+                QMessageBox.information(self, "Success", f"Repository loaded successfully! Processed {len(registered_files)} files.")
+                logging.info("Operation completed successfully")
+                
         except Exception as e:
+            if progress_dialog:
+                progress_dialog.close()
             logger.error(f"Error loading repository: {e}")
             QMessageBox.warning(self, "Error", f"Failed to load repository: {e}")
 
     def sync_repo(self):
-        """Sync the repository by running registerFitsImages with moveFiles=False."""
+        """Sync the repository by running registerFitsImages with moveFiles=False and progress dialog."""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        
         try:
             self.fits_file_handler = fitsProcessing()
-            registered_files = self.fits_file_handler.registerFitsImages(moveFiles=False)
-            self.load_fits_data()
-            QMessageBox.information(self, "Success", f"Repository synchronized successfully! Processed {len(registered_files)} files.")
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Synchronizing Repository")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.show()
+            
+            def update_progress(current, total, filename):
+                """Progress callback function"""
+                if progress_dialog.wasCanceled():
+                    return False  # Signal to stop processing
+                
+                progress = int((current / total) * 100) if total > 0 else 0
+                progress_dialog.setValue(progress)
+                progress_dialog.setLabelText(f"Syncing {current}/{total}: {os.path.basename(filename)}")
+                QApplication.processEvents()  # Keep UI responsive
+                return True  # Continue processing
+            
+            # Run the processing with progress callback
+            registered_files = self.fits_file_handler.registerFitsImages(moveFiles=False, progress_callback=update_progress)
+            
+            # Close progress dialog
+            progress_dialog.close()
+            
+            # Check if operation was cancelled
+            if progress_dialog.wasCanceled():
+                QMessageBox.information(self, "Cancelled", "Repository synchronization was cancelled by user.")
+            else:
+                self.load_fits_data()
+                QMessageBox.information(self, "Success", f"Repository synchronized successfully! Processed {len(registered_files)} files.")
+                
         except Exception as e:
+            if 'progress_dialog' in locals():
+                progress_dialog.close()
             logger.error(f"Error syncing repository: {e}")
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
 
@@ -370,13 +479,47 @@ class SequencesTab(QWidget):
         self.update_calibrations_button.clicked.connect(self.update_calibration_sequences)
     
     def update_sequences(self):
-        """Update light sequences by running createLightSequences method."""
+        """Update light sequences by running createLightSequences method with progress dialog."""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        
         try:
             self.fits_file_handler = fitsProcessing()
-            created_sequences = self.fits_file_handler.createLightSequences()
-            self.load_sequences_data()
-            QMessageBox.information(self, "Success", f"Light sequences updated successfully! Created {len(created_sequences)} sequences.")
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Creating Light Sequences")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.show()
+            
+            def update_progress(current, total, filename):
+                """Progress callback function"""
+                if progress_dialog.wasCanceled():
+                    return False  # Signal to stop processing
+                
+                progress = int((current / total) * 100) if total > 0 else 0
+                progress_dialog.setValue(progress)
+                progress_dialog.setLabelText(f"Creating sequences {current}/{total}: {os.path.basename(filename)}")
+                QApplication.processEvents()  # Keep UI responsive
+                return True  # Continue processing
+            
+            # Run the processing with progress callback
+            created_sequences = self.fits_file_handler.createLightSequences(progress_callback=update_progress)
+            
+            # Close progress dialog
+            progress_dialog.close()
+            
+            # Check if operation was cancelled
+            if progress_dialog.wasCanceled():
+                QMessageBox.information(self, "Cancelled", "Light sequence creation was cancelled by user.")
+            else:
+                self.load_sequences_data()
+                QMessageBox.information(self, "Success", f"Light sequences updated successfully! Created {len(created_sequences)} sequences.")
+                
         except Exception as e:
+            if 'progress_dialog' in locals():
+                progress_dialog.close()
             logger.error(f"Error updating light sequences: {e}")
             QMessageBox.warning(self, "Error", f"Failed to update light sequences: {e}")
 

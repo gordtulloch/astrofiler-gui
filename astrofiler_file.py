@@ -212,10 +212,11 @@ class fitsProcessing:
     #################################################################################################################
     ## registerFitsImages - this function scans the images folder and registers all fits files in the database     ##
     #################################################################################################################
-    def registerFitsImages(self,moveFiles=True):
+    def registerFitsImages(self,moveFiles=True, progress_callback=None):
         registeredFiles=[]
         newFitsFileId=None
         currCount=0
+        start_time = datetime.now()
 
         # Scan the pictures folder
         if moveFiles:
@@ -225,23 +226,91 @@ class fitsProcessing:
             logging.info("Syncronizing images in "+os.path.abspath(self.repoFolder))
             workFolder=self.repoFolder
 
+        # First pass: count total files to process
+        total_files = 0
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
             for file in files:
-                logging.info("Processing file "+file+" in "+root)
-                if (newFitsFileId := self.registerFitsImage(root,file,moveFiles)) != None:
-                    # Add the file to the list of registered files
+                file_name, file_extension = os.path.splitext(file)
+                if "fit" in file_extension:
+                    total_files += 1
+        
+        logging.info(f"Found {total_files} FITS files to process")
+        
+        # If no files found, return early
+        if total_files == 0:
+            logging.info("No FITS files found to process")
+            if progress_callback:
+                progress_callback(0, 0, "No FITS files found")
+            return registeredFiles
+        
+        # Second pass: process files with progress tracking
+        successful_files = 0
+        failed_files = 0
+        cancelled_by_user = False
+        
+        logging.info(f"Starting second pass to process {total_files} FITS files")
+        
+        for root, dirs, files in os.walk(os.path.abspath(workFolder)):
+            logging.debug(f"Processing directory: {root} with {len(files)} files")
+            for file in files:
+                file_name, file_extension = os.path.splitext(file)
+                if "fit" in file_extension:
                     currCount += 1
-                    if currCount % 10 == 0:
-                        logging.info(f"Processed {currCount} files so far...")
-                    registeredFiles.append(newFitsFileId)
+                    logging.info(f"Found FITS file #{currCount}: {file}")
+                    
+                    # Call progress callback if provided
+                    if progress_callback:
+                        logging.info(f"Calling progress callback for file {currCount}/{total_files}: {file}")
+                        should_continue = progress_callback(currCount, total_files, file)
+                        logging.info(f"Progress callback returned: {should_continue}")
+                        if not should_continue:
+                            logging.info("Processing cancelled by user")
+                            cancelled_by_user = True
+                            break
+                    else:
+                        logging.debug("No progress callback provided")
+                    
+                    # Calculate and display progress
+                    progress_percent = (currCount / total_files) * 100 if total_files > 0 else 0
+                    elapsed_time = datetime.now() - start_time
+                    if currCount > 0:
+                        avg_time_per_file = elapsed_time / currCount
+                        estimated_remaining = avg_time_per_file * (total_files - currCount)
+                        eta_str = f", ETA: {estimated_remaining}"
+                    else:
+                        eta_str = ""
+                    
+                    logging.info(f"Processing file {currCount}/{total_files} ({progress_percent:.1f}%): {file}{eta_str}")
+                    
+                    # Try to register the file
+                    newFitsFileId = self.registerFitsImage(root, file, moveFiles)
+                    if newFitsFileId is not None:
+                        # Add the file to the list of registered files
+                        registeredFiles.append(newFitsFileId)
+                        successful_files += 1
+                        logging.info(f"Successfully registered file: {file}")
+                    else:
+                        failed_files += 1
+                        logging.warning(f"Failed to register file: {file}")
                 else:
-                    logging.warning("File not added to repo - no IMAGETYP card - "+str(os.path.join(root, file)))
+                    logging.debug("Ignoring non-FITS file: "+file)
+            
+            # Check if processing was cancelled
+            if cancelled_by_user:
+                break
+        
+        total_time = datetime.now() - start_time
+        logging.info(f"Processing complete! Found {total_files} files, successfully registered {successful_files} files, failed {failed_files} files in {total_time}")
+        
+        if cancelled_by_user:
+            logging.info("Processing was cancelled by user")
+        
         return registeredFiles
 
     #################################################################################################################
     ## createLightSequences - this function creates sequences for all Light files not currently assigned to one    ##
     #################################################################################################################
-    def createLightSequences(self):
+    def createLightSequences(self, progress_callback=None):
         sequencesCreated=[]
         
         # Query for all fits files that are not assigned to a sequence
@@ -252,8 +321,19 @@ class fitsProcessing:
 
         # Loop through each unassigned file and create a sequence each time the object changes
         currentObject= ""
+        total_files = len(unassigned_files)
+        current_count = 0
     
         for currentFitsFile in unassigned_files:
+            current_count += 1
+            
+            # Call progress callback if provided
+            if progress_callback:
+                should_continue = progress_callback(current_count, total_files, str(currentFitsFile.fitsFileName))
+                if not should_continue:
+                    logging.info("Sequence creation cancelled by user")
+                    break
+            
             logging.info("Current Object is "+currentFitsFile.fitsFileObject)
             logging.info("Processing "+str(currentFitsFile.fitsFileName))
 
