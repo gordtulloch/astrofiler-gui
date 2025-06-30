@@ -14,13 +14,15 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 - **Repository Scanning**: Recursively scan directories for FITS files
 - **Batch Processing**: Process multiple files with progress tracking
 - **File Organization**: Automatically organize files based on metadata
-- **Duplicate Detection**: Identify and manage duplicate files
+- **Duplicate Detection**: SHA-256 hash-based duplicate file identification
+- **Duplicate Management**: Safely remove duplicate files while preserving one copy
 
 ### 📊 **Metadata & Analysis**
 - **FITS Header Extraction**: Automatically extract and catalog metadata
 - **Object Identification**: Track astronomical targets and sequences
 - **Filter & Exposure Tracking**: Monitor filter usage and exposure times
 - **Date/Time Analysis**: Organize by observation dates and times
+- **File Integrity**: SHA-256 hashing for duplicate detection and verification
 
 ### 🔍 **Search & Filter**
 - **Advanced Filtering**: Search by object, filter, exposure, date, and more
@@ -73,6 +75,15 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
    ```
 3. **Run the application:**
    ```bash
+   # Linux/Mac (using virtual environment):
+   .venv/bin/python astrofiler.py
+   
+   # Windows (using virtual environment):
+   .venv\Scripts\python astrofiler.py
+   
+   # Or activate environment first:
+   source .venv/bin/activate  # Linux/Mac
+   .venv\Scripts\activate     # Windows
    python astrofiler.py
    ```
 
@@ -87,7 +98,7 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 
 ### Main Interface
 
-The application features a tabbed interface with five main sections:
+The application features a tabbed interface with six main sections:
 
 #### 🖼️ **Images Tab**
 - **Tree View**: Hierarchical display of your FITS files organized by:
@@ -118,7 +129,14 @@ The application features a tabbed interface with five main sections:
 - **Batch Operations**: Process multiple sequences simultaneously
 - **File Renaming**: Option to update filenames on disk (default: enabled)
 
-#### 📋 **Log Tab**
+#### � **Duplicates Tab**
+- **Duplicate Detection**: Automatically identify files with identical content
+- **Hash-Based Analysis**: Uses SHA-256 hashing for accurate duplicate detection
+- **Hierarchical Display**: View duplicate groups with individual file details
+- **Safe Deletion**: Remove duplicate files while preserving the earliest copy
+- **Batch Management**: Process all duplicate groups with one action
+
+#### �📋 **Log Tab**
 - **Activity Monitoring**: View real-time application logs
 - **Error Tracking**: Monitor and troubleshoot issues
 - **Log Management**: Clear logs when needed
@@ -145,6 +163,29 @@ The application features a tabbed interface with five main sections:
 3. Select your preferred FITS viewing application (e.g., DS9, FITS Liberator)
 4. Settings are automatically saved
 
+### Duplicate Management
+
+#### Detecting Duplicates
+
+1. **Automatic Detection**: File hashes are calculated during repository loading
+2. **Manual Refresh**: Use the "Refresh Duplicates" button in the Duplicates tab
+3. **Hash-Based Comparison**: SHA-256 hashes ensure accurate duplicate detection
+
+#### Managing Duplicates
+
+1. **View Duplicates**: Navigate to the **Duplicates** tab
+2. **Review Groups**: Expand duplicate groups to see individual files
+3. **Safe Deletion**: Click "Delete Duplicate Files" to remove extras
+4. **Preservation**: The earliest file (by date) is always kept
+
+#### Duplicate Detection Features
+
+- **Content-Based**: Uses file content hashing, not just filenames
+- **Batch Processing**: Process all duplicate groups simultaneously
+- **Confirmation Dialog**: Requires explicit user confirmation before deletion
+- **Progress Feedback**: Shows number of files that can be removed
+- **Error Handling**: Graceful handling of file system errors
+
 ### File Processing
 
 #### Supported Metadata
@@ -155,6 +196,7 @@ AstroFiler automatically extracts and catalogs:
 - **EXPTIME**: Exposure duration
 - **DATE-OBS**: Observation timestamp
 - **FILENAME**: File identifier
+- **HASH**: SHA-256 hash for duplicate detection
 
 #### Progress Monitoring
 
@@ -175,8 +217,8 @@ Persistent application settings including:
 
 ### `astrofiler.db`
 SQLite database containing:
-- FITS file catalog
-- Metadata index
+- FITS file catalog with metadata
+- SHA-256 file hashes for duplicate detection
 - Sequence relationships
 - Processing history
 
@@ -202,6 +244,11 @@ SQLite database containing:
 **Database corruption:**
 - Delete `astrofiler.db` to reset the database
 - Reload your repository to rebuild the catalog
+
+**Duplicate files not detected:**
+- Ensure files have been processed with the latest version
+- Use "Refresh Duplicates" to update the duplicate list
+- Check that file hashes were calculated during repository loading
 
 ### Log Analysis
 
@@ -234,14 +281,31 @@ The Log tab provides detailed information about:
 ```sql
 -- FITS File Catalog
 fitsFile:
-- id (Primary Key)
-- filename (Text)
-- object (Text) 
-- filter (Text)
-- exptime (Real)
-- dateObs (DateTime)
-- fullPath (Text)
+- fitsFileId (Primary Key)
+- fitsFileName (Text)
+- fitsFileObject (Text) 
 - fitsFileFilter (Text)
+- fitsFileExpTime (Text)
+- fitsFileDate (Date)
+- fitsFileType (Text)
+- fitsFileHash (Text) -- SHA-256 hash for duplicate detection
+- fitsFileTelescop (Text)
+- fitsFileInstrument (Text)
+- fitsFileCCDTemp (Text)
+- fitsFileXBinning (Text)
+- fitsFileYBinning (Text)
+- fitsFileSequence (Text)
+
+-- Sequence Management
+fitsSequence:
+- fitsSequenceId (Primary Key)
+- fitsSequenceObjectName (Text)
+- fitsSequenceDate (Date)
+- fitsSequenceTelescope (Text)
+- fitsSequenceImager (Text)
+- fitsMasterBias (Text)
+- fitsMasterDark (Text)
+- fitsMasterFlat (Text)
 ```
 
 ## 🤝 Contributing

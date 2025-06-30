@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import uuid
 import os
+import hashlib
 from math import cos,sin 
 from astropy.io import fits
 import shutil
@@ -40,29 +41,19 @@ class fitsProcessing:
         self.repoFolder = config.get('DEFAULT', 'repo', fallback='.')
 
     ################################################################################################################
-    ## - this function submits a fits file to the database                                          ##
+    ## - this function calculates SHA-256 hash of a file for duplicate detection                    ##
     #################################################################################################################
-    def submitFileToDB(self,fileName,hdr):
-        if "DATE-OBS" in hdr:
-            # Create new fitsFile record
-            logging.info("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
-            if "OBJECT" in hdr:
-                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
-                            fitsFileObject=hdr["OBJECT"],fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
-                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
-                            fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", None),
-                            fitsFileSequence=None)
-            else:
-                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
-                            fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
-                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
-                            fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", "OSC"),
-                            fitsFileSequence=None)
-            return newfile.fitsFileId
-        else:
-            logging.error("Error: File not added to repo due to missing date is "+fileName)
+    def calculateFileHash(self, filePath):
+        """Calculate SHA-256 hash of a file for duplicate detection."""
+        try:
+            hash_sha256 = hashlib.sha256()
+            with open(filePath, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_sha256.update(chunk)
+            return hash_sha256.hexdigest()
+        except Exception as e:
+            logging.error(f"Error calculating hash for {filePath}: {str(e)}")
             return None
-        return True
 
     #################################################################################################################
     ## registerFitsImage - this functioncalls a function to registers each fits files in the database              ##
@@ -184,9 +175,11 @@ class fitsProcessing:
             if not os.path.isdir(newPath) and moveFiles:
                 os.makedirs (newPath)
 
-            # If we can add the file to the database move it to the repo
+            # Calculate file hash for duplicate detection
+            currentFilePath = os.path.join(root, file)
+            fileHash = self.calculateFileHash(currentFilePath)
             logging.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName.replace(" ", "_"))
-            newFitsFileId=self.submitFileToDB(newPath+newName.replace(" ", "_"),hdr)
+            newFitsFileId=self.submitFileToDB(newPath+newName.replace(" ", "_"),hdr,fileHash)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
                     logging.debug("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
@@ -455,4 +448,28 @@ class fitsProcessing:
     #################################################################################################################
     def calibrateFitsImage(self,targetFitsFile):
         pass
-    
+
+    #################################################################################################################
+    ## - this function submits a fits file to the database                                          ##
+    #################################################################################################################
+    def submitFileToDB(self,fileName,hdr,fileHash=None):
+        if "DATE-OBS" in hdr:
+            # Create new fitsFile record
+            logging.info("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
+            if "OBJECT" in hdr:
+                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
+                            fitsFileObject=hdr["OBJECT"],fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
+                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
+                            fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", None),
+                            fitsFileHash=fileHash,fitsFileSequence=None)
+            else:
+                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
+                            fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
+                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
+                            fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", "OSC"),
+                            fitsFileHash=fileHash,fitsFileSequence=None)
+            return newfile.fitsFileId
+        else:
+            logging.error("Error: File not added to repo due to missing date is "+fileName)
+            return None
+        return True
