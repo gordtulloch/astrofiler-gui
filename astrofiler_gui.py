@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QMessageBox, QScrollArea)
 from PySide6.QtGui import QPixmap, QFont, QTextCursor
 from astrofiler_file import fitsProcessing
-from astrofiler_db import fitsFile as FitsFileModel, fitsSequence as FitsSequenceModel
+from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 
 # Global version variable
 VERSION = "1.0.0"
@@ -368,19 +368,19 @@ class ImagesTab(QWidget):
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
 
     def clear_files(self):
-        """Clear the file tree and delete all fitsSequence and fitsFile records from the database."""
+        """Clear the file tree and delete all fitsSession and fitsFile records from the database."""
         try:
             # Clear the tree widget
             self.file_tree.clear()
             
-            # Delete all fitsSequence records from the database
-            deleted_sequences = FitsSequenceModel.delete().execute()
+            # Delete all fitsSession records from the database
+            deleted_sessions = FitsSessionModel.delete().execute()
             
             # Delete all fitsFile records from the database
             deleted_files = FitsFileModel.delete().execute()
             
-            logger.info(f"Deleted {deleted_sequences} sequence records and {deleted_files} file records from database")
-            QMessageBox.information(self, "Success", f"Repository cleared! Deleted {deleted_sequences} sequence records and {deleted_files} file records from database.")
+            logger.info(f"Deleted {deleted_sessions} session records and {deleted_files} file records from database")
+            QMessageBox.information(self, "Success", f"Repository cleared! Deleted {deleted_sessions} session records and {deleted_files} file records from database.")
             
         except Exception as e:
             logger.error(f"Error clearing repository: {e}")
@@ -438,12 +438,12 @@ class ImagesTab(QWidget):
                               "Unable to access FITS viewer configuration.")
 
 
-class SequencesTab(QWidget):
+class SessionsTab(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
         # Load existing data on startup
-        self.load_sequences_data()
+        self.load_sessions_data()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -452,126 +452,259 @@ class SequencesTab(QWidget):
         controls_layout = QHBoxLayout()
         self.update_button = QPushButton("Update Lights")
         self.update_calibrations_button = QPushButton("Update Calibrations")
+        self.clear_sessions_button = QPushButton("Clear Sessions")
         
         controls_layout.addWidget(self.update_button)
         controls_layout.addWidget(self.update_calibrations_button)
+        controls_layout.addWidget(self.clear_sessions_button)
         controls_layout.addStretch()
         
-        # Sequences list
-        self.sequences_tree = QTreeWidget()
-        self.sequences_tree.setHeaderLabels(["Sequence ID", "Object Name", "Date", "Telescope", "Imager", "Master Bias", "Master Dark", "Master Flat"])
+        # Sessions list
+        self.sessions_tree = QTreeWidget()
+        self.sessions_tree.setHeaderLabels(["Session ID", "Object Name", "Date", "Telescope", "Imager", "Master Bias", "Master Dark", "Master Flat"])
         
         # Set column widths for better display
-        self.sequences_tree.setColumnWidth(0, 250)  # Sequence ID
-        self.sequences_tree.setColumnWidth(1, 120)  # Object Name
-        self.sequences_tree.setColumnWidth(2, 150)  # Date
-        self.sequences_tree.setColumnWidth(3, 120)  # Telescope
-        self.sequences_tree.setColumnWidth(4, 120)  # Imager
-        self.sequences_tree.setColumnWidth(5, 100)  # Master Bias
-        self.sequences_tree.setColumnWidth(6, 100)  # Master Dark
-        self.sequences_tree.setColumnWidth(7, 100)  # Master Flat
+        self.sessions_tree.setColumnWidth(0, 250)  # Session ID
+        self.sessions_tree.setColumnWidth(1, 120)  # Object Name
+        self.sessions_tree.setColumnWidth(2, 150)  # Date
+        self.sessions_tree.setColumnWidth(3, 120)  # Telescope
+        self.sessions_tree.setColumnWidth(4, 120)  # Imager
+        self.sessions_tree.setColumnWidth(5, 100)  # Master Bias
+        self.sessions_tree.setColumnWidth(6, 100)  # Master Dark
+        self.sessions_tree.setColumnWidth(7, 100)  # Master Flat
         
         layout.addLayout(controls_layout)
-        layout.addWidget(self.sequences_tree)
+        layout.addWidget(self.sessions_tree)
         
         # Connect signals
-        self.update_button.clicked.connect(self.update_sequences)
-        self.update_calibrations_button.clicked.connect(self.update_calibration_sequences)
+        self.update_button.clicked.connect(self.update_sessions)
+        self.update_calibrations_button.clicked.connect(self.update_calibration_sessions)
+        self.clear_sessions_button.clicked.connect(self.clear_sessions)
     
-    def update_sequences(self):
-        """Update light sequences by running createLightSequences method with progress dialog."""
+    def update_sessions(self):
+        """Update light sessions by running createLightSessions method with progress dialog."""
         from PySide6.QtWidgets import QProgressDialog
         from PySide6.QtCore import Qt
+        
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             self.fits_file_handler = fitsProcessing()
             
             # Create progress dialog
             progress_dialog = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
-            progress_dialog.setWindowTitle("Creating Light Sequences")
+            progress_dialog.setWindowTitle("Creating Light Sessions")
             progress_dialog.setWindowModality(Qt.WindowModal)
             progress_dialog.setMinimumDuration(0)  # Show immediately
             progress_dialog.show()
             
             def update_progress(current, total, filename):
                 """Progress callback function"""
-                if progress_dialog.wasCanceled():
-                    return False  # Signal to stop processing
-                
-                progress = int((current / total) * 100) if total > 0 else 0
-                progress_dialog.setValue(progress)
-                progress_dialog.setLabelText(f"Creating sequences {current}/{total}: {os.path.basename(filename)}")
-                QApplication.processEvents()  # Keep UI responsive
-                return True  # Continue processing
+                nonlocal was_cancelled
+                try:
+                    # Don't check cancellation if already cancelled
+                    if was_cancelled:
+                        logging.info("Already cancelled, returning False")
+                        return False
+                    
+                    # Check if dialog was cancelled before updating
+                    if progress_dialog and progress_dialog.wasCanceled():
+                        logging.info("User cancelled the light session creation")
+                        was_cancelled = True
+                        return False  # Signal to stop processing
+                    
+                    if progress_dialog:
+                        progress = int((current / total) * 100) if total > 0 else 0
+                        progress_dialog.setValue(progress)
+                        progress_dialog.setLabelText(f"Creating sessions {current}/{total}: {os.path.basename(filename)}")
+                        QApplication.processEvents()  # Keep UI responsive
+                        
+                        # Check again after processing events
+                        if progress_dialog.wasCanceled():
+                            logging.info("User cancelled the light session creation during update")
+                            was_cancelled = True
+                            return False
+                    
+                    return True  # Continue processing
+                except Exception as e:
+                    logging.error(f"Error in progress callback: {e}")
+                    return True  # Continue on callback errors
             
             # Run the processing with progress callback
-            created_sequences = self.fits_file_handler.createLightSequences(progress_callback=update_progress)
+            created_sessions = self.fits_file_handler.createLightSessions(progress_callback=update_progress)
             
             # Close progress dialog
-            progress_dialog.close()
+            if progress_dialog:
+                progress_dialog.close()
             
-            # Check if operation was cancelled
-            if progress_dialog.wasCanceled():
-                QMessageBox.information(self, "Cancelled", "Light sequence creation was cancelled by user.")
+            # Check if operation was cancelled or completed normally
+            if was_cancelled:
+                QMessageBox.information(self, "Cancelled", "Light session creation was cancelled by user.")
+                logging.info("Light session creation was cancelled by user")
             else:
-                self.load_sequences_data()
-                QMessageBox.information(self, "Success", f"Light sequences updated successfully! Created {len(created_sequences)} sequences.")
+                self.load_sessions_data()
+                QMessageBox.information(self, "Success", f"Light sessions updated successfully! Created {len(created_sessions)} sessions.")
+                logging.info("Light session creation completed successfully")
                 
         except Exception as e:
-            if 'progress_dialog' in locals():
+            if progress_dialog:
                 progress_dialog.close()
-            logger.error(f"Error updating light sequences: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to update light sequences: {e}")
+            logger.error(f"Error updating light Sessions: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to update light Sessions: {e}")
 
-    def update_calibration_sequences(self):
-        """Update calibration sequences by running createCalibrationSequences method."""
+    def update_calibration_sessions(self):
+        """Update calibration Sessions by running createCalibrationSessions method with progress dialog."""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        
+        progress_dialog = None
+        was_cancelled = False
+        
         try:
             self.fits_file_handler = fitsProcessing()
-            created_sequences = self.fits_file_handler.createCalibrationSequences()
-            self.load_sequences_data()
-            QMessageBox.information(self, "Success", f"Calibration sequences updated successfully! Created {len(created_sequences)} sequences.")
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Creating Calibration Sessions")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.show()
+            
+            def update_progress(current, total, filename):
+                """Progress callback function"""
+                nonlocal was_cancelled
+                try:
+                    # Don't check cancellation if already cancelled
+                    if was_cancelled:
+                        logging.info("Already cancelled, returning False")
+                        return False
+                    
+                    # Check if dialog was cancelled before updating
+                    if progress_dialog and progress_dialog.wasCanceled():
+                        logging.info("User cancelled the calibration Session creation")
+                        was_cancelled = True
+                        return False  # Signal to stop processing
+                    
+                    if progress_dialog:
+                        progress = int((current / total) * 100) if total > 0 else 0
+                        progress_dialog.setValue(progress)
+                        progress_dialog.setLabelText(f"Creating calibration sessions {current}/{total}: {os.path.basename(filename)}")
+                        QApplication.processEvents()  # Keep UI responsive
+                        
+                        # Check again after processing events
+                        if progress_dialog.wasCanceled():
+                            logging.info("User cancelled the calibration session creation during update")
+                            was_cancelled = True
+                            return False
+                    
+                    return True  # Continue processing
+                except Exception as e:
+                    logging.error(f"Error in progress callback: {e}")
+                    return True  # Continue on callback errors
+            
+            # Run the processing with progress callback
+            created_sessions = self.fits_file_handler.createCalibrationSessions(progress_callback=update_progress)
+            
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
+            # Check if operation was cancelled or completed normally
+            if was_cancelled:
+                QMessageBox.information(self, "Cancelled", "Calibration session creation was cancelled by user.")
+                logging.info("Calibration session creation was cancelled by user")
+            else:
+                self.load_sessions_data()
+                QMessageBox.information(self, "Success", f"Calibration sessions updated successfully! Created {len(created_sessions)} sessions.")
+                logging.info("Calibration session creation completed successfully")
+                
         except Exception as e:
-            logger.error(f"Error updating calibration sequences: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to update calibration sequences: {e}")
+            if progress_dialog:
+                progress_dialog.close()
+            logger.error(f"Error updating calibration Sessions: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to update calibration Sessions: {e}")
 
-    def load_sequences_data(self):
-        """Load sequence data from the database and populate the tree widget."""
+    def load_sessions_data(self):
+        """Load session data from the database and populate the tree widget."""
         try:
-            self.sequences_tree.clear()
+            self.sessions_tree.clear()
             
-            # Query all sequences from the database
-            sequences = FitsSequenceModel.select()
+            # Query all sessions from the database
+            sessions = FitsSessionModel.select()
             
-            for sequence in sequences:
+            for session in sessions:
                 item = QTreeWidgetItem()
                 
                 # Populate the tree item with database fields
-                item.setText(0, str(sequence.fitsSequenceId) or "N/A")  # Sequence ID
-                item.setText(1, sequence.fitsSequenceObjectName or "N/A")  # Object Name
-                item.setText(2, str(sequence.fitsSequenceDate) or "N/A")  # Date
-                item.setText(3, sequence.fitsSequenceTelescope or "N/A")  # Telescope
-                item.setText(4, sequence.fitsSequenceImager or "N/A")  # Imager
-                item.setText(5, sequence.fitsMasterBias or "N/A")  # Master Bias
-                item.setText(6, sequence.fitsMasterDark or "N/A")  # Master Dark
-                item.setText(7, sequence.fitsMasterFlat or "N/A")  # Master Flat
+                item.setText(0, str(session.fitsSessionId) or "N/A")  # Session ID
+                item.setText(1, session.fitsSessionObjectName or "N/A")  # Object Name
+                item.setText(2, str(session.fitsSessionDate) or "N/A")  # Date
+                item.setText(3, session.fitsSessionTelescope or "N/A")  # Telescope
+                item.setText(4, session.fitsSessionImager or "N/A")  # Imager
+                item.setText(5, session.fitsMasterBias or "N/A")  # Master Bias
+                item.setText(6, session.fitsMasterDark or "N/A")  # Master Dark
+                item.setText(7, session.fitsMasterFlat or "N/A")  # Master Flat
                 
                 # Store the full database record for potential future use
-                item.setData(0, Qt.UserRole, sequence.fitsSequenceId)
+                item.setData(0, Qt.UserRole, session.fitsSessionId)
                 
-                self.sequences_tree.addTopLevelItem(item)
+                self.sessions_tree.addTopLevelItem(item)
                 
-            count = len(sequences)
+            count = len(sessions)
             if count > 0:
-                logger.info(f"Loaded {count} sequences into the display")
+                logger.info(f"Loaded {count} sessions into the display")
             else:
-                logger.info("No sequences found in database")
+                logger.info("No sessions found in database")
             
         except Exception as e:
-            logger.error(f"Error loading sequences data: {e}")
+            logger.error(f"Error loading Sessions data: {e}")
             # Don't show error dialog on startup if database is just empty
             if "no such table" not in str(e).lower():
-                QMessageBox.warning(self, "Error", f"Failed to load sequences data: {e}")
+                QMessageBox.warning(self, "Error", f"Failed to load Sessions data: {e}")
 
+    def clear_sessions(self):
+        """Clear all Session records from the database and refresh the display."""
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self, 
+            "Confirm Clear Sessions", 
+            "This will permanently delete all Session records from the database.\n"
+            "This will NOT delete the actual FITS files, only the Session groupings.\n"
+            "Individual FITS files will become unassigned to Sessions.\n\n"
+            "Are you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        try:
+            # Clear the tree widget first
+            self.sessions_tree.clear()
+            
+            # Delete all fitsSession records from the database
+            deleted_sessions = FitsSessionModel.delete().execute()
+            
+            # Also clear the session assignments from FITS files
+            from astrofiler_db import fitsFile as FitsFileModel
+            FitsFileModel.update(fitsFileSession=None).execute()
+            
+            logger.info(f"Deleted {deleted_sessions} session records from database and cleared session assignments")
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"Successfully cleared {deleted_sessions} session records from database.\n"
+                f"All FITS files are now unassigned to sessions."
+            )
+            
+            # Refresh the display (should be empty now)
+            self.load_sessions_data()
+            
+        except Exception as e:
+            logger.error(f"Error clearing Sessions: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to clear Sessions: {e}")
 
 class MergeTab(QWidget):
     def __init__(self):
@@ -787,22 +920,22 @@ class MergeTab(QWidget):
                 except Exception as e:
                     errors.append(f"Error processing {fits_file.fitsFileName}: {str(e)}")
             
-            # Update sequences that reference the old object name
-            sequences_updated = 0
+            # Update Sessions that reference the old object name
+            Sessions_updated = 0
             try:
-                from astrofiler_db import fitsSequence as FitsSequenceModel
-                sequences = FitsSequenceModel.select().where(FitsSequenceModel.fitsSequenceObjectName == from_object)
-                for sequence in sequences:
-                    sequence.fitsSequenceObjectName = to_object
-                    sequence.save()
-                    sequences_updated += 1
+                from astrofiler_db import fitsSession as FitsSessionModel
+                Sessions = FitsSessionModel.select().where(FitsSessionModel.fitsSessionObjectName == from_object)
+                for Session in Sessions:
+                    Session.fitsSessionObjectName = to_object
+                    Session.save()
+                    Sessions_updated += 1
             except Exception as e:
-                errors.append(f"Error updating sequences: {str(e)}")
+                errors.append(f"Error updating Sessions: {str(e)}")
             
             result_text += f"Database records updated: {merged_count}\n"
             if change_files:
                 result_text += f"Files renamed on disk: {renamed_count}\n"
-            result_text += f"Sequences updated: {sequences_updated}\n"
+            result_text += f"Sessions updated: {Sessions_updated}\n"
             
             if errors:
                 result_text += f"\nErrors encountered:\n"
@@ -1529,7 +1662,7 @@ class AstroFilerGUI(QWidget):
         
         # Create and add tabs
         self.images_tab = ImagesTab()
-        self.sequences_tab = SequencesTab()
+        self.sessions_tab = SessionsTab()
         self.merge_tab = MergeTab()
         self.config_tab = ConfigTab()
         self.duplicates_tab = DuplicatesTab()
@@ -1537,11 +1670,11 @@ class AstroFilerGUI(QWidget):
         self.about_tab = AboutTab()
         
         self.tab_widget.addTab(self.images_tab, "Images")
-        self.tab_widget.addTab(self.sequences_tab, "Sequences")
+        self.tab_widget.addTab(self.sessions_tab, "Sessions")
         self.tab_widget.addTab(self.merge_tab, "Merge")
-        self.tab_widget.addTab(self.config_tab, "Config")
         self.tab_widget.addTab(self.duplicates_tab, "Duplicates")
         self.tab_widget.addTab(self.log_tab, "Log")
+        self.tab_widget.addTab(self.config_tab, "Config")
         self.tab_widget.addTab(self.about_tab, "About")
         # Set the default tab to be the Images tab
         self.tab_widget.setCurrentWidget(self.images_tab)

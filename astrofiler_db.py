@@ -29,25 +29,24 @@ class fitsFile(BaseModel):
     fitsFileOffset = pw.TextField(null=True)
     fitsFileFilter = pw.TextField(null=True)
     fitsFileHash = pw.TextField(null=True)
-    fitsFileSequence = pw.TextField(null=True)
+    fitsFileSession = pw.TextField(null=True)
 
-class fitsSequence(BaseModel):
-    fitsSequenceId = pw.TextField(primary_key=True)
-    fitsSequenceObjectName = pw.TextField(null=True)
-    fitsSequenceDate = pw.DateField(null=True)
-    fitsSequenceTelescope = pw.TextField(null=True)
-    fitsSequenceImager = pw.TextField(null=True)
-    fitsMasterBias = pw.TextField(null=True)
-    fitsMasterDark = pw.TextField(null=True)
-    fitsMasterFlat = pw.TextField(null=True)
+class fitsSession(BaseModel):
+    fitsSessionId = pw.TextField(primary_key=True)
+    fitsSessionObjectName = pw.TextField(null=True)
+    fitsSessionTelescope = pw.TextField(null=True)
+    fitsSessionImager = pw.TextField(null=True)
+    fitsBiasSession = pw.TextField(null=True)
+    fitsDarkSession = pw.TextField(null=True)
+    fitsFlatSession = pw.TextField(null=True)
 
 def setup_database():
-    """Connect to the SQLite database and create the fitsFile and fitsSequence tables if they don't exist."""
+    """Connect to the SQLite database and create the fitsFile and fitsSession tables if they don't exist."""
     try:
         db.connect()
-        db.create_tables([fitsFile, fitsSequence])
+        db.create_tables([fitsFile, fitsSession])
         db.close()
-        logger.info("Database setup complete. fitsFile and fitsSequence tables created.")
+        logger.info("Database setup complete. fitsFile and fitsSession tables created.")
         
     except pw.OperationalError as e:
         logger.error(f"Database error: {e}")
