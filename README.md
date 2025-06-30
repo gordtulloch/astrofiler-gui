@@ -66,7 +66,7 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 
 
    ```bash
-   REM In Windows:
+   # In Windows:
    python -m venv .venv
    .venv/Scripts/Activate
    pip install -r requirements.txt
