@@ -1,6 +1,6 @@
 ![Astrofile icon](/astrofiler.ico) 
 
-# AstroFiler GUI
+# AstroFiler
 
 **A comprehensive astronomical image file management tool**
 
@@ -8,7 +8,7 @@
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
 [![AstroPy](https://img.shields.io/badge/astronomy-AstroPy-orange.svg)](https://www.astropy.org/)
 
-AstroFiler GUI is a powerful Python application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, and session analysis.
+AstroFiler is a powerful Python application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, and session analysis.
 
 **NOTE**: This software still in active development. A release version for Linux, Mac, and Windows is expected end of July 2025. 
 
