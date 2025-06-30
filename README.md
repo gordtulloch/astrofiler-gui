@@ -54,16 +54,19 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
    ```
 
 2. **Set up Virtual Environment and Install dependencies (first run only):**
-In Linux/Mac:
+
+
 
    ```bash
+   # In Linux/Mac:
    python -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt
    ```
-In Windows:
+
 
    ```bash
+   REM In Windows:
    python -m venv .venv
    .venv/Scripts/Activate
    pip install -r requirements.txt
