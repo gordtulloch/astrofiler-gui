@@ -15,34 +15,24 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 ## ✨ Features
 
 ### 🗂️ **File Management**
-- **Repository Scanning**: Recursively scan directories for FITS files
+- **Repository Scanning**: Recursively scan directories for FITS files, rename to a descriptive name, and move into a centralized repository
 - **Batch Processing**: Process multiple files with progress tracking
 - **File Organization**: Automatically organize files based on metadata
 - **Duplicate Detection**: SHA-256 hash-based duplicate file identification
 - **Duplicate Management**: Safely remove duplicate files while preserving one copy
+- **Command Line Utilities**: Critical functions exposed as command line utilities to facilitate use of scripts and crontab
 
 ### 📊 **Metadata & Analysis**
 - **FITS Header Extraction**: Automatically extract and catalog metadata
 - **Object Identification**: Track astronomical targets and sequences
-- **Filter & Exposure Tracking**: Monitor filter usage and exposure times
-- **Date/Time Analysis**: Organize by observation dates and times
-- **File Integrity**: SHA-256 hashing for duplicate detection and verification
-
-### 🔍 **Search & Filter**
-- **Advanced Filtering**: Search by object, filter, exposure, date, and more
-- **Tree View Navigation**: Hierarchical organization of your image library
-- **Quick Access**: Fast lookup of specific images or sequences
-
+- **Date/Time Analysis**: Organize by objects, observation dates, instruments, and cameras
+- **
 ### 🛠️ **Tools & Integration**
-- **External Viewer Support**: Launch your favorite FITS viewer directly
-- **Progress Monitoring**: Real-time progress for long operations
-- **Logging System**: Comprehensive activity logging
-- **Configuration Management**: Persistent settings and preferences
+- **External Viewer Support**: Launch your favorite FITS viewer directly from Astrofile
 
 ### 📈 **Sequence Management**
-- **Sequence Detection**: Automatically group related images
-- **Merge Operations**: Combine sequences with conflict resolution
-- **Batch Renaming**: Standardize file naming conventions
+- **Sequence Detection**: Automatically group lights and calibration images
+- **Sequence Export**: Export Lights and Calibration files ready for SIRIL processing
 
 ## 🚀 Quick Start
 
