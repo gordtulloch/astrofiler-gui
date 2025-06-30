@@ -1,6 +1,6 @@
 ![Astrofile icon](/astrofiler.ico) 
 
-#AstroFiler GUI
+# AstroFiler GUI
 
 **A comprehensive astronomical image file management and organization tool**
 
