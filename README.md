@@ -8,7 +8,7 @@
 
 AstroFiler GUI is a powerful Python application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, and sequence analysis.
 
-**NOTE**: This software still in active development. Release version expected end of July 2025.
+**NOTE**: This software still in active development. Release version for Linux, Mac, and Windows expected end of July 2025.
 
 ## ✨ Features
 
