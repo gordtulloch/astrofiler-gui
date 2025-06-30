@@ -2,13 +2,50 @@
 
 # AstroFiler GUI
 
-**A comprehensive astronomical image file management and organization tool**
+**A comprehensive astronomical image file managem- **Features**: Collapsible tr  - Load R  - Load Repository: Scan and catalog files
+  - Sync Repository: Update existing catalog
+  - Update Sessions: Refresh session groupings
+
+#### � **Sessions Tab**
+- **Session Management**: View and manage automatically created session groups
+- **Light Sessions**: Update and organize light frame sessions by object
+- **Calibration Sessions**: Group bias, dark, and flat calibration filesy: S#### �🔄 **Merge Tab**
+- **Session Merging**: Combine related image sessions
+- **Conflict Resolution**: Handle duplicate or conflicting entries
+- **Batch Operations**: Process multiple sessions simultaneouslyand catalog files
+  - Sync Repository: Update existing catalog
+  - Update Sessions: Refresh session groupings
+
+#### � **Sessions Tab**
+- **Session Management**: View and manage automatically created session groups
+- **Light Sessions**: Update and organize light frame sessions by object
+- **Calibration Sessions**: Group bias, dark, and flat calibration filestu#### 📋 **Log Tab**
+- **Activity Monitoring**: View real-time application logs
+- **Error Tracking**: Monitor and troubleshoot issues
+- **Log Management**: Clear logs when needed
+- **Debugging**: Detailed operation tracking
+
+#### ⚙️ **Config Tab**
+- **Repository Settings**:
+  - Set the root directory for FITS file scanning
+  - Configure recursive scanning options
+- **External Tools**:
+  - Configure your preferred FITS file viewer
+  - Browse and select executable applications
+- **Database Management**:
+  - Load Repository: Scan and catalog files
+  - Sync Repository: Update existing catalog
+  - Update Sessions: Refresh session groupings
+
+#### ℹ️ **About Tab**easy navigation
+
+#### 📈 **Sessions Tab**ation tool**
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
 [![AstroPy](https://img.shields.io/badge/astronomy-AstroPy-orange.svg)](https://www.astropy.org/)
 
-AstroFiler GUI is a powerful Python application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, and sequence analysis.
+AstroFiler GUI is a powerful Python application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, and session analysis.
 
 **NOTE**: This software still in active development. A release version for Linux, Mac, and Windows is expected end of July 2025. 
 
@@ -24,15 +61,16 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 
 ### 📊 **Metadata & Analysis**
 - **FITS Header Extraction**: Automatically extract and catalog metadata
-- **Object Identification**: Track astronomical targets and sequences
+- **Object Identification**: Track astronomical targets and sessions
 - **Date/Time Analysis**: Organize by objects, observation dates, instruments, and cameras
-- **
+- **File Integrity**: SHA-256 hashing for duplicate detection and verification
 ### 🛠️ **Tools & Integration**
 - **External Viewer Support**: Launch your favorite FITS viewer directly from Astrofile
 
-### 📈 **Sequence Management**
-- **Sequence Detection**: Automatically group lights and calibration images
-- **Sequence Export**: Export Lights and Calibration files ready for SIRIL processing
+### 📈 **Session Management**
+- **Session Detection**: Automatically group lights and calibration images
+- **Session Operations**: Create, update, and clear session groupings
+- **Session Export**: Export Lights and Calibration files ready for SIRIL processing
 
 ## 📖 User Guide
 
@@ -113,12 +151,23 @@ The application features a tabbed interface with six main sections:
 - **Database Management**:
   - Load Repository: Scan and catalog files
   - Sync Repository: Update existing catalog
-  - Update Sequences: Refresh sequence groupings
+  - Update Sessions: Refresh Session groupings
 
-#### 🔄 **Merge Tab**
-- **Sequence Merging**: Combine related image sequences
+#### � **Session Tab**
+- **Session Management**: View and manage automatically created Session groups
+- **Light Sessions**: Update and organize light frame Sessions by object
+- **Calibration Sessions**: Group bias, dark, and flat calibration files
+- **Session Operations**:
+  - **Update Lights**: Create sessions for unassigned light frames
+  - **Update Calibrations**: Group calibration frames by type and date
+  - **Clear Sessions**: Remove all session records (files remain unassigned)
+- **Progress Tracking**: Real-time progress with cancellation support
+- **Session Details**: View session IDs, objects, dates, and master calibration assignments
+
+#### �🔄 **Merge Tab**
+- **Session Merging**: Combine related image Sessions
 - **Conflict Resolution**: Handle duplicate or conflicting entries
-- **Batch Operations**: Process multiple sequences simultaneously
+- **Batch Operations**: Process multiple Sessions simultaneously
 - **File Renaming**: Option to update filenames on disk (default: enabled)
 
 #### � **Duplicates Tab**
@@ -211,7 +260,7 @@ Persistent application settings including:
 SQLite database containing:
 - FITS file catalog with metadata
 - SHA-256 file hashes for duplicate detection
-- Sequence relationships
+- Session relationships
 - Processing history
 
 ## 🐛 Troubleshooting
@@ -286,15 +335,15 @@ fitsFile:
 - fitsFileCCDTemp (Text)
 - fitsFileXBinning (Text)
 - fitsFileYBinning (Text)
-- fitsFileSequence (Text)
+- fitsFileSession (Text)
 
--- Sequence Management
-fitsSequence:
-- fitsSequenceId (Primary Key)
-- fitsSequenceObjectName (Text)
-- fitsSequenceDate (Date)
-- fitsSequenceTelescope (Text)
-- fitsSequenceImager (Text)
+-- Session Management
+fitsSession:
+- fitsSessionId (Primary Key)
+- fitsSessionObjectName (Text)
+- fitsSessionDate (Date)
+- fitsSessionTelescope (Text)
+- fitsSessionImager (Text)
 - fitsMasterBias (Text)
 - fitsMasterDark (Text)
 - fitsMasterFlat (Text)
@@ -310,17 +359,7 @@ We welcome contributions! Please:
 4. Add tests if applicable
 5. Submit a pull request
 
-### Development Setup
-
-```bash
-# Clone and setup development environment
-git clone <repository-url>
-cd astrofiler-gui
-pip install -r requirements.txt
-
-# Run in development mode
-python astrofiler.py
-```
+If you wish to make a cash contribution to assist the author in continuing to produce quality open source software please feel free to make a Paypal contribution to gord.tulloch@gmail.com.
 
 ## 📄 License
 

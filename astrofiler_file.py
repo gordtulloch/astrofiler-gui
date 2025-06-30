@@ -18,7 +18,7 @@ import pytz
 from peewee import IntegrityError
 import configparser
 
-from astrofiler_db import fitsFile as FitsFileModel, fitsSequence as fitsSequenceModel
+from astrofiler_db import fitsFile as FitsFileModel, fitsSession as fitsSessionModel
 
 import logging
 logging=logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class fitsProcessing:
     This class handles:
     - Importing FITS file data into the database
     - Renaming and moving files to repository structure
-    - Creating sequences from FITS files
+    - Creating sessions from FITS files
     - Creating thumbnails
     - Calibrating images
     """
@@ -301,18 +301,18 @@ class fitsProcessing:
         return registeredFiles
 
     #################################################################################################################
-    ## createLightSequences - this function creates sequences for all Light files not currently assigned to one    ##
+    ## createLightSessions - this function creates sessions for all Light files not currently assigned to one    ##
     #################################################################################################################
-    def createLightSequences(self, progress_callback=None):
-        sequencesCreated=[]
+    def createLightSessions(self, progress_callback=None):
+        sessionsCreated=[]
         
-        # Query for all fits files that are not assigned to a sequence
-        unassigned_files = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Light"))
+        # Query for all fits files that are not assigned to a session
+        unassigned_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Light"))
         
         # How many unassigned_files are there?
-        logging.info("createSequences found "+str(len(unassigned_files))+" unassigned files to sequence")
+        logging.info("createSessions found "+str(len(unassigned_files))+" unassigned files to session")
 
-        # Loop through each unassigned file and create a sequence each time the object changes
+        # Loop through each unassigned file and create a session each time the object changes
         currentObject= ""
         total_files = len(unassigned_files)
         current_count = 0
@@ -324,37 +324,37 @@ class fitsProcessing:
             if progress_callback:
                 should_continue = progress_callback(current_count, total_files, str(currentFitsFile.fitsFileName))
                 if not should_continue:
-                    logging.info("Sequence creation cancelled by user")
+                    logging.info("Session creation cancelled by user")
                     break
             
             logging.info("Current Object is "+currentFitsFile.fitsFileObject)
             logging.info("Processing "+str(currentFitsFile.fitsFileName))
 
-            # If the object name has changed, create a new sequence
+            # If the object name has changed, create a new session
             if str(currentFitsFile.fitsFileObject) != currentObject:
-                # Create a new fitsSequence record
-                currentSequenceId = uuid.uuid4()
+                # Create a new fitsSession record
+                currentSessionId = uuid.uuid4()
                 try:
-                    newFitsSequence=fitsSequenceModel.create(fitsSequenceId=currentSequenceId,
-                                                    fitsSequenceObjectName=currentFitsFile.fitsFileObject,
-                                                    fitsSequenceTelescope=currentFitsFile.fitsFileTelescop,
-                                                    fitsSequenceImager=currentFitsFile.fitsFileInstrument,
-                                                    fitsSequenceDate=currentFitsFile.fitsFileDate,
+                    newFitsSession=fitsSessionModel.create(fitsSessionId=currentSessionId,
+                                                    fitsSessionObjectName=currentFitsFile.fitsFileObject,
+                                                    fitsSessionTelescope=currentFitsFile.fitsFileTelescop,
+                                                    fitsSessionImager=currentFitsFile.fitsFileInstrument,
+                                                    fitsSessionDate=currentFitsFile.fitsFileDate,
                                                     fitsMasterBias=None,fitsMasterDark=None,fitsMasterFlat=None)
-                    sequencesCreated.append(currentSequenceId)
-                    logging.info("New sequence created for "+str(newFitsSequence.fitsSequenceId))
+                    sessionsCreated.append(currentSessionId)
+                    logging.info("New session created for "+str(newFitsSession.fitsSessionId))
                 except IntegrityError as e:
                     # Handle the integrity error
                     logging.error("IntegrityError: "+str(e))
                     continue     
                 currentObject = str(currentFitsFile.fitsFileObject)
-            # Assign the current sequence to the fits file
-            currentFitsFile.fitsFileSequence=currentSequenceId
+            # Assign the current session to the fits file
+            currentFitsFile.fitsFileSession=currentSessionId
             currentFitsFile.save()
-            logging.info("Assigned "+str(currentFitsFile.fitsFileName)+" to sequence "+str(currentSequenceId))
-            sequencesCreated.append(currentSequenceId)
+            logging.info("Assigned "+str(currentFitsFile.fitsFileName)+" to session "+str(currentSessionId))
+            sessionsCreated.append(currentSessionId)
             
-        return sequencesCreated
+        return sessionsCreated
         
     #################################################################################################################
     ## sameDay - this function returns True if two dates are within 12 hours of each other, False otherwise        ##
@@ -366,85 +366,119 @@ class fitsProcessing:
         return time_difference <= timedelta(hours=12)
         
     #################################################################################################################
-    ## createCalibrationSequences - this function creates sequences for all calibration files not currently        ##
+    ## createCalibrationSessions - this function creates sessions for all calibration files not currently        ##
     ##                              assigned to one                                                                ##
     #################################################################################################################
-    def createCalibrationSequences(self):
-        createdCalibrationSequences=[]
+    def createCalibrationSessions(self, progress_callback=None):
+        createdCalibrationSessions=[]
         
-        # Query for all calibration files that are not assigned to a sequence
-        unassignedBiases = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Bias"))
-        unassignedDarks  = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Dark"))
-        unassignedFlats  = FitsFileModel.select().where(FitsFileModel.fitsFileSequence.is_null(True), FitsFileModel.fitsFileType.contains("Flat"))
+        # Query for all calibration files that are not assigned to a session
+        unassignedBiases = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Bias"))
+        unassignedDarks  = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Dark"))
+        unassignedFlats  = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Flat"))
+        
+        # Calculate total files for progress tracking
+        total_biases = len(unassignedBiases)
+        total_darks = len(unassignedDarks)
+        total_flats = len(unassignedFlats)
+        total_files = total_biases + total_darks + total_flats
+        current_count = 0
         
         # How many unassigned_files are there?
-        logging.info("createCalibrationSequences found "+str(len(unassignedBiases))+" unassigned Bias calibration files to sequence")
-        logging.info("createCalibrationSequences found "+str(len(unassignedDarks))+" unassigned Dark calibration files to sequence")
-        logging.info("createCalibrationSequences found "+str(len(unassignedFlats))+" unassigned Flat calibration files to sequence")
+        logging.info("createCalibrationSessions found "+str(total_biases)+" unassigned Bias calibration files to Session")
+        logging.info("createCalibrationSessions found "+str(total_darks)+" unassigned Dark calibration files to Session")
+        logging.info("createCalibrationSessions found "+str(total_flats)+" unassigned Flat calibration files to Session")
 
         # Bias calibration files
         currDate="0001-01-01"
         uuidStr=uuid.uuid4()
                         
         for biasFitsFile in unassignedBiases:
+            current_count += 1
+            
+            # Call progress callback if provided
+            if progress_callback:
+                should_continue = progress_callback(current_count, total_files, f"Bias: {biasFitsFile.fitsFileName}")
+                if not should_continue:
+                    logging.info("Calibration Session creation cancelled by user")
+                    return createdCalibrationSessions
+            
             if not self.sameDay(biasFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
                 currDate=datetime.strptime(biasFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
-                uuidStr=uuid.uuid4() # New sequence
-                newFitsSequence=fitsSequenceModel.create(fitsSequenceId=uuidStr,
-                                                fitsSequenceDate=biasFitsFile.fitsFileDate,
-                                                fitsSequenceObjectName='Flat',
+                uuidStr=uuid.uuid4() # New Session
+                newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
+                                                fitsSessionDate=biasFitsFile.fitsFileDate,
+                                                fitsSessionObjectName='Bias',
                                                 fitsMasterBias=None,
                                                 fitsMasterDark=None,
                                                 fitsMasterFlat=None)
                 logging.info("New date for bias "+currDate) 
-            biasFitsFile.fitsFileSequence=uuidStr
+            biasFitsFile.fitsFileSession=uuidStr
             biasFitsFile.save()   
-            logging.info("Set sequence for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
-            createdCalibrationSequences.append(uuidStr)
+            logging.info("Set Session for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
+            createdCalibrationSessions.append(uuidStr)
         
         # Dark calibration files
         currDate="0001-01-01"
         uuidStr=uuid.uuid4()
         for darkFitsFile in unassignedDarks:
+            current_count += 1
+            
+            # Call progress callback if provided
+            if progress_callback:
+                should_continue = progress_callback(current_count, total_files, f"Dark: {darkFitsFile.fitsFileName}")
+                if not should_continue:
+                    logging.info("Calibration Session creation cancelled by user")
+                    return createdCalibrationSessions
+            
             if not self.sameDay(darkFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
                 currDate=datetime.strptime(darkFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
-                uuidStr=uuid.uuid4() # New sequence
-                newFitsSequence=fitsSequenceModel.create(fitsSequenceId=uuidStr,
-                                                fitsSequenceDate=darkFitsFile.fitsFileDate,
-                                                fitsSequenceObjectName='Dark',
+                uuidStr=uuid.uuid4() # New Session
+                newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
+                                                fitsSessionDate=darkFitsFile.fitsFileDate,
+                                                fitsSessionObjectName='Dark',
                                                 fitsMasterBias=None,
                                                 fitsMasterDark=None,
                                                 fitsMasterFlat=None)
                 logging.info("New date "+currDate) 
-            darkFitsFile.fitsFileSequence=uuidStr
+            darkFitsFile.fitsFileSession=uuidStr
             darkFitsFile.save()   
-            logging.info("Set sequence for dark "+darkFitsFile.fitsFileName+" to "+str(uuidStr))
-            createdCalibrationSequences.append(uuidStr)
+            logging.info("Set Session for dark "+darkFitsFile.fitsFileName+" to "+str(uuidStr))
+            createdCalibrationSessions.append(uuidStr)
             
         # Flat calibration files
         currDate="0001-01-01"
         uuidStr=uuid.uuid4()
         for flatFitsFile in unassignedFlats:
+            current_count += 1
+            
+            # Call progress callback if provided
+            if progress_callback:
+                should_continue = progress_callback(current_count, total_files, f"Flat: {flatFitsFile.fitsFileName}")
+                if not should_continue:
+                    logging.info("Calibration Session creation cancelled by user")
+                    return createdCalibrationSessions
+            
             if not self.sameDay(flatFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
                 currDate=datetime.strptime(flatFitsFile.fitsFileDate,'%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d')
-                uuidStr=uuid.uuid4() # New sequence
-                newFitsSequence=fitsSequenceModel.create(fitsSequenceId=uuidStr,
-                                fitsSequenceDate=flatFitsFile.fitsFileDate,
-                                fitsSequenceObjectName='Flat',
+                uuidStr=uuid.uuid4() # New Session
+                newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
+                                fitsSessionDate=flatFitsFile.fitsFileDate,
+                                fitsSessionObjectName='Flat',
                                 fitsMasterBias=None,
                                 fitsMasterDark=None,
                                 fitsMasterFlat=None)
                 logging.info("New date "+currDate) 
-            flatFitsFile.fitsFileSequence=uuidStr
+            flatFitsFile.fitsFileSession=uuidStr
             flatFitsFile.save()   
-            logging.info("Set sequence for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
-            createdCalibrationSequences.append(uuidStr)
+            logging.info("Set Session for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
+            createdCalibrationSessions.append(uuidStr)
         
-        return createdCalibrationSequences
+        return createdCalibrationSessions
 
     #################################################################################################################
     ## calibrateFitsFile - this function calibrates a light IMAGETYP using master bias, dark, and flat IMAGETYPs. If     ##
-    ##                     the master IMAGETYPs do not exist, they are created for the sequence.                      ##
+    ##                     the master IMAGETYPs do not exist, they are created for the Session.                      ##
     #################################################################################################################
     def calibrateFitsImage(self,targetFitsFile):
         pass
@@ -461,13 +495,13 @@ class fitsProcessing:
                             fitsFileObject=hdr["OBJECT"],fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", None),
-                            fitsFileHash=fileHash,fitsFileSequence=None)
+                            fitsFileHash=fileHash,fitsFileSession=None)
             else:
                 newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
                             fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", "OSC"),
-                            fitsFileHash=fileHash,fitsFileSequence=None)
+                            fitsFileHash=fileHash,fitsFileSession=None)
             return newfile.fitsFileId
         else:
             logging.error("Error: File not added to repo due to missing date is "+fileName)
