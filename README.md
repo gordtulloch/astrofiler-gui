@@ -34,40 +34,38 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 - **Sequence Detection**: Automatically group lights and calibration images
 - **Sequence Export**: Export Lights and Calibration files ready for SIRIL processing
 
-## 🚀 Quick Start
+## 📖 User Guide
 
 ### Prerequisites
 
 - Python 3.8 or higher
 - FITS files to manage
 
-### Installation
+### Getting Started
 
-1. **Clone the repository:**
+1. **Install Astrofile **  
+
+A. **Clone the repository:**
    ```bash
    git clone https://github.com/gordtulloch/astrofiler-gui
    cd astrofiler-gui
    ```
 
-2. **Set up Virtual Environment and Install dependencies (first run only):**
-
-
+B. **Set up Virtual Environment and Install dependencies (first run only):**
 
    ```bash
    # In Linux/Mac:
    python -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt
-   ```
-
-
+   ```  
    ```bash
    # In Windows:
    python -m venv .venv
    .venv/Scripts/Activate
    pip install -r requirements.txt
    ```
-3. **Run the application:**
+C. **Run the application:**
    ```bash
    # Linux/Mac (using virtual environment):
    .venv/bin/python astrofiler.py
@@ -79,13 +77,8 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
    source .venv/bin/activate  # Linux/Mac
    .venv\Scripts\activate     # Windows
    python astrofiler.py
-   ```
+   ```  
 
-## 📖 User Guide
-
-### Getting Started
-
-1. **Launch AstroFiler GUI**: Run `python astrofiler.py`
 2. **Load Repository**: Use the Config tab to set your FITS file directory
 3. **Scan Files**: Click "Load Repository" to scan and catalog your files
 4. **Browse**: Use the Images tab to explore your organized file collection
