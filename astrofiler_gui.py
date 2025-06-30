@@ -1274,6 +1274,238 @@ class LogTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to clear log file: {str(e)}")
 
 
+class DuplicatesTab(QWidget):
+    """Tab for managing duplicate FITS files"""
+    
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        self.refresh_duplicates()
+    
+    def init_ui(self):
+        """Initialize the duplicates tab UI"""
+        layout = QVBoxLayout(self)
+        
+        # Title and description
+        title_label = QLabel("Duplicate Files Management")
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
+        layout.addWidget(title_label)
+        
+        description = QLabel("Files with identical content (same hash) are considered duplicates.\n"
+                           "You can safely remove all but one copy of each duplicate group.")
+        description.setAlignment(Qt.AlignCenter)
+        description.setStyleSheet("margin: 5px;")
+        layout.addWidget(description)
+        
+        # Refresh button
+        refresh_button = QPushButton("Refresh Duplicates")
+        refresh_button.clicked.connect(self.refresh_duplicates)
+        layout.addWidget(refresh_button)
+        
+        # Duplicates tree widget
+        self.duplicates_tree = QTreeWidget()
+        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type"])
+        self.duplicates_tree.setAlternatingRowColors(True)
+        self.duplicates_tree.setSortingEnabled(True)
+        layout.addWidget(self.duplicates_tree)
+        
+        # Button layout
+        button_layout = QHBoxLayout()
+        
+        # Delete duplicates button
+        self.delete_button = QPushButton("Delete Duplicate Files")
+        self.delete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:disabled {
+                background-color: #666666;
+                color: #cccccc;
+            }
+        """)
+        self.delete_button.clicked.connect(self.delete_duplicates)
+        self.delete_button.setEnabled(False)
+        
+        # Info label
+        self.info_label = QLabel("No duplicates found.")
+        self.info_label.setAlignment(Qt.AlignLeft)
+        
+        button_layout.addWidget(self.info_label)
+        button_layout.addStretch()
+        button_layout.addWidget(self.delete_button)
+        
+        layout.addLayout(button_layout)
+    
+    def refresh_duplicates(self):
+        """Refresh the list of duplicate files"""
+        from astrofiler_db import fitsFile
+        
+        self.duplicates_tree.clear()
+        duplicate_groups = []
+        
+        try:
+            # Query for files with duplicate hashes
+            query = """
+            SELECT fitsFileHash, COUNT(*) as count
+            FROM fitsfile 
+            WHERE fitsFileHash IS NOT NULL 
+            GROUP BY fitsFileHash 
+            HAVING COUNT(*) > 1
+            """
+            
+            import sqlite3
+            conn = sqlite3.connect('astrofiler.db')
+            cursor = conn.cursor()
+            cursor.execute(query)
+            duplicate_hashes = cursor.fetchall()
+            conn.close()
+            
+            total_duplicates = 0
+            
+            for hash_value, count in duplicate_hashes:
+                # Get all files with this hash
+                files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value)
+                
+                if files_with_hash.count() > 1:
+                    # Create a parent item for this duplicate group
+                    group_item = QTreeWidgetItem(self.duplicates_tree)
+                    group_item.setText(0, f"Duplicate Group (Hash: {hash_value[:16]}...)")
+                    group_item.setText(1, f"{count} files")
+                    group_item.setExpanded(True)
+                    
+                    # Style the group item
+                    font = group_item.font(0)
+                    font.setBold(True)
+                    for i in range(6):
+                        group_item.setFont(i, font)
+                    
+                    # Add individual files as children
+                    for fits_file in files_with_hash:
+                        file_item = QTreeWidgetItem(group_item)
+                        file_item.setText(0, os.path.basename(fits_file.fitsFileName or "Unknown"))
+                        file_item.setText(1, fits_file.fitsFileObject or "Unknown")
+                        file_item.setText(2, str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "Unknown")
+                        file_item.setText(3, fits_file.fitsFileFilter or "Unknown")
+                        file_item.setText(4, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "Unknown")
+                        file_item.setText(5, fits_file.fitsFileType or "Unknown")
+                        
+                        # Store the file object for deletion
+                        file_item.setData(0, Qt.UserRole, fits_file)
+                    
+                    duplicate_groups.append((hash_value, count))
+                    total_duplicates += count - 1  # count - 1 because we keep one copy
+            
+            # Update info label and button state
+            if duplicate_groups:
+                self.info_label.setText(f"Found {len(duplicate_groups)} duplicate groups with {total_duplicates} files that can be removed.")
+                self.delete_button.setEnabled(True)
+            else:
+                self.info_label.setText("No duplicate files found.")
+                self.delete_button.setEnabled(False)
+                
+        except Exception as e:
+            logging.error(f"Error refreshing duplicates: {str(e)}")
+            self.info_label.setText(f"Error loading duplicates: {str(e)}")
+            self.delete_button.setEnabled(False)
+    
+    def delete_duplicates(self):
+        """Delete duplicate files, keeping only one copy of each"""
+        from astrofiler_db import fitsFile
+        
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self, 
+            "Confirm Deletion", 
+            "This will permanently delete duplicate files from both the database and disk.\n"
+            "One copy of each file will be kept. This action cannot be undone.\n\n"
+            "Are you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        deleted_count = 0
+        error_count = 0
+        
+        try:
+            # Get all duplicate groups
+            query = """
+            SELECT fitsFileHash
+            FROM fitsfile 
+            WHERE fitsFileHash IS NOT NULL 
+            GROUP BY fitsFileHash 
+            HAVING COUNT(*) > 1
+            """
+            
+            import sqlite3
+            conn = sqlite3.connect('astrofiler.db')
+            cursor = conn.cursor()
+            cursor.execute(query)
+            duplicate_hashes = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            
+            for hash_value in duplicate_hashes:
+                # Get all files with this hash, ordered by date (keep the earliest)
+                files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value).order_by(fitsFile.fitsFileDate)
+                files_list = list(files_with_hash)
+                
+                if len(files_list) > 1:
+                    # Keep the first file, delete the rest
+                    files_to_delete = files_list[1:]
+                    
+                    for fits_file in files_to_delete:
+                        try:
+                            # Delete the physical file if it exists
+                            if fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                                os.remove(fits_file.fitsFileName)
+                                logging.info(f"Deleted file: {fits_file.fitsFileName}")
+                            
+                            # Delete from database
+                            fits_file.delete_instance()
+                            deleted_count += 1
+                            
+                        except Exception as e:
+                            logging.error(f"Error deleting file {fits_file.fitsFileName}: {str(e)}")
+                            error_count += 1
+            
+            # Show results
+            if error_count == 0:
+                QMessageBox.information(
+                    self, 
+                    "Deletion Complete", 
+                    f"Successfully deleted {deleted_count} duplicate files."
+                )
+            else:
+                QMessageBox.warning(
+                    self, 
+                    "Deletion Complete with Errors", 
+                    f"Deleted {deleted_count} files successfully.\n"
+                    f"Failed to delete {error_count} files. Check the log for details."
+                )
+            
+            # Refresh the display
+            self.refresh_duplicates()
+            
+        except Exception as e:
+            logging.error(f"Error during duplicate deletion: {str(e)}")
+            QMessageBox.critical(
+                self, 
+                "Deletion Error", 
+                f"An error occurred during deletion: {str(e)}"
+            )
+
+
 class AstroFilerGUI(QWidget):
     """Main GUI class that encapsulates the entire AstroFiler application interface"""
     
@@ -1300,15 +1532,19 @@ class AstroFilerGUI(QWidget):
         self.sequences_tab = SequencesTab()
         self.merge_tab = MergeTab()
         self.config_tab = ConfigTab()
-        self.about_tab = AboutTab()
+        self.duplicates_tab = DuplicatesTab()
         self.log_tab = LogTab()
+        self.about_tab = AboutTab()
         
         self.tab_widget.addTab(self.images_tab, "Images")
         self.tab_widget.addTab(self.sequences_tab, "Sequences")
         self.tab_widget.addTab(self.merge_tab, "Merge")
         self.tab_widget.addTab(self.config_tab, "Config")
+        self.tab_widget.addTab(self.duplicates_tab, "Duplicates")
         self.tab_widget.addTab(self.log_tab, "Log")
         self.tab_widget.addTab(self.about_tab, "About")
+        # Set the default tab to be the Images tab
+        self.tab_widget.setCurrentWidget(self.images_tab)
         
         layout.addWidget(self.tab_widget)
     
