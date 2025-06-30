@@ -461,7 +461,7 @@ class SessionsTab(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Session ID", "Object Name", "Date", "Telescope", "Imager", "Master Bias", "Master Dark", "Master Flat"])
+        self.sessions_tree.setHeaderLabels(["Session ID", "Object Name", "Date", "Telescope", "Imager", "Bias Date", "Dark Date", "Flat Date"])
         
         # Set column widths for better display
         self.sessions_tree.setColumnWidth(0, 250)  # Session ID
@@ -642,9 +642,9 @@ class SessionsTab(QWidget):
                 item.setText(2, str(session.fitsSessionDate) or "N/A")  # Date
                 item.setText(3, session.fitsSessionTelescope or "N/A")  # Telescope
                 item.setText(4, session.fitsSessionImager or "N/A")  # Imager
-                item.setText(5, session.fitsMasterBias or "N/A")  # Master Bias
-                item.setText(6, session.fitsMasterDark or "N/A")  # Master Dark
-                item.setText(7, session.fitsMasterFlat or "N/A")  # Master Flat
+                item.setText(5, session.fitsBiasSession or "N/A")  # Master Bias
+                item.setText(6, session.fitsDarkSession or "N/A")  # Master Dark
+                item.setText(7, session.fitsFlatSession or "N/A")  # Master Flat
                 
                 # Store the full database record for potential future use
                 item.setData(0, Qt.UserRole, session.fitsSessionId)

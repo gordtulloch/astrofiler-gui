@@ -44,7 +44,7 @@ AstroFiler is a powerful Python application designed for astronomers and astroph
 
 ### Getting Started
 
-1. **Install Astrofile**  
+1. **Install Astrofiler**  
 
 A. **Clone the repository:**
    ```bash
@@ -87,7 +87,9 @@ C. **Run the application:**
 
 3. **Scan Files**: In the Images tab, click "Load Repo" to scan and catalog your files. You can also rescan your repo using the "Sync Repo" button, clear the Repo (does not delete files) with the "Clear Repo" button (which you can then reload with "Sync Repo") or refresh the list.  
 
-4. **Open Files**: If you have specified an external FITS file viewer (I Like the ASIFitsView program from the ASIStudio product, free from ASI at https://www.zwoastro.com/software/) if you double-click any image it will be opened in that viewer.
+4. **Create Sessions**: In the Sessions tab click on Update Lights and Update Calibrations to create session sets for light and calibration settings. These tie together all images taken in one session and link the most recently updated calibration files to the lights so they can be treated as one unit for processing. Click on Assign Calibration to assign calibration frames to light sessions. Double click on a session to pop up a download dialog that allows you to create a folder of lights and associated calibration frames that can easily be loaded into image processing software like Siril. 
+
+5. **Open Files**: If you have specified an external FITS file viewer (I Like the ASIFitsView program from the ASIStudio product, free from ASI at https://www.zwoastro.com/software/) if you double-click any image it will be opened in that viewer.
 
 ### Main Interface
 
@@ -127,10 +129,8 @@ The application features a tabbed interface with six main sections:
 - **Progress Tracking**: Real-time progress with cancellation support
 - **Session Details**: View session IDs, objects, dates, and master calibration assignments
 
-#### �🔄 **Merge Tab**
-- **Session Merging**: Combine related image Sessions
-- **Conflict Resolution**: Handle duplicate or conflicting entries
-- **Batch Operations**: Process multiple Sessions simultaneously
+#### �🔄 **Merge/Rename Tab**
+- **Session Merging**: Combine related image sessions or rename all sessions of a particular object
 - **File Renaming**: Option to update filenames on disk (default: enabled)
 
 #### � **Duplicates Tab**
@@ -150,22 +150,6 @@ The application features a tabbed interface with six main sections:
 - **Application Information**: Version and credits
 - **Documentation**: Quick reference and help
 - **Contact**: Support and contribution information
-
-### Configuration
-
-#### Setting Up Your Repository
-
-1. Go to the **Config** tab
-2. Click "Browse" next to "Repository directory"
-3. Select your FITS files directory
-4. Click "Load Repository" to scan files
-
-#### External FITS Viewer
-
-1. Go to the **Config** tab → **External Tools** section
-2. Click "Browse" next to "FITS Viewer"
-3. Select your preferred FITS viewing application (e.g., DS9, FITS Liberator)
-4. Settings are automatically saved
 
 ### Duplicate Management
 
@@ -190,26 +174,18 @@ The application features a tabbed interface with six main sections:
 - **Progress Feedback**: Shows number of files that can be removed
 - **Error Handling**: Graceful handling of file system errors
 
-### File Processing
+### Command Line Processing
 
-#### Supported Metadata
+In the Utilities folder there are the following command line utilities:
+- **LoadRepo.py** - load the repository from the incoming folder
+- **CreateSessions.py** - process any files that do not have sessions applied
+- **LinkSessions.py** - link lights to calibration files 
 
-AstroFiler automatically extracts and catalogs:
-- **OBJECT**: Target name
-- **FILTER**: Filter designation
-- **EXPTIME**: Exposure duration
-- **DATE-OBS**: Observation timestamp
-- **FILENAME**: File identifier
-- **HASH**: SHA-256 hash for duplicate detection
+These files can loaded into crontab (Linux) or Task Scheduler (Windows) to automatically register new images in the repository, combine them into sessions and link the appropriate calibration files. For example to run LoadRepo.py daily at 10am when imaging operations are complete:
 
-#### Progress Monitoring
-
-Long-running operations display:
-- **Progress Bar**: Real-time completion percentage
-- **Status Text**: Current file being processed (filename only)
-- **Cancel Option**: Ability to abort operations
-- **Time Estimates**: Remaining time calculations
-
+`
+0 10 * * * /home/user/astrofiler/.venv/bin/python /home/user/astrofiler/LoadRepo.py 
+`
 ## 🔧 Configuration Files
 
 ### `astrofiler.ini`
@@ -307,9 +283,9 @@ fitsSession:
 - fitsSessionDate (Date)
 - fitsSessionTelescope (Text)
 - fitsSessionImager (Text)
-- fitsMasterBias (Text)
-- fitsMasterDark (Text)
-- fitsMasterFlat (Text)
+- fitsBiasSession (Text) - Biases matched to this light session
+- fitsDarkSession (Text) - Darks matched to this light session
+- fitsFlatSession (Text) - Flats matched to this light session
 ```
 
 ## 🤝 Contributing
