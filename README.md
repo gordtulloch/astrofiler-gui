@@ -2,7 +2,7 @@
 
 # AstroFiler GUI
 
-**A comprehensive astronomical image file management tool
+**A comprehensive astronomical image file management tool**
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
