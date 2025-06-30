@@ -187,6 +187,7 @@ For example to run LoadRepo.py daily at 10am when imaging operations are complet
 
 `
 crontab -e
+
 0 10 * * * /home/user/astrofiler/.venv/bin/python /home/user/astrofiler/LoadRepo.py 
 `
 
