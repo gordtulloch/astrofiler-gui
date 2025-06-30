@@ -2,44 +2,7 @@
 
 # AstroFiler GUI
 
-**A comprehensive astronomical image file managem- **Features**: Collapsible tr  - Load R  - Load Repository: Scan and catalog files
-  - Sync Repository: Update existing catalog
-  - Update Sessions: Refresh session groupings
-
-#### � **Sessions Tab**
-- **Session Management**: View and manage automatically created session groups
-- **Light Sessions**: Update and organize light frame sessions by object
-- **Calibration Sessions**: Group bias, dark, and flat calibration filesy: S#### �🔄 **Merge Tab**
-- **Session Merging**: Combine related image sessions
-- **Conflict Resolution**: Handle duplicate or conflicting entries
-- **Batch Operations**: Process multiple sessions simultaneouslyand catalog files
-  - Sync Repository: Update existing catalog
-  - Update Sessions: Refresh session groupings
-
-#### � **Sessions Tab**
-- **Session Management**: View and manage automatically created session groups
-- **Light Sessions**: Update and organize light frame sessions by object
-- **Calibration Sessions**: Group bias, dark, and flat calibration filestu#### 📋 **Log Tab**
-- **Activity Monitoring**: View real-time application logs
-- **Error Tracking**: Monitor and troubleshoot issues
-- **Log Management**: Clear logs when needed
-- **Debugging**: Detailed operation tracking
-
-#### ⚙️ **Config Tab**
-- **Repository Settings**:
-  - Set the root directory for FITS file scanning
-  - Configure recursive scanning options
-- **External Tools**:
-  - Configure your preferred FITS file viewer
-  - Browse and select executable applications
-- **Database Management**:
-  - Load Repository: Scan and catalog files
-  - Sync Repository: Update existing catalog
-  - Update Sessions: Refresh session groupings
-
-#### ℹ️ **About Tab**easy navigation
-
-#### 📈 **Sessions Tab**ation tool**
+**A comprehensive astronomical image file management tool
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
