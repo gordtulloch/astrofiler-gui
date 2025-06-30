@@ -181,11 +181,15 @@ In the Utilities folder there are the following command line utilities:
 - **CreateSessions.py** - process any files that do not have sessions applied
 - **LinkSessions.py** - link lights to calibration files 
 
-These files can loaded into crontab (Linux) or Task Scheduler (Windows) to automatically register new images in the repository, combine them into sessions and link the appropriate calibration files. For example to run LoadRepo.py daily at 10am when imaging operations are complete:
+These files can loaded into crontab (Linux) or Task Scheduler (Windows) to automatically register new images in the repository, combine them into sessions and link the appropriate calibration files. 
+
+For example to run LoadRepo.py daily at 10am when imaging operations are complete via cron, do the following in Linux:
 
 `
+crontab -e
 0 10 * * * /home/user/astrofiler/.venv/bin/python /home/user/astrofiler/LoadRepo.py 
 `
+
 ## 🔧 Configuration Files
 
 ### `astrofiler.ini`
