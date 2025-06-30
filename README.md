@@ -49,15 +49,25 @@ AstroFiler GUI is a powerful Python application designed for astronomers and ast
 
 1. **Clone the repository:**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/gordtulloch/astrofiler-gui
    cd astrofiler-gui
    ```
 
-2. **Install dependencies:**
+2. **Set up Virtual Environment and Install dependencies (first run only):**
+In Linux/Mac:
+
    ```bash
+   python -m venv .venv
+   source .venv/bin/activate
    pip install -r requirements.txt
    ```
+In Windows:
 
+   ```bash
+   python -m venv .venv
+   .venv/Scripts/Activate
+   pip install -r requirements.txt
+   ```
 3. **Run the application:**
    ```bash
    python astrofiler.py
