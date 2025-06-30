@@ -1108,7 +1108,7 @@ class AboutTab(QWidget):
         """)
         
         # Subtitle
-        self.subtitle_label = QLabel("By Gord Tulloch\ngord.tulloch@gmail.com\nJune 27, 2025")
+        self.subtitle_label = QLabel("By Gord Tulloch\nJuly 2025\n\nQuestions to:\nEmail: gord.tulloch@gmail.com\nGithub: https://github.com/gordtulloch/astrofiler-gui\n\nContributions gratefully accepted via\nPaypal to the above email address.")
         subtitle_font = QFont()
         subtitle_font.setPointSize(16)
         self.subtitle_label.setFont(subtitle_font)
