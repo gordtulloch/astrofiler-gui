@@ -185,9 +185,9 @@ These files can loaded into crontab (Linux) or Task Scheduler (Windows) to autom
 
 For example to run LoadRepo.py daily at 10am when imaging operations are complete via cron, do the following in Linux:
 
-`crontab -e
+`crontab -e`
 
-0 10 * * * /home/user/astrofiler/.venv/bin/python /home/user/astrofiler/LoadRepo.py`
+`0 10 * * * /home/user/astrofiler/.venv/bin/python /home/user/astrofiler/LoadRepo.py`
 
 ## 🔧 Configuration Files
 
