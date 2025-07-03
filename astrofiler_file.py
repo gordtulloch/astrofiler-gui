@@ -510,3 +510,113 @@ class fitsProcessing:
             logging.error("Error: File not added to repo due to missing date is "+fileName)
             return None
         return True
+
+    #################################################################################################################
+    ## linkSessions - this function links calibration sessions to light sessions based on telescope and imager    ##
+    ##                matching. For each light session, it finds the most recent calibration sessions for the     ##
+    ##                same telescope and imager combination.                                                        ##
+    #################################################################################################################
+    def linkSessions(self, progress_callback=None):
+        """
+        Link calibration sessions to light sessions based on telescope and imager matching.
+        
+        This function iterates through all light sessions and finds the most recent 
+        calibration sessions (bias, dark, flat) that match the telescope and imager.
+        It then updates the light session records to link them to the appropriate 
+        calibration sessions.
+        
+        Args:
+            progress_callback: Optional callback function for progress updates
+            
+        Returns:
+            list: List of session IDs that were updated
+        """
+        updated_sessions = []
+        
+        try:
+            # Get all light sessions that need calibration linking
+            light_sessions = (fitsSessionModel
+                             .select()
+                             .where(fitsSessionModel.fitsSessionObjectName != 'Bias',
+                                   fitsSessionModel.fitsSessionObjectName != 'Dark',
+                                   fitsSessionModel.fitsSessionObjectName != 'Flat'))
+            
+            total_sessions = len(light_sessions)
+            current_count = 0
+            
+            logging.info(f"Found {total_sessions} light sessions to process for calibration linking")
+            
+            for light_session in light_sessions:
+                current_count += 1
+                
+                # Call progress callback if provided
+                if progress_callback:
+                    should_continue = progress_callback(current_count, total_sessions, 
+                                                      f"Linking: {light_session.fitsSessionObjectName}")
+                    if not should_continue:
+                        logging.info("Session linking cancelled by user")
+                        break
+                
+                session_updated = False
+                
+                # Find most recent bias session for this telescope/imager combination
+                if not light_session.fitsBiasSession:
+                    bias_session = (fitsSessionModel
+                                   .select()
+                                   .where(fitsSessionModel.fitsSessionObjectName == 'Bias',
+                                         fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
+                                         fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
+                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate)
+                                   .order_by(fitsSessionModel.fitsSessionDate.desc())
+                                   .first())
+                    
+                    if bias_session:
+                        light_session.fitsBiasSession = str(bias_session.fitsSessionId)
+                        session_updated = True
+                        logging.info(f"Linked bias session {bias_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                
+                # Find most recent dark session for this telescope/imager combination
+                if not light_session.fitsDarkSession:
+                    dark_session = (fitsSessionModel
+                                   .select()
+                                   .where(fitsSessionModel.fitsSessionObjectName == 'Dark',
+                                         fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
+                                         fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
+                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate)
+                                   .order_by(fitsSessionModel.fitsSessionDate.desc())
+                                   .first())
+                    
+                    if dark_session:
+                        light_session.fitsDarkSession = str(dark_session.fitsSessionId)
+                        session_updated = True
+                        logging.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                
+                # Find most recent flat session for this telescope/imager combination
+                if not light_session.fitsFlatSession:
+                    flat_session = (fitsSessionModel
+                                   .select()
+                                   .where(fitsSessionModel.fitsSessionObjectName == 'Flat',
+                                         fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
+                                         fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
+                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate)
+                                   .order_by(fitsSessionModel.fitsSessionDate.desc())
+                                   .first())
+                    
+                    if flat_session:
+                        light_session.fitsFlatSession = str(flat_session.fitsSessionId)
+                        session_updated = True
+                        logging.info(f"Linked flat session {flat_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                
+                # Save the session if any links were updated
+                if session_updated:
+                    light_session.save()
+                    updated_sessions.append(str(light_session.fitsSessionId))
+                    logging.info(f"Updated light session {light_session.fitsSessionId} with calibration links")
+            
+            logging.info(f"Session linking complete. Updated {len(updated_sessions)} light sessions with calibration links")
+            
+        except Exception as e:
+            logging.error(f"Error in linkSessions: {str(e)}")
+            raise
+        
+        return updated_sessions
