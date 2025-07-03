@@ -339,8 +339,8 @@ class fitsProcessing:
                                                     fitsSessionObjectName=currentFitsFile.fitsFileObject,
                                                     fitsSessionTelescope=currentFitsFile.fitsFileTelescop,
                                                     fitsSessionImager=currentFitsFile.fitsFileInstrument,
-                                                    fitsSessionDate=currentFitsFile.fitsFileDate,
-                                                    fitsBias=None,fitsMasterDark=None,fitsMasterFlat=None)
+                                                    fitsSessionDate=self.dateToDateField(currentFitsFile.fitsFileDate),
+                                                    fitsBiasSession=None,fitsDarkSession=None,fitsFlatSession=None)
                     sessionsCreated.append(currentSessionId)
                     logging.info("New session created for "+str(newFitsSession.fitsSessionId))
                 except IntegrityError as e:
@@ -403,13 +403,15 @@ class fitsProcessing:
                     logging.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
-            if not self.sameDay(biasFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                logging.info("Current date for bias is "+biasFitsFile.fitsFileDate)
-                currDate=biasFitsFile.fitsFileDate.strftime('%Y-%m-%d')
-                uuidStr=uuid.uuid4() # New Session
+            if not self.sameDay(self.dateToString(biasFitsFile.fitsFileDate), currDate):
+                logging.info("Current date for bias is " + str(biasFitsFile.fitsFileDate))
+                currDate = self.dateToString(biasFitsFile.fitsFileDate)
+                uuidStr = uuid.uuid4()  # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
-                                                fitsSessionDate=biasFitsFile.fitsFileDate,
+                                                fitsSessionDate=self.dateToDateField(biasFitsFile.fitsFileDate),
                                                 fitsSessionObjectName='Bias',
+                                                fitsSessionTelescope=biasFitsFile.fitsFileTelescop,
+                                                fitsSessionImager=biasFitsFile.fitsFileInstrument,
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
@@ -432,13 +434,15 @@ class fitsProcessing:
                     logging.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
-            if not self.sameDay(darkFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=darkFitsFile.fitsFileDate.strftime('%Y-%m-%d')
-                logging.info("Current date for dark is "+darkFitsFile.fitsFileDate)
+            if not self.sameDay(self.dateToString(darkFitsFile.fitsFileDate), currDate):
+                currDate = self.dateToString(darkFitsFile.fitsFileDate)
+                logging.info("Current date for dark is " + str(darkFitsFile.fitsFileDate))
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
-                                                fitsSessionDate=darkFitsFile.fitsFileDate,
+                                                fitsSessionDate=self.dateToDateField(darkFitsFile.fitsFileDate),
                                                 fitsSessionObjectName='Dark',
+                                                fitsSessionTelescope=darkFitsFile.fitsFileTelescop,
+                                                fitsSessionImager=darkFitsFile.fitsFileInstrument,
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
@@ -461,13 +465,15 @@ class fitsProcessing:
                     logging.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
-            if not self.sameDay(flatFitsFile.fitsFileDate.strftime('%Y-%m-%d'),currDate):
-                currDate=flatFitsFile.fitsFileDate.strftime('%Y-%m-%d')
-                logging.info("Current date for flat is "+flatFitsFile.fitsFileDate)
+            if not self.sameDay(self.dateToString(flatFitsFile.fitsFileDate), currDate):
+                currDate = self.dateToString(flatFitsFile.fitsFileDate)
+                logging.info("Current date for flat is " + str(flatFitsFile.fitsFileDate))
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
-                                fitsSessionDate=flatFitsFile.fitsFileDate,
+                                fitsSessionDate=self.dateToDateField(flatFitsFile.fitsFileDate),
                                 fitsSessionObjectName='Flat',
+                                fitsSessionTelescope=flatFitsFile.fitsFileTelescop,
+                                fitsSessionImager=flatFitsFile.fitsFileInstrument,
                                 fitsBiasSession=None,
                                 fitsDarkSession=None,
                                 fitsFlatSession=None)
@@ -478,13 +484,6 @@ class fitsProcessing:
             createdCalibrationSessions.append(uuidStr)
         
         return createdCalibrationSessions
-
-    #################################################################################################################
-    ## calibrateFitsFile - this function calibrates a light IMAGETYP using master bias, dark, and flat IMAGETYPs. If     ##
-    ##                     the master IMAGETYPs do not exist, they are created for the Session.                      ##
-    #################################################################################################################
-    def calibrateFitsImage(self,targetFitsFile):
-        pass
 
     #################################################################################################################
     ## - this function submits a fits file to the database                                          ##
@@ -620,3 +619,92 @@ class fitsProcessing:
             raise
         
         return updated_sessions
+
+    #################################################################################################################
+    ## dateToString - helper function to safely convert date to string format                                    ##
+    #################################################################################################################
+    def dateToString(self, date_obj):
+        """Convert date object to string format, handling both datetime objects and strings."""
+        if date_obj is None:
+            return None
+        
+        # If it's already a string, extract date part if it contains time info
+        if isinstance(date_obj, str):
+            # If string contains ISO datetime format, extract just the date part
+            if 'T' in date_obj:
+                return date_obj.split('T')[0]
+            # If string contains space-separated datetime format, extract date part
+            elif ' ' in date_obj and len(date_obj) > 10:
+                # Check if it looks like a datetime (has time part)
+                parts = date_obj.split(' ')
+                if len(parts) >= 2 and ':' in parts[1]:
+                    return parts[0]
+            # If it's already just a date string, return as is
+            return date_obj
+        
+        # If it's a datetime object, format it
+        try:
+            return date_obj.strftime('%Y-%m-%d')
+        except AttributeError:
+            # If it doesn't have strftime, convert to string
+            return str(date_obj)
+
+    #################################################################################################################
+    ## dateToDateField - helper function to safely convert date for database storage                            ##
+    #################################################################################################################
+    def dateToDateField(self, date_obj):
+        """Convert date object to proper format for database DateField storage."""
+        if date_obj is None:
+            return None
+        
+        # If it's already a string in date format, try to parse it first
+        if isinstance(date_obj, str):
+            try:
+                from datetime import datetime
+                
+                # List of possible date formats to try
+                date_formats = [
+                    '%Y-%m-%d',                    # 2023-07-15
+                    '%Y-%m-%dT%H:%M:%S',          # 2023-07-15T03:26:15
+                    '%Y-%m-%dT%H:%M:%S.%f',       # 2023-07-15T03:26:15.438
+                    '%Y-%m-%d %H:%M:%S',          # 2023-07-15 03:26:15
+                    '%Y-%m-%d %H:%M:%S.%f',       # 2023-07-15 03:26:15.438
+                ]
+                
+                # Try each format
+                for fmt in date_formats:
+                    try:
+                        parsed_date = datetime.strptime(date_obj, fmt).date()
+                        return parsed_date
+                    except ValueError:
+                        continue
+                
+                # If none of the formats work, try to extract just the date part
+                if 'T' in date_obj:
+                    date_part = date_obj.split('T')[0]
+                    try:
+                        parsed_date = datetime.strptime(date_part, '%Y-%m-%d').date()
+                        return parsed_date
+                    except ValueError:
+                        pass
+                
+                # If still no luck, try to take first 10 characters
+                try:
+                    parsed_date = datetime.strptime(date_obj[:10], '%Y-%m-%d').date()
+                    return parsed_date
+                except ValueError:
+                    logging.warning(f"Could not parse date string: {date_obj}")
+                    return None
+                    
+            except Exception as e:
+                logging.warning(f"Error parsing date string '{date_obj}': {e}")
+                return None
+        
+        # If it's a datetime object, get the date part
+        try:
+            if hasattr(date_obj, 'date'):
+                return date_obj.date()
+            return date_obj
+        except Exception as e:
+            logging.warning(f"Error converting date object: {e}")
+            return None

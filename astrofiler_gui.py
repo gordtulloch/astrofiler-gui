@@ -2,6 +2,7 @@ import sys
 import os
 import configparser
 import logging
+import datetime
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +25,7 @@ from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 
 # Global version variable
-VERSION = "1.0.0"
+VERSION = "1.0.0 alpha"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
@@ -463,17 +464,13 @@ class SessionsTab(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Session ID", "Object Name", "Date", "Telescope", "Imager", "Bias Date", "Dark Date", "Flat Date"])
+        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager"])
         
         # Set column widths for better display
-        self.sessions_tree.setColumnWidth(0, 250)  # Session ID
-        self.sessions_tree.setColumnWidth(1, 120)  # Object Name
-        self.sessions_tree.setColumnWidth(2, 150)  # Date
-        self.sessions_tree.setColumnWidth(3, 120)  # Telescope
-        self.sessions_tree.setColumnWidth(4, 120)  # Imager
-        self.sessions_tree.setColumnWidth(5, 100)  # Master Bias
-        self.sessions_tree.setColumnWidth(6, 100)  # Master Dark
-        self.sessions_tree.setColumnWidth(7, 100)  # Master Flat
+        self.sessions_tree.setColumnWidth(0, 200)  # Object Name
+        self.sessions_tree.setColumnWidth(1, 150)  # Date
+        self.sessions_tree.setColumnWidth(2, 150)  # Telescope
+        self.sessions_tree.setColumnWidth(3, 150)  # Imager
         
         layout.addLayout(controls_layout)
         layout.addWidget(self.sessions_tree)
@@ -629,34 +626,101 @@ class SessionsTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to update calibration Sessions: {e}")
 
     def load_sessions_data(self):
-        """Load session data from the database and populate the tree widget."""
+        """Load session data from the database and populate the tree widget with hierarchical structure."""
         try:
             self.sessions_tree.clear()
             
             # Query all sessions from the database
             sessions = FitsSessionModel.select()
             
+            # Group sessions by object name
+            sessions_by_object = {}
             for session in sessions:
-                item = QTreeWidgetItem()
+                object_name = session.fitsSessionObjectName or "Unknown"
+                if object_name not in sessions_by_object:
+                    sessions_by_object[object_name] = []
+                sessions_by_object[object_name].append(session)
+            
+            # Create hierarchical tree structure
+            for object_name, object_sessions in sessions_by_object.items():
+                # Create parent item for each object
+                parent_item = QTreeWidgetItem()
+                parent_item.setText(0, object_name)
+                parent_item.setText(1, "")  # No date for parent
+                parent_item.setText(2, "")  # No telescope for parent
+                parent_item.setText(3, "")  # No imager for parent
                 
-                # Populate the tree item with database fields
-                item.setText(0, str(session.fitsSessionId) or "N/A")  # Session ID
-                item.setText(1, session.fitsSessionObjectName or "N/A")  # Object Name
-                item.setText(2, str(session.fitsSessionDate) or "N/A")  # Date
-                item.setText(3, session.fitsSessionTelescope or "N/A")  # Telescope
-                item.setText(4, session.fitsSessionImager or "N/A")  # Imager
-                item.setText(5, session.fitsBiasSession or "N/A")  # Master Bias
-                item.setText(6, session.fitsDarkSession or "N/A")  # Master Dark
-                item.setText(7, session.fitsFlatSession or "N/A")  # Master Flat
+                # Style parent item differently
+                font = parent_item.font(0)
+                font.setBold(True)
+                parent_item.setFont(0, font)
                 
-                # Store the full database record for potential future use
-                item.setData(0, Qt.UserRole, session.fitsSessionId)
+                # Sort sessions by date (newest first)
+                sorted_sessions = sorted(object_sessions, 
+                                       key=lambda x: x.fitsSessionDate if x.fitsSessionDate else datetime.date.min, 
+                                       reverse=True)
                 
-                self.sessions_tree.addTopLevelItem(item)
+                # Add child items for each session
+                for session in sorted_sessions:
+                    child_item = QTreeWidgetItem()
+                    child_item.setText(0, "")  # Empty object name for child (parent shows it)
+                    child_item.setText(1, str(session.fitsSessionDate) if session.fitsSessionDate else "N/A")
+                    child_item.setText(2, session.fitsSessionTelescope or "N/A")
+                    child_item.setText(3, session.fitsSessionImager or "N/A")
+                    
+                    # Store session ID for future use
+                    child_item.setData(0, Qt.UserRole, session.fitsSessionId)
+                    
+                    # Add linked calibration sessions as sub-children for light sessions
+                    if object_name not in ['Bias', 'Dark', 'Flat']:
+                        # This is a light session, show linked calibration sessions
+                        if session.fitsBiasSession:
+                            try:
+                                bias_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsBiasSession)
+                                bias_child = QTreeWidgetItem()
+                                bias_child.setText(0, f"  → Bias")
+                                bias_child.setText(1, str(bias_session.fitsSessionDate) if bias_session.fitsSessionDate else "N/A")
+                                bias_child.setText(2, bias_session.fitsSessionTelescope or "N/A")
+                                bias_child.setText(3, bias_session.fitsSessionImager or "N/A")
+                                child_item.addChild(bias_child)
+                            except FitsSessionModel.DoesNotExist:
+                                pass
+                        
+                        if session.fitsDarkSession:
+                            try:
+                                dark_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsDarkSession)
+                                dark_child = QTreeWidgetItem()
+                                dark_child.setText(0, f"  → Dark")
+                                dark_child.setText(1, str(dark_session.fitsSessionDate) if dark_session.fitsSessionDate else "N/A")
+                                dark_child.setText(2, dark_session.fitsSessionTelescope or "N/A")
+                                dark_child.setText(3, dark_session.fitsSessionImager or "N/A")
+                                child_item.addChild(dark_child)
+                            except FitsSessionModel.DoesNotExist:
+                                pass
+                        
+                        if session.fitsFlatSession:
+                            try:
+                                flat_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsFlatSession)
+                                flat_child = QTreeWidgetItem()
+                                flat_child.setText(0, f"  → Flat")
+                                flat_child.setText(1, str(flat_session.fitsSessionDate) if flat_session.fitsSessionDate else "N/A")
+                                flat_child.setText(2, flat_session.fitsSessionTelescope or "N/A")
+                                flat_child.setText(3, flat_session.fitsSessionImager or "N/A")
+                                child_item.addChild(flat_child)
+                            except FitsSessionModel.DoesNotExist:
+                                pass
+                    
+                    parent_item.addChild(child_item)
                 
+                # Only add parent item if it has children
+                if parent_item.childCount() > 0:
+                    self.sessions_tree.addTopLevelItem(parent_item)
+                    # Collapse parent item by default
+                    parent_item.setExpanded(False)
+            
             count = len(sessions)
             if count > 0:
-                logger.info(f"Loaded {count} sessions into the display")
+                logger.info(f"Loaded {count} sessions into hierarchical display")
             else:
                 logger.info("No sessions found in database")
             
