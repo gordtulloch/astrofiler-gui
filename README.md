@@ -367,16 +367,16 @@ AstroFiler includes a comprehensive test suite to ensure reliability and catch r
 ### Quick Testing
 ```bash
 # Quick validation (fastest, 4 tests)
-.venv/bin/python run_tests.py --validate
+.venv/bin/python test/run_tests.py --validate
 
 # Simple test suite (21 tests, no dependencies)  
-.venv/bin/python run_tests.py --simple
+.venv/bin/python test/run_tests.py --simple
 
 # Full test suite (29 tests, with pytest)
-.venv/bin/python run_tests.py --full
+.venv/bin/python test/run_tests.py --full
 
 # Auto-detect best option
-.venv/bin/python run_tests.py
+.venv/bin/python test/run_tests.py
 ```
 
 ### Test Coverage

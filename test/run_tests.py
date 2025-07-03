@@ -20,7 +20,8 @@ import argparse
 def get_python_executable():
     """Get the appropriate Python executable (prefer virtual environment)."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    venv_python = os.path.join(script_dir, ".venv", "bin", "python")
+    parent_dir = os.path.dirname(script_dir)  # Go up one level from test/ to root
+    venv_python = os.path.join(parent_dir, ".venv", "bin", "python")
     
     if os.path.exists(venv_python):
         return venv_python
@@ -31,7 +32,7 @@ def install_test_requirements():
     """Install test requirements."""
     try:
         python_exe = get_python_executable()
-        subprocess.check_call([python_exe, "-m", "pip", "install", "-r", "test/test_requirements.txt"])
+        subprocess.check_call([python_exe, "-m", "pip", "install", "-r", "test_requirements.txt"])
         return True
     except subprocess.CalledProcessError:
         print("Failed to install test requirements")
@@ -41,7 +42,7 @@ def run_tests_with_pytest():
     """Run tests using pytest."""
     try:
         import pytest
-        return pytest.main(["-v", "test/test_astrofiler.py"])
+        return pytest.main(["-v", "test_astrofiler.py"])
     except ImportError:
         print("pytest not available")
         return False
@@ -50,7 +51,7 @@ def run_simple_tests():
     """Run simple tests without pytest."""
     try:
         python_exe = get_python_executable()
-        result = subprocess.run([python_exe, "test/test_simple.py"], 
+        result = subprocess.run([python_exe, "test_simple.py"], 
                               capture_output=True, text=True)
         print(result.stdout)
         if result.stderr:
@@ -64,7 +65,7 @@ def run_validation():
     """Run quick validation tests."""
     try:
         python_exe = get_python_executable()
-        result = subprocess.run([python_exe, "test/validate_astrofiler.py"], 
+        result = subprocess.run([python_exe, "validate_astrofiler.py"], 
                               capture_output=True, text=True)
         print(result.stdout)
         if result.stderr:
@@ -89,9 +90,13 @@ def main():
     print("AstroFiler Test Runner")
     print("=" * 50)
     
-    # Change to script directory
+    # Change to script directory and set up Python path
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)  # Go up one level from test/ to root
     os.chdir(script_dir)
+    
+    # Add parent directory to Python path so tests can import astrofiler modules
+    sys.path.insert(0, parent_dir)
     
     # Handle command line options
     if args.validate:

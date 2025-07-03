@@ -54,7 +54,7 @@ A comprehensive test suite has been created for the AstroFiler application, prov
 ```
 Validation Script:     ✅ 4/4 tests passed
 Simple Test Suite:     ✅ 21/21 tests passed  
-Full Test Suite:       ✅ 26/29 tests passed
+Full Test Suite:       ✅ 25/29 tests passed
 ```
 
 ## Usage Examples

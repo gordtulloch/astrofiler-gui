@@ -165,7 +165,7 @@ class fitsProcessing:
                 else:
                     newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate)
-            elif hdr["IMAGETYP"]=="Bias":
+            elif "Bias" in hdr["IMAGETYP"]:
                 newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             else:
