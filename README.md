@@ -33,6 +33,7 @@ AstroFiler is a powerful Python application designed for astronomers and astroph
 ### 📈 **Session Management**
 - **Session Detection**: Automatically group lights and calibration images
 - **Session Operations**: Create, update, and clear session groupings
+- **Session Linking**: Automatically link calibration sessions to light sessions
 - **Session Export**: Export Lights and Calibration files ready for SIRIL processing
 
 ## 📖 User Guide
@@ -125,6 +126,7 @@ The application features a tabbed interface with six main sections:
 - **Session Operations**:
   - **Update Lights**: Create sessions for unassigned light frames
   - **Update Calibrations**: Group calibration frames by type and date
+  - **Link Sessions**: Automatically link calibration sessions to light sessions
   - **Clear Sessions**: Remove all session records (files remain unassigned)
 - **Progress Tracking**: Real-time progress with cancellation support
 - **Session Details**: View session IDs, objects, dates, and master calibration assignments
@@ -176,18 +178,75 @@ The application features a tabbed interface with six main sections:
 
 ### Command Line Processing
 
-In the Utilities folder there are the following command line utilities:
+In the commands folder there are the following command line utilities:
 - **LoadRepo.py** - load the repository from the incoming folder
 - **CreateSessions.py** - process any files that do not have sessions applied
 - **LinkSessions.py** - link lights to calibration files 
 
-These files can loaded into crontab (Linux) or Task Scheduler (Windows) to automatically register new images in the repository, combine them into sessions and link the appropriate calibration files. 
+These files can be loaded into crontab (Linux) or Task Scheduler (Windows) to automatically register new images in the repository, combine them into sessions and link the appropriate calibration files. 
 
-For example to run LoadRepo.py daily at 10am when imaging operations are complete via cron, do the following in Linux:
+For example, to run LoadRepo.py daily at 10am when imaging operations are complete via cron, do the following in Linux:
 
 `crontab -e`
 
-`0 10 * * * /home/user/astrofiler/.venv/bin/python /home/user/astrofiler/LoadRepo.py`
+`0 10 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py`
+
+**Complete Workflow Example:**
+```bash
+# Load repository at 10:00 AM  
+0 10 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py
+
+# Create sessions at 10:30 AM (after files are loaded)
+30 10 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CreateSessions.py
+
+# Link sessions at 11:00 AM (after sessions are created)
+0 11 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LinkSessions.py
+```
+
+**LoadRepo.py Usage:**
+```bash
+# Basic usage (loads from source to repository as configured in astrofiler.ini)
+python commands/LoadRepo.py
+
+# Verbose output
+python commands/LoadRepo.py -v
+
+# Sync mode (register files without moving them)
+python commands/LoadRepo.py -n
+
+# Override source folder
+python commands/LoadRepo.py -s /path/to/incoming/fits/files
+
+# Use custom configuration file
+python commands/LoadRepo.py -c /path/to/custom.ini
+```
+
+**CreateSessions.py Usage:**
+```bash
+# Create both light and calibration sessions
+python commands/CreateSessions.py
+
+# Verbose output
+python commands/CreateSessions.py -v
+
+# Only create light sessions
+python commands/CreateSessions.py -l
+
+# Only create calibration sessions
+python commands/CreateSessions.py -C
+```
+
+**LinkSessions.py Usage:**
+```bash
+# Link calibration sessions to light sessions
+python commands/LinkSessions.py
+
+# Verbose output
+python commands/LinkSessions.py -v
+
+# Custom config file
+python commands/LinkSessions.py -c /path/to/config.ini
+```
 
 ## 🔧 Configuration Files
 

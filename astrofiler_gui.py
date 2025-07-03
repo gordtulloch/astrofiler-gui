@@ -452,10 +452,12 @@ class SessionsTab(QWidget):
         controls_layout = QHBoxLayout()
         self.update_button = QPushButton("Update Lights")
         self.update_calibrations_button = QPushButton("Update Calibrations")
+        self.link_sessions_button = QPushButton("Link Sessions")
         self.clear_sessions_button = QPushButton("Clear Sessions")
         
         controls_layout.addWidget(self.update_button)
         controls_layout.addWidget(self.update_calibrations_button)
+        controls_layout.addWidget(self.link_sessions_button)
         controls_layout.addWidget(self.clear_sessions_button)
         controls_layout.addStretch()
         
@@ -479,6 +481,7 @@ class SessionsTab(QWidget):
         # Connect signals
         self.update_button.clicked.connect(self.update_sessions)
         self.update_calibrations_button.clicked.connect(self.update_calibration_sessions)
+        self.link_sessions_button.clicked.connect(self.link_sessions)
         self.clear_sessions_button.clicked.connect(self.clear_sessions)
     
     def update_sessions(self):
@@ -705,6 +708,79 @@ class SessionsTab(QWidget):
         except Exception as e:
             logger.error(f"Error clearing Sessions: {e}")
             QMessageBox.warning(self, "Error", f"Failed to clear Sessions: {e}")
+
+    def link_sessions(self):
+        """Link calibration sessions to light sessions with progress dialog."""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        
+        progress_dialog = None
+        was_cancelled = False
+        
+        try:
+            self.fits_file_handler = fitsProcessing()
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Linking Sessions")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.show()
+            
+            # Progress callback function
+            def update_progress(current, total, session_name):
+                nonlocal was_cancelled
+                
+                try:
+                    # Don't check cancellation if already cancelled
+                    if was_cancelled:
+                        logging.info("Already cancelled, returning False")
+                        return False
+                    
+                    # Check if dialog was cancelled before updating
+                    if progress_dialog and progress_dialog.wasCanceled():
+                        logging.info("User cancelled session linking")
+                        was_cancelled = True
+                        return False  # Signal to stop processing
+                    
+                    if progress_dialog:
+                        progress = int((current / total) * 100) if total > 0 else 0
+                        progress_dialog.setValue(progress)
+                        progress_dialog.setLabelText(f"Linking sessions {current}/{total}: {session_name}")
+                        QApplication.processEvents()  # Keep UI responsive
+                        
+                        # Check again after processing events
+                        if progress_dialog.wasCanceled():
+                            logging.info("User cancelled session linking during update")
+                            was_cancelled = True
+                            return False
+                    
+                    return True  # Continue processing
+                except Exception as e:
+                    logging.error(f"Error in progress callback: {e}")
+                    return True  # Continue on callback errors
+            
+            # Run the processing with progress callback
+            updated_sessions = self.fits_file_handler.linkSessions(progress_callback=update_progress)
+            
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
+            # Check if operation was cancelled or completed normally
+            if was_cancelled:
+                QMessageBox.information(self, "Cancelled", "Session linking was cancelled by user.")
+                logging.info("Session linking was cancelled by user")
+            else:
+                self.load_sessions_data()
+                QMessageBox.information(self, "Success", f"Session linking completed successfully! Updated {len(updated_sessions)} light sessions with calibration links.")
+                logging.info("Session linking completed successfully")
+                
+        except Exception as e:
+            if progress_dialog:
+                progress_dialog.close()
+            logger.error(f"Error linking sessions: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to link sessions: {e}")
 
 class MergeTab(QWidget):
     def __init__(self):
