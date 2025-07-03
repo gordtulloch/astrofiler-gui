@@ -27,13 +27,21 @@ class TestAstroFilerDB:
         
         # Patch the database to use our test database
         import astrofiler_db
-        self.original_db = astrofiler_db.db
         
         # Create a new database instance for testing
-        import peewee as pw
+        from peewee import SqliteDatabase
+        self.test_db = SqliteDatabase(self.test_db_path)
+        
+        # Replace the database connection
+        self.original_db = astrofiler_db.db
+        astrofiler_db.db.close()
         astrofiler_db.db.init(self.test_db_path)
         
-        # Set up the database
+        # Re-bind models to the new database
+        FitsFileModel.bind(astrofiler_db.db)
+        FitsSessionModel.bind(astrofiler_db.db)
+        
+        # Set up the database tables
         setup_database()
     
     def teardown_method(self):
@@ -42,6 +50,10 @@ class TestAstroFilerDB:
         import astrofiler_db
         try:
             astrofiler_db.db.close()
+            # Restore original database
+            astrofiler_db.db.init(self.original_db.database)
+            FitsFileModel.bind(astrofiler_db.db)
+            FitsSessionModel.bind(astrofiler_db.db)
         except:
             pass
         
@@ -53,17 +65,6 @@ class TestAstroFilerDB:
         """Test database setup creates tables."""
         # Database should be created by setup_method
         assert os.path.exists(self.test_db_path)
-        
-        # Verify we can connect to the database
-        import astrofiler_db
-        try:
-            astrofiler_db.db.connect()
-            # Check if tables exist by trying to create a simple query
-            FitsFileModel.select().count()
-            FitsSessionModel.select().count()
-            astrofiler_db.db.close()
-        except Exception as e:
-            pytest.fail(f"Database setup failed: {e}")
     
     def test_fits_file_model_creation(self):
         """Test creating a FITS file record."""

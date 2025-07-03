@@ -464,13 +464,16 @@ class SessionsTab(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager"])
+        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager", "Bias Date", "Dark Date", "Flat Date"])
         
         # Set column widths for better display
         self.sessions_tree.setColumnWidth(0, 200)  # Object Name
         self.sessions_tree.setColumnWidth(1, 150)  # Date
         self.sessions_tree.setColumnWidth(2, 150)  # Telescope
         self.sessions_tree.setColumnWidth(3, 150)  # Imager
+        self.sessions_tree.setColumnWidth(4, 120)  # Bias Date
+        self.sessions_tree.setColumnWidth(5, 120)  # Dark Date
+        self.sessions_tree.setColumnWidth(6, 120)  # Flat Date
         
         layout.addLayout(controls_layout)
         layout.addWidget(self.sessions_tree)
@@ -641,14 +644,18 @@ class SessionsTab(QWidget):
                     sessions_by_object[object_name] = []
                 sessions_by_object[object_name].append(session)
             
-            # Create hierarchical tree structure
-            for object_name, object_sessions in sessions_by_object.items():
+            # Create hierarchical tree structure, sorted by object name
+            for object_name in sorted(sessions_by_object.keys()):
+                object_sessions = sessions_by_object[object_name]
                 # Create parent item for each object
                 parent_item = QTreeWidgetItem()
                 parent_item.setText(0, object_name)
                 parent_item.setText(1, "")  # No date for parent
                 parent_item.setText(2, "")  # No telescope for parent
                 parent_item.setText(3, "")  # No imager for parent
+                parent_item.setText(4, "")  # No bias date for parent
+                parent_item.setText(5, "")  # No dark date for parent
+                parent_item.setText(6, "")  # No flat date for parent
                 
                 # Style parent item differently
                 font = parent_item.font(0)
@@ -668,6 +675,42 @@ class SessionsTab(QWidget):
                     child_item.setText(2, session.fitsSessionTelescope or "N/A")
                     child_item.setText(3, session.fitsSessionImager or "N/A")
                     
+                    # Initialize calibration date columns
+                    bias_date = "N/A"
+                    dark_date = "N/A"
+                    flat_date = "N/A"
+                    
+                    # For light sessions, get calibration dates
+                    if object_name not in ['Bias', 'Dark', 'Flat']:
+                        # Get bias date
+                        if session.fitsBiasSession:
+                            try:
+                                bias_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsBiasSession)
+                                bias_date = str(bias_session.fitsSessionDate) if bias_session.fitsSessionDate else "N/A"
+                            except FitsSessionModel.DoesNotExist:
+                                bias_date = "N/A"
+                        
+                        # Get dark date
+                        if session.fitsDarkSession:
+                            try:
+                                dark_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsDarkSession)
+                                dark_date = str(dark_session.fitsSessionDate) if dark_session.fitsSessionDate else "N/A"
+                            except FitsSessionModel.DoesNotExist:
+                                dark_date = "N/A"
+                        
+                        # Get flat date
+                        if session.fitsFlatSession:
+                            try:
+                                flat_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsFlatSession)
+                                flat_date = str(flat_session.fitsSessionDate) if flat_session.fitsSessionDate else "N/A"
+                            except FitsSessionModel.DoesNotExist:
+                                flat_date = "N/A"
+                    
+                    # Set the calibration date columns
+                    child_item.setText(4, bias_date)
+                    child_item.setText(5, dark_date)
+                    child_item.setText(6, flat_date)
+                    
                     # Store session ID for future use
                     child_item.setData(0, Qt.UserRole, session.fitsSessionId)
                     
@@ -682,6 +725,9 @@ class SessionsTab(QWidget):
                                 bias_child.setText(1, str(bias_session.fitsSessionDate) if bias_session.fitsSessionDate else "N/A")
                                 bias_child.setText(2, bias_session.fitsSessionTelescope or "N/A")
                                 bias_child.setText(3, bias_session.fitsSessionImager or "N/A")
+                                bias_child.setText(4, "")  # Empty for sub-child
+                                bias_child.setText(5, "")  # Empty for sub-child
+                                bias_child.setText(6, "")  # Empty for sub-child
                                 child_item.addChild(bias_child)
                             except FitsSessionModel.DoesNotExist:
                                 pass
@@ -694,6 +740,9 @@ class SessionsTab(QWidget):
                                 dark_child.setText(1, str(dark_session.fitsSessionDate) if dark_session.fitsSessionDate else "N/A")
                                 dark_child.setText(2, dark_session.fitsSessionTelescope or "N/A")
                                 dark_child.setText(3, dark_session.fitsSessionImager or "N/A")
+                                dark_child.setText(4, "")  # Empty for sub-child
+                                dark_child.setText(5, "")  # Empty for sub-child
+                                dark_child.setText(6, "")  # Empty for sub-child
                                 child_item.addChild(dark_child)
                             except FitsSessionModel.DoesNotExist:
                                 pass
@@ -706,6 +755,9 @@ class SessionsTab(QWidget):
                                 flat_child.setText(1, str(flat_session.fitsSessionDate) if flat_session.fitsSessionDate else "N/A")
                                 flat_child.setText(2, flat_session.fitsSessionTelescope or "N/A")
                                 flat_child.setText(3, flat_session.fitsSessionImager or "N/A")
+                                flat_child.setText(4, "")  # Empty for sub-child
+                                flat_child.setText(5, "")  # Empty for sub-child
+                                flat_child.setText(6, "")  # Empty for sub-child
                                 child_item.addChild(flat_child)
                             except FitsSessionModel.DoesNotExist:
                                 pass
