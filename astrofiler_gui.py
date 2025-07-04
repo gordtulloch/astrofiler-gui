@@ -713,55 +713,7 @@ class SessionsTab(QWidget):
                     
                     # Store session ID for future use
                     child_item.setData(0, Qt.UserRole, session.fitsSessionId)
-                    
-                    # Add linked calibration sessions as sub-children for light sessions
-                    if object_name not in ['Bias', 'Dark', 'Flat']:
-                        # This is a light session, show linked calibration sessions
-                        if session.fitsBiasSession:
-                            try:
-                                bias_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsBiasSession)
-                                bias_child = QTreeWidgetItem()
-                                bias_child.setText(0, f"  → Bias")
-                                bias_child.setText(1, str(bias_session.fitsSessionDate) if bias_session.fitsSessionDate else "N/A")
-                                bias_child.setText(2, bias_session.fitsSessionTelescope or "N/A")
-                                bias_child.setText(3, bias_session.fitsSessionImager or "N/A")
-                                bias_child.setText(4, "")  # Empty for sub-child
-                                bias_child.setText(5, "")  # Empty for sub-child
-                                bias_child.setText(6, "")  # Empty for sub-child
-                                child_item.addChild(bias_child)
-                            except FitsSessionModel.DoesNotExist:
-                                pass
-                        
-                        if session.fitsDarkSession:
-                            try:
-                                dark_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsDarkSession)
-                                dark_child = QTreeWidgetItem()
-                                dark_child.setText(0, f"  → Dark")
-                                dark_child.setText(1, str(dark_session.fitsSessionDate) if dark_session.fitsSessionDate else "N/A")
-                                dark_child.setText(2, dark_session.fitsSessionTelescope or "N/A")
-                                dark_child.setText(3, dark_session.fitsSessionImager or "N/A")
-                                dark_child.setText(4, "")  # Empty for sub-child
-                                dark_child.setText(5, "")  # Empty for sub-child
-                                dark_child.setText(6, "")  # Empty for sub-child
-                                child_item.addChild(dark_child)
-                            except FitsSessionModel.DoesNotExist:
-                                pass
-                        
-                        if session.fitsFlatSession:
-                            try:
-                                flat_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsFlatSession)
-                                flat_child = QTreeWidgetItem()
-                                flat_child.setText(0, f"  → Flat")
-                                flat_child.setText(1, str(flat_session.fitsSessionDate) if flat_session.fitsSessionDate else "N/A")
-                                flat_child.setText(2, flat_session.fitsSessionTelescope or "N/A")
-                                flat_child.setText(3, flat_session.fitsSessionImager or "N/A")
-                                flat_child.setText(4, "")  # Empty for sub-child
-                                flat_child.setText(5, "")  # Empty for sub-child
-                                flat_child.setText(6, "")  # Empty for sub-child
-                                child_item.addChild(flat_child)
-                            except FitsSessionModel.DoesNotExist:
-                                pass
-                    
+                                        
                     parent_item.addChild(child_item)
                 
                 # Only add parent item if it has children
@@ -911,7 +863,7 @@ class MergeTab(QWidget):
         main_layout = QVBoxLayout(main_widget)
         
         # Title
-        title_label = QLabel("Object Name Merge Tool")
+        title_label = QLabel("Object Name Merge/Rename Tool")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -921,7 +873,7 @@ class MergeTab(QWidget):
         
         # Instructions
         instructions = QLabel(
-            "This tool allows you to merge object names in the database. "
+            "This tool allows you to merge or rename object names in the database. "
             "All instances of the 'From' object name will be changed to the 'To' object name. "
             "Optionally, you can also rename the actual files on disk."
         )
@@ -930,7 +882,7 @@ class MergeTab(QWidget):
         main_layout.addWidget(instructions)
         
         # Form group
-        form_group = QGroupBox("Merge Settings")
+        form_group = QGroupBox("Merge/Rename Settings")
         form_layout = QFormLayout(form_group)
         
         # From field
@@ -954,7 +906,7 @@ class MergeTab(QWidget):
         # Buttons
         button_layout = QHBoxLayout()
         self.preview_button = QPushButton("Preview Changes")
-        self.merge_button = QPushButton("Execute Merge")
+        self.merge_button = QPushButton("Execute Merge/Rename")
         self.clear_button = QPushButton("Clear Fields")
         
         self.preview_button.clicked.connect(self.preview_merge)
