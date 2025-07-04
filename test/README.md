@@ -8,26 +8,16 @@ From the main project directory, run tests using:
 
 ```bash
 # Quick validation (fastest, 4 tests)
-.venv/bin/python test/run_tests.py --validate
+.venv/bin/python run_tests.py --validate
 
 # Simple test suite (21 tests, no dependencies)
-.venv/bin/python test/run_tests.py --simple
+.venv/bin/python run_tests.py --simple
 
 # Full test suite (29 tests, requires pytest)
-.venv/bin/python test/run_tests.py --full
+.venv/bin/python run_tests.py --full
 
 # Auto-detect (default behavior)
-.venv/bin/python test/run_tests.py
-```
-
-Or from within the test folder:
-
-```bash
-cd test
-../.venv/bin/python run_tests.py --validate
-../.venv/bin/python run_tests.py --simple
-../.venv/bin/python run_tests.py --full
-../.venv/bin/python run_tests.py
+.venv/bin/python run_tests.py
 ```
 
 ## Test Files
@@ -55,13 +45,13 @@ You can also run tests directly from within the test folder:
 cd test/
 
 # Run validation
-../.venv/bin/python validate_astrofiler.py
+.venv/bin/python validate_astrofiler.py
 
 # Run simple tests  
-../.venv/bin/python test_simple.py
+.venv/bin/python test_simple.py
 
 # Run with pytest (requires installation)
-../.venv/bin/python -m pytest test_astrofiler.py -v
+.venv/bin/python -m pytest test_astrofiler.py -v
 ```
 
 ## Test Results
@@ -74,4 +64,4 @@ cd test/
 
 ## Integration
 
-The test folder is organized to keep all test artifacts separate from the main application code. All tests can be run using the `run_tests.py` script located in the test folder.
+The test folder is organized to keep all test artifacts separate from the main application code while maintaining easy access through the main `run_tests.py` script in the project root.
