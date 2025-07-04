@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
-                               QMessageBox, QScrollArea)
+                               QMessageBox, QScrollArea, QDialog)
 from PySide6.QtGui import QPixmap, QFont, QTextCursor
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
@@ -200,6 +200,9 @@ class ImagesTab(QWidget):
         from PySide6.QtWidgets import QProgressDialog
         from PySide6.QtCore import Qt
         
+        progress_dialog = None
+        was_cancelled = False
+        
         try:
             self.fits_file_handler = fitsProcessing()
             
@@ -212,30 +215,54 @@ class ImagesTab(QWidget):
             
             def update_progress(current, total, filename):
                 """Progress callback function"""
-                if progress_dialog.wasCanceled():
-                    return False  # Signal to stop processing
-                
-                progress = int((current / total) * 100) if total > 0 else 0
-                progress_dialog.setValue(progress)
-                progress_dialog.setLabelText(f"Syncing {current}/{total}: {os.path.basename(filename)}")
-                QApplication.processEvents()  # Keep UI responsive
-                return True  # Continue processing
+                nonlocal was_cancelled
+                try:
+                    # Don't check cancellation if already cancelled
+                    if was_cancelled:
+                        logging.info("Already cancelled, returning False")
+                        return False
+                    
+                    # Check if dialog was cancelled before updating
+                    if progress_dialog and progress_dialog.wasCanceled():
+                        logging.info("User cancelled the repository synchronization")
+                        was_cancelled = True
+                        return False  # Signal to stop processing
+                    
+                    if progress_dialog:
+                        progress = int((current / total) * 100) if total > 0 else 0
+                        progress_dialog.setValue(progress)
+                        progress_dialog.setLabelText(f"Syncing {current}/{total}: {os.path.basename(filename)}")
+                        QApplication.processEvents()  # Keep UI responsive
+                        
+                        # Check again after processing events
+                        if progress_dialog.wasCanceled():
+                            logging.info("User cancelled the repository synchronization during update")
+                            was_cancelled = True
+                            return False
+                    
+                    return True  # Continue processing
+                except Exception as e:
+                    logging.error(f"Error in progress callback: {e}")
+                    return True  # Continue on callback errors
             
             # Run the processing with progress callback
             registered_files = self.fits_file_handler.registerFitsImages(moveFiles=False, progress_callback=update_progress)
             
             # Close progress dialog
-            progress_dialog.close()
+            if progress_dialog:
+                progress_dialog.close()
             
-            # Check if operation was cancelled
-            if progress_dialog.wasCanceled():
+            # Check if operation was cancelled or completed normally
+            if was_cancelled:
                 QMessageBox.information(self, "Cancelled", "Repository synchronization was cancelled by user.")
+                logging.info("Repository synchronization was cancelled by user")
             else:
                 self.load_fits_data()
                 QMessageBox.information(self, "Success", f"Repository synchronized successfully! Processed {len(registered_files)} files.")
+                logging.info("Repository synchronization completed successfully")
                 
         except Exception as e:
-            if 'progress_dialog' in locals():
+            if progress_dialog:
                 progress_dialog.close()
             logger.error(f"Error syncing repository: {e}")
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
@@ -483,6 +510,7 @@ class SessionsTab(QWidget):
         self.update_calibrations_button.clicked.connect(self.update_calibration_sessions)
         self.link_sessions_button.clicked.connect(self.link_sessions)
         self.clear_sessions_button.clicked.connect(self.clear_sessions)
+        self.sessions_tree.itemDoubleClicked.connect(self.on_session_double_click)
     
     def update_sessions(self):
         """Update light sessions by running createLightSessions method with progress dialog."""
@@ -898,1018 +926,179 @@ class SessionsTab(QWidget):
             logger.error(f"Error linking sessions: {e}")
             QMessageBox.warning(self, "Error", f"Failed to link sessions: {e}")
 
-class MergeTab(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        
-        # Main content area
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
-        
-        # Title
-        title_label = QLabel("Object Name Merge Tool")
-        title_font = QFont()
-        title_font.setPointSize(16)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
-        
-        # Instructions
-        instructions = QLabel(
-            "This tool allows you to merge object names in the database. "
-            "All instances of the 'From' object name will be changed to the 'To' object name. "
-            "Optionally, you can also rename the actual files on disk."
-        )
-        instructions.setWordWrap(True)
-        instructions.setStyleSheet("padding: 10px; background-color: rgba(255, 255, 255, 0.1); border-radius: 5px; margin: 10px 0px;")
-        main_layout.addWidget(instructions)
-        
-        # Form group
-        form_group = QGroupBox("Merge Settings")
-        form_layout = QFormLayout(form_group)
-        
-        # From field
-        self.from_field = QLineEdit()
-        self.from_field.setPlaceholderText("Enter the object name to change from...")
-        form_layout.addRow("From Object:", self.from_field)
-        
-        # To field
-        self.to_field = QLineEdit()
-        self.to_field.setPlaceholderText("Enter the object name to change to...")
-        form_layout.addRow("To Object:", self.to_field)
-        
-        # Change filenames checkbox
-        self.change_filenames = QCheckBox("Change filenames on disk")
-        self.change_filenames.setChecked(True)  # Default to true
-        self.change_filenames.setToolTip("If checked, actual files on disk will be renamed to match the new object name")
-        form_layout.addRow("", self.change_filenames)
-        
-        main_layout.addWidget(form_group)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        self.preview_button = QPushButton("Preview Changes")
-        self.merge_button = QPushButton("Execute Merge")
-        self.clear_button = QPushButton("Clear Fields")
-        
-        self.preview_button.clicked.connect(self.preview_merge)
-        self.merge_button.clicked.connect(self.execute_merge)
-        self.clear_button.clicked.connect(self.clear_fields)
-        
-        button_layout.addWidget(self.preview_button)
-        button_layout.addWidget(self.merge_button)
-        button_layout.addWidget(self.clear_button)
-        button_layout.addStretch()
-        
-        main_layout.addLayout(button_layout)
-        
-        # Results area
-        self.results_text = QTextEdit()
-        self.results_text.setReadOnly(True)
-        self.results_text.setMaximumHeight(200)
-        self.results_text.setPlaceholderText("Results and status messages will appear here...")
-        main_layout.addWidget(self.results_text)
-        
-        main_layout.addStretch()
-        layout.addWidget(main_widget)
-    
-    def clear_fields(self):
-        """Clear all input fields and results"""
-        self.from_field.clear()
-        self.to_field.clear()
-        self.change_filenames.setChecked(False)
-        self.results_text.clear()
-    
-    def preview_merge(self):
-        """Preview what changes would be made without executing them"""
-        from_object = self.from_field.text().strip()
-        to_object = self.to_field.text().strip()
-        
-        if not from_object or not to_object:
-            QMessageBox.warning(self, "Input Error", "Please enter both From and To object names.")
-            return
-        
-        if from_object == to_object:
-            QMessageBox.information(self, "No Changes", "From and To object names are identical. No changes needed.")
-            return
-        
+    def on_session_double_click(self, item, column):
+        """Handle double-click on session tree items."""
         try:
-            # Check if From object exists
-            from_files = FitsFileModel.select().where(FitsFileModel.fitsFileObject == from_object)
-            from_count = len(from_files)
-            
-            if from_count == 0:
-                QMessageBox.warning(self, "Object Not Found", f"No files found with object name '{from_object}'.")
+            # Check if this is a parent item (object name)
+            if item.parent() is None:
+                # This is a top-level item (object name), don't do anything
                 return
             
-            # Check if To object exists
-            to_files = FitsFileModel.select().where(FitsFileModel.fitsFileObject == to_object)
-            to_count = len(to_files)
-            
-            # Display preview
-            preview_text = f"PREVIEW - No changes will be made:\n\n"
-            preview_text += f"From Object: '{from_object}' ({from_count} files)\n"
-            preview_text += f"To Object: '{to_object}' ({to_count} files)\n\n"
-            
-            if to_count > 0:
-                preview_text += f"After merge: '{to_object}' will have {from_count + to_count} files total\n\n"
-            else:
-                preview_text += f"After merge: '{to_object}' will be created with {from_count} files\n\n"
-            
-            preview_text += "Database changes:\n"
-            preview_text += f"- {from_count} FITS file records will have their object name changed\n"
-            
-            if self.change_filenames.isChecked():
-                preview_text += f"- {from_count} files on disk will be renamed\n"
-            else:
-                preview_text += "- Files on disk will NOT be renamed\n"
-            
-            self.results_text.setPlainText(preview_text)
-            
-        except Exception as e:
-            logger.error(f"Error during preview: {e}")
-            QMessageBox.warning(self, "Preview Error", f"Error during preview: {e}")
-    
-    def execute_merge(self):
-        """Execute the actual merge operation"""
-        from_object = self.from_field.text().strip()
-        to_object = self.to_field.text().strip()
-        change_files = self.change_filenames.isChecked()
-        
-        if not from_object or not to_object:
-            QMessageBox.warning(self, "Input Error", "Please enter both From and To object names.")
-            return
-        
-        if from_object == to_object:
-            QMessageBox.information(self, "No Changes", "From and To object names are identical. No changes needed.")
-            return
-        
-        # Confirm with user
-        msg = f"Are you sure you want to merge '{from_object}' into '{to_object}'?\n\n"
-        if change_files:
-            msg += "This will change database records AND rename files on disk.\n"
-        else:
-            msg += "This will change database records only.\n"
-        msg += "\nThis action cannot be undone!"
-        
-        reply = QMessageBox.question(self, "Confirm Merge", msg, 
-                                   QMessageBox.Yes | QMessageBox.No, 
-                                   QMessageBox.No)
-        
-        if reply != QMessageBox.Yes:
-            return
-        
-        try:
-            # Get files to merge
-            files_to_merge = FitsFileModel.select().where(FitsFileModel.fitsFileObject == from_object)
-            
-            if len(files_to_merge) == 0:
-                QMessageBox.warning(self, "Object Not Found", f"No files found with object name '{from_object}'.")
+            # Check if this is a session item or a sub-item (calibration detail)
+            if item.parent().parent() is None:
+                # This is a session item (child of object name)
+                session_id = item.data(0, Qt.UserRole)
+                if session_id:
+                    self.show_session_export_dialog(session_id)
                 return
             
-            merged_count = 0
-            renamed_count = 0
-            errors = []
-            
-            result_text = f"MERGE EXECUTION RESULTS:\n\n"
-            result_text += f"From: '{from_object}' → To: '{to_object}'\n"
-            result_text += f"Change filenames: {'Yes' if change_files else 'No'}\n\n"
-            
-            for fits_file in files_to_merge:
-                try:
-                    old_filename = fits_file.fitsFileName
-                    
-                    # Update database record
-                    fits_file.fitsFileObject = to_object
-                    
-                    # If changing filenames, update the filename in database and rename actual file
-                    if change_files and old_filename and os.path.exists(old_filename):
-                        # Create new filename by replacing the object name
-                        path_parts = old_filename.split('/')
-                        old_file_part = path_parts[-1]  # Get just the filename
-                        
-                        # Replace the from_object with to_object in the filename
-                        new_file_part = old_file_part.replace(from_object.replace(" ", "_"), to_object.replace(" ", "_"))
-                        new_filename = '/'.join(path_parts[:-1] + [new_file_part])
-                        
-                        # Rename the actual file
-                        if old_filename != new_filename:
-                            if not os.path.exists(new_filename):
-                                os.rename(old_filename, new_filename)
-                                fits_file.fitsFileName = new_filename
-                                renamed_count += 1
-                            else:
-                                errors.append(f"Cannot rename {old_filename} - target file already exists")
-                    
-                    fits_file.save()
-                    merged_count += 1
-                    
-                except Exception as e:
-                    errors.append(f"Error processing {fits_file.fitsFileName}: {str(e)}")
-            
-            # Update Sessions that reference the old object name
-            Sessions_updated = 0
-            try:
-                from astrofiler_db import fitsSession as FitsSessionModel
-                Sessions = FitsSessionModel.select().where(FitsSessionModel.fitsSessionObjectName == from_object)
-                for Session in Sessions:
-                    Session.fitsSessionObjectName = to_object
-                    Session.save()
-                    Sessions_updated += 1
-            except Exception as e:
-                errors.append(f"Error updating Sessions: {str(e)}")
-            
-            result_text += f"Database records updated: {merged_count}\n"
-            if change_files:
-                result_text += f"Files renamed on disk: {renamed_count}\n"
-            result_text += f"Sessions updated: {Sessions_updated}\n"
-            
-            if errors:
-                result_text += f"\nErrors encountered:\n"
-                for error in errors:
-                    result_text += f"- {error}\n"
-            
-            result_text += f"\nMerge completed successfully!"
-            
-            self.results_text.setPlainText(result_text)
-            
-            # Show success message
-            if errors:
-                QMessageBox.warning(self, "Merge Completed with Errors", 
-                                  f"Merge completed but {len(errors)} errors occurred. Check results for details.")
-            else:
-                QMessageBox.information(self, "Merge Successful", 
-                                      f"Successfully merged {merged_count} records from '{from_object}' to '{to_object}'.")
-            
-            logger.info(f"Object merge completed: {from_object} → {to_object}, {merged_count} records, {renamed_count} files renamed")
+            # This is a sub-item (calibration detail), check if it represents a file
+            # For now, we'll implement file opening in a future update
+            # as sub-items show calibration session details, not individual files
             
         except Exception as e:
-            error_msg = f"Error during merge execution: {e}"
-            logger.error(error_msg)
-            QMessageBox.critical(self, "Merge Error", error_msg)
-            self.results_text.setPlainText(f"ERROR: {error_msg}")
+            logger.error(f"Error handling session double-click: {e}")
+            QMessageBox.warning(self, "Error", f"Error handling double-click: {e}")
 
-
-class ConfigTab(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.init_ui()
-        self.load_settings()  # Load settings after UI is initialized
-    
-    def init_ui(self):
-        layout = QVBoxLayout(self)
+    def show_session_export_dialog(self, session_id):
+        """Show dialog for exporting session files."""
+        from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
+                                     QFormLayout, QLineEdit, QPushButton, 
+                                     QComboBox, QFileDialog, QLabel)
         
-        # General settings group
-        general_group = QGroupBox("General Settings")
-        general_layout = QFormLayout(general_group)
-        
-        # Source Path with directory picker
-        source_path_layout = QHBoxLayout()
-        self.source_path = QLineEdit()
-        self.source_path_button = QPushButton("Browse...")
-        self.source_path_button.clicked.connect(self.browse_source_path)
-        source_path_layout.addWidget(self.source_path)
-        source_path_layout.addWidget(self.source_path_button)
-        
-        # Repository Path with directory picker
-        repo_path_layout = QHBoxLayout()
-        self.repo_path = QLineEdit()
-        self.repo_path_button = QPushButton("Browse...")
-        self.repo_path_button.clicked.connect(self.browse_repo_path)
-        repo_path_layout.addWidget(self.repo_path)
-        repo_path_layout.addWidget(self.repo_path_button)
-        
-        # Refresh on Startup (default checked)
-        self.refresh_on_startup = QCheckBox()
-        self.refresh_on_startup.setChecked(True)  # Default to true
-        
-        general_layout.addRow("Source Path:", source_path_layout)
-        general_layout.addRow("Repository Path:", repo_path_layout)
-        general_layout.addRow("Refresh on Startup:", self.refresh_on_startup)
-        
-        # Display settings group
-        display_group = QGroupBox("Display Settings")
-        display_layout = QFormLayout(display_group)
-        
-        self.theme = QComboBox()
-        self.theme.addItems(["Light", "Dark", "Auto"])
-        self.theme.setCurrentText("Dark")  # Default to dark theme
-        self.font_size = QSpinBox()
-        self.font_size.setMinimum(8)
-        self.font_size.setMaximum(24)
-        self.font_size.setValue(10)
-        self.grid_size = QSpinBox()
-        self.grid_size.setMinimum(16)
-        self.grid_size.setMaximum(256)
-        self.grid_size.setValue(64)
-        
-        display_layout.addRow("Theme:", self.theme)
-        display_layout.addRow("Font Size:", self.font_size)
-        display_layout.addRow("Grid Icon Size:", self.grid_size)
-        
-        # External Tools settings group
-        tools_group = QGroupBox("External Tools")
-        tools_layout = QFormLayout(tools_group)
-        
-        # FITS Viewer Path with file picker
-        fits_viewer_layout = QHBoxLayout()
-        self.fits_viewer_path = QLineEdit()
-        self.fits_viewer_path.setPlaceholderText("Select external FITS file viewer...")
-        self.fits_viewer_button = QPushButton("Browse...")
-        self.fits_viewer_button.clicked.connect(self.browse_fits_viewer)
-        fits_viewer_layout.addWidget(self.fits_viewer_path)
-        fits_viewer_layout.addWidget(self.fits_viewer_button)
-        
-        tools_layout.addRow("FITS Viewer:", fits_viewer_layout)
-        
-        # Action buttons
-        button_layout = QHBoxLayout()
-        self.save_button = QPushButton("Save Settings")
-        self.reset_button = QPushButton("Reset to Defaults")
-        self.import_button = QPushButton("Import Config")
-        self.export_button = QPushButton("Export Config")
-        
-        button_layout.addWidget(self.save_button)
-        button_layout.addWidget(self.reset_button)
-        button_layout.addWidget(self.import_button)
-        button_layout.addWidget(self.export_button)
-        button_layout.addStretch()
-        
-        layout.addWidget(general_group)
-        layout.addWidget(display_group)
-        layout.addWidget(tools_group)
-        layout.addStretch()
-        layout.addLayout(button_layout)
-        
-        # Connect signals
-        self.save_button.clicked.connect(self.save_settings)
-        self.reset_button.clicked.connect(self.reset_settings)
-        self.theme.currentTextChanged.connect(self.on_theme_changed)
-    
-    def save_settings(self):
-        """Save configuration settings to astrofiler.ini file"""
         try:
-            config = configparser.ConfigParser()
+            # Get session details
+            session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session_id)
             
-            # Get paths and ensure they end with a slash
-            source_path = self.source_path.text().strip()
-            repo_path = self.repo_path.text().strip()
+            # Create dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Export Session: {session.fitsSessionObjectName}")
+            dialog.setModal(True)
+            dialog.resize(500, 200)
             
-            # Automatically append slash if not present
-            if source_path and not source_path.endswith('/') and not source_path.endswith('\\'):
-                source_path += '/'
-            if repo_path and not repo_path.endswith('/') and not repo_path.endswith('\\'):
-                repo_path += '/'
+            layout = QVBoxLayout(dialog)
+            form_layout = QFormLayout()
             
-            # Update the GUI fields with the corrected paths
-            self.source_path.setText(source_path)
-            self.repo_path.setText(repo_path)
+            # Session info
+            info_label = QLabel(f"Object: {session.fitsSessionObjectName or 'N/A'}\n"
+                               f"Date: {session.fitsSessionDate or 'N/A'}\n"
+                               f"Telescope: {session.fitsSessionTelescope or 'N/A'}\n"
+                               f"Imager: {session.fitsSessionImager or 'N/A'}")
+            layout.addWidget(info_label)
             
-            # Save the path settings directly to DEFAULT section
-            config['DEFAULT'] = {
-                'source': source_path,
-                'repo': repo_path,
-                'refresh_on_startup': str(self.refresh_on_startup.isChecked()),
-                'theme': self.theme.currentText(),
-                'font_size': str(self.font_size.value()),
-                'grid_size': str(self.grid_size.value()),
-                'fits_viewer_path': self.fits_viewer_path.text().strip()
-            }
+            # Destination folder
+            dest_layout = QHBoxLayout()
+            self.dest_folder_edit = QLineEdit()
+            self.dest_folder_edit.setPlaceholderText("Select destination folder...")
+            browse_button = QPushButton("Browse")
+            browse_button.clicked.connect(lambda: self.browse_destination_folder(dialog))
+            dest_layout.addWidget(self.dest_folder_edit)
+            dest_layout.addWidget(browse_button)
+            form_layout.addRow("Destination Folder:", dest_layout)
             
-            # Write to the astrofiler.ini file
-            with open('astrofiler.ini', 'w') as configfile:
-                config.write(configfile)
+            # Format selection (currently only FITS)
+            format_combo = QComboBox()
+            format_combo.addItem("FITS")
+            # Future formats can be added here: format_combo.addItem("TIFF")
+            form_layout.addRow("Format:", format_combo)
             
-            logger.info("Settings saved to astrofiler.ini!")
-            QMessageBox.information(self, "Success", "Settings saved successfully!")
+            # Folder structure selection
+            structure_combo = QComboBox()
+            structure_combo.addItem("Siril")
+            # Future structures can be added here: structure_combo.addItem("PixInsight")
+            form_layout.addRow("Folder Structure:", structure_combo)
             
+            layout.addLayout(form_layout)
+            
+            # Buttons
+            button_layout = QHBoxLayout()
+            ok_button = QPushButton("OK")
+            cancel_button = QPushButton("Cancel")
+            
+            ok_button.clicked.connect(lambda: self.export_session_files(
+                dialog, session_id, self.dest_folder_edit.text(), 
+                format_combo.currentText(), structure_combo.currentText()))
+            cancel_button.clicked.connect(dialog.reject)
+            
+            button_layout.addWidget(ok_button)
+            button_layout.addWidget(cancel_button)
+            layout.addLayout(button_layout)
+            
+            dialog.exec()
+            
+        except FitsSessionModel.DoesNotExist:
+            QMessageBox.warning(self, "Error", "Session not found in database.")
         except Exception as e:
-            logger.error(f"Error saving settings: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to save settings: {e}")
-    
-    def load_settings(self):
-        """Load configuration settings from astrofiler.ini file"""
+            logger.error(f"Error showing session export dialog: {e}")
+            QMessageBox.warning(self, "Error", f"Error showing export dialog: {e}")
+
+    def browse_destination_folder(self, dialog):
+        """Browse for destination folder."""
+        folder = QFileDialog.getExistingDirectory(dialog, "Select Destination Folder")
+        if folder:
+            self.dest_folder_edit.setText(folder)
+
+    def export_session_files(self, dialog, session_id, dest_folder, format_type, structure_type):
+        """Export session files to destination folder."""
+        import os
+        import shutil
+        
+        if not dest_folder:
+            QMessageBox.warning(dialog, "Error", "Please select a destination folder.")
+            return
+            
+        if not os.path.exists(dest_folder):
+            QMessageBox.warning(dialog, "Error", "Destination folder does not exist.")
+            return
+            
         try:
-            config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            # Get session details
+            session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session_id)
             
-            # Load path settings
-            if config.has_option('DEFAULT', 'source'):
-                self.source_path.setText(config.get('DEFAULT', 'source'))
-            
-            if config.has_option('DEFAULT', 'repo'):
-                self.repo_path.setText(config.get('DEFAULT', 'repo'))
-            
-            # Load additional settings with defaults
-            if config.has_option('DEFAULT', 'refresh_on_startup'):
-                refresh_value = config.getboolean('DEFAULT', 'refresh_on_startup')
-                self.refresh_on_startup.setChecked(refresh_value)
-            
-            if config.has_option('DEFAULT', 'theme'):
-                theme_value = config.get('DEFAULT', 'theme')
-                index = self.theme.findText(theme_value)
-                if index >= 0:
-                    self.theme.setCurrentIndex(index)
-            
-            if config.has_option('DEFAULT', 'font_size'):
-                font_size = config.getint('DEFAULT', 'font_size')
-                self.font_size.setValue(font_size)
-            
-            if config.has_option('DEFAULT', 'grid_size'):
-                grid_size = config.getint('DEFAULT', 'grid_size')
-                self.grid_size.setValue(grid_size)
-            
-            if config.has_option('DEFAULT', 'fits_viewer_path'):
-                fits_viewer_path = config.get('DEFAULT', 'fits_viewer_path')
-                self.fits_viewer_path.setText(fits_viewer_path)
+            # Create folder structure based on selected type
+            if structure_type == "Siril":
+                folders = ["lights", "darks", "biases", "flats", "process"]
+                for folder in folders:
+                    folder_path = os.path.join(dest_folder, folder)
+                    os.makedirs(folder_path, exist_ok=True)
                 
-            logger.info("Settings loaded from astrofiler.ini!")
-            
-        except Exception as e:
-            logger.error(f"Error loading settings: {e}")
-            # Use default values if loading fails
-            self.reset_settings()
-    
-    def reset_settings(self):
-        # Reset to default values
-        self.source_path.setText("")
-        self.repo_path.setText("")
-        self.refresh_on_startup.setChecked(True)
-        self.theme.setCurrentIndex(0)
-        self.font_size.setValue(10)
-        self.grid_size.setValue(64)
-        self.fits_viewer_path.setText("")
-    
-    def browse_source_path(self):
-        """Open directory dialog for source path"""
-        directory = QFileDialog.getExistingDirectory(
-            self, 
-            "Select Source Directory", 
-            self.source_path.text() or os.path.expanduser("~")
-        )
-        if directory:
-            self.source_path.setText(directory)
-    
-    def browse_repo_path(self):
-        """Open directory dialog for repository path"""
-        directory = QFileDialog.getExistingDirectory(
-            self, 
-            "Select Repository Directory", 
-            self.repo_path.text() or os.path.expanduser("~")
-        )
-        if directory:
-            self.repo_path.setText(directory)
-    
-    def browse_fits_viewer(self):
-        """Open file dialog for FITS viewer executable"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select FITS Viewer Executable",
-            self.fits_viewer_path.text() or os.path.expanduser("~"),
-            "Executable Files (*.exe);;All Files (*)" if os.name == 'nt' else "All Files (*)"
-        )
-        if file_path:
-            self.fits_viewer_path.setText(file_path)
-    
-    def on_theme_changed(self, theme_name):
-        """Handle theme changes"""
-        app = QApplication.instance()
-        if theme_name == "Dark":
-            app.setStyleSheet(get_dark_stylesheet())
-        elif theme_name == "Light":
-            app.setStyleSheet(get_light_stylesheet())
-        elif theme_name == "Auto":
-            # Use system theme detection
-            if detect_system_theme():
-                app.setStyleSheet(get_dark_stylesheet())
-            else:
-                app.setStyleSheet(get_light_stylesheet())
-
-
-class AboutTab(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Create a container widget that will hold both background and text
-        self.container = QWidget()
-        self.container.setMinimumSize(800, 600)
-        
-        # Create background label
-        self.background_label = QLabel(self.container)
-        self.background_label.setAlignment(Qt.AlignCenter)
-        self.background_label.setGeometry(0, 0, 800, 600)
-        
-        # Create text overlay widget with transparent background
-        self.text_widget = QWidget(self.container)
-        self.text_widget.setStyleSheet("background-color: transparent;")
-        text_layout = QVBoxLayout(self.text_widget)
-        text_layout.setAlignment(Qt.AlignCenter)
-        
-        # Main title
-        self.title_label = QLabel(f"AstroFiler Version {VERSION}")
-        title_font = QFont()
-        title_font.setPointSize(32)
-        title_font.setBold(True)
-        self.title_label.setFont(title_font)
-        self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                background-color: rgba(0, 0, 0, 120);
-                padding: 20px;
-                border-radius: 10px;
-                margin: 10px;
-            }
-        """)
-        
-        # Subtitle
-        self.subtitle_label = QLabel("By Gord Tulloch\nJuly 2025\n\nQuestions to:\nEmail: gord.tulloch@gmail.com\nGithub: https://github.com/gordtulloch/astrofiler-gui\n\nContributions gratefully accepted via\nPaypal to the above email address.")
-        subtitle_font = QFont()
-        subtitle_font.setPointSize(16)
-        self.subtitle_label.setFont(subtitle_font)
-        self.subtitle_label.setAlignment(Qt.AlignCenter)
-        self.subtitle_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                background-color: rgba(0, 0, 0, 120);
-                padding: 15px;
-                border-radius: 10px;
-                margin: 10px;
-            }
-        """)
-        
-        text_layout.addWidget(self.title_label)
-        text_layout.addWidget(self.subtitle_label)
-        
-        layout.addWidget(self.container)
-        
-        # Set default background first
-        self.set_default_background()
-        
-        # Then try to load the actual background image
-        self.load_background_image()
-    
-    def load_background_image(self):
-        """Load the background image from local images/background.jpg file"""
-        try:
-            # Try to load the image from the images directory
-            pixmap = QPixmap("images/background.jpg")
-            
-            if not pixmap.isNull():
-                # Get the size of the container
-                container_size = self.container.size()
-                if container_size.width() <= 0:
-                    # Use minimum size if widget not yet properly sized
-                    container_size = self.container.minimumSize()
-                
-                # Scale the image to fit the container while maintaining aspect ratio
-                scaled_pixmap = pixmap.scaled(
-                    container_size, 
-                    Qt.KeepAspectRatioByExpanding, 
-                    Qt.SmoothTransformation
+                # Get light files for this session
+                light_files = FitsFileModel.select().where(
+                    FitsFileModel.fitsFileSession == session_id,
+                    FitsFileModel.fitsFileType == "Light"
                 )
                 
-                self.background_label.setPixmap(scaled_pixmap)
-                self.background_label.setScaledContents(True)
-                logger.info("Successfully loaded images/background.jpg as background")
-            else:
-                # If image loading fails, use the default background
-                logger.warning("Failed to load images/background.jpg, using default background")
-                self.set_default_background()
-        except Exception as e:
-            logger.error(f"Error loading background image: {e}")
-            self.set_default_background()
-    
-    def set_default_background(self):
-        """Set a default starry background if image download fails"""
-        self.background_label.setStyleSheet("""
-            QLabel {
-                background: qradialgradient(cx:0.5, cy:0.5, radius:1.0,
-                    stop:0 #1a1a2e, stop:0.5 #16213e, stop:1.0 #0f0f23);
-            }
-        """)
-    
-    def resizeEvent(self, event):
-        """Handle resize events to reposition text overlay and reload background"""
-        super().resizeEvent(event)
-        if hasattr(self, 'container') and hasattr(self, 'background_label') and hasattr(self, 'text_widget'):
-            # Resize container and its children
-            container_size = self.container.size()
-            self.background_label.resize(container_size)
-            self.text_widget.resize(container_size)
-            # Reload the background image with new size
-            self.load_background_image()
-    
-    def showEvent(self, event):
-        """Handle show events to ensure background loads when tab is visible"""
-        super().showEvent(event)
-        # Load background when tab becomes visible and ensure text positioning
-        if hasattr(self, 'container') and hasattr(self, 'background_label') and hasattr(self, 'text_widget'):
-            container_size = self.container.size()
-            self.background_label.resize(container_size)
-            self.text_widget.resize(container_size)
-        self.load_background_image()
-
-
-class LogTab(QWidget):
-    """Tab for displaying and managing log files"""
-    
-    def __init__(self):
-        super().__init__()
-        self.log_file_path = "astrofiler.log"
-        self.init_ui()
-        self.load_log_content()
-    
-    def init_ui(self):
-        """Initialize the log tab UI"""
-        layout = QVBoxLayout(self)
-        
-        # Controls layout with Clear button
-        controls_layout = QHBoxLayout()
-        self.clear_button = QPushButton("Clear")
-        self.clear_button.clicked.connect(self.clear_log)
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.clicked.connect(self.load_log_content)
-        
-        controls_layout.addWidget(self.clear_button)
-        controls_layout.addWidget(self.refresh_button)
-        controls_layout.addStretch()  # Push buttons to the left
-        
-        # Log display area with horizontal and vertical scrolling
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setLineWrapMode(QTextEdit.NoWrap)  # Enable horizontal scrolling
-        self.log_text.setFont(QFont("Courier", 9))  # Monospace font for logs
-        
-        layout.addLayout(controls_layout)
-        layout.addWidget(self.log_text)
-    
-    def load_log_content(self):
-        """Load the current log file content into the text area"""
-        try:
-            if os.path.exists(self.log_file_path):
-                with open(self.log_file_path, 'r', encoding='utf-8') as file:
-                    content = file.read()
-                    self.log_text.setPlainText(content)
-                    # Scroll to the bottom to show latest entries
-                    cursor = self.log_text.textCursor()
-                    cursor.movePosition(QTextCursor.MoveOperation.End)
-                    self.log_text.setTextCursor(cursor)
-                    logger.info("Log content loaded successfully")
-            else:
-                self.log_text.setPlainText("Log file not found.")
-                logger.warning(f"Log file not found: {self.log_file_path}")
-        except Exception as e:
-            self.log_text.setPlainText(f"Error loading log file: {str(e)}")
-            logger.error(f"Error loading log file: {e}")
-    
-    def clear_log(self):
-        """Clear the log file by deleting it and creating an empty file"""
-        try:
-            if os.path.exists(self.log_file_path):
-                os.remove(self.log_file_path)
-            
-            # Create an empty log file
-            with open(self.log_file_path, 'w', encoding='utf-8') as file:
-                pass
-            
-            # Clear the display
-            self.log_text.clear()
-            
-            # Log this action (this will recreate the log file with the first entry)
-            logger.info("Log file cleared by user")
-            
-            # Reload to show the new log entry
-            self.load_log_content()
-            
-            QMessageBox.information(self, "Success", "Log file cleared successfully!")
-            
-        except Exception as e:
-            logger.error(f"Error clearing log file: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to clear log file: {str(e)}")
-
-
-class DuplicatesTab(QWidget):
-    """Tab for managing duplicate FITS files"""
-    
-    def __init__(self):
-        super().__init__()
-        self.init_ui()
-        self.refresh_duplicates()
-    
-    def init_ui(self):
-        """Initialize the duplicates tab UI"""
-        layout = QVBoxLayout(self)
-        
-        # Title and description
-        title_label = QLabel("Duplicate Files Management")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
-        layout.addWidget(title_label)
-        
-        description = QLabel("Files with identical content (same hash) are considered duplicates.\n"
-                           "You can safely remove all but one copy of each duplicate group.")
-        description.setAlignment(Qt.AlignCenter)
-        description.setStyleSheet("margin: 5px;")
-        layout.addWidget(description)
-        
-        # Refresh button
-        refresh_button = QPushButton("Refresh Duplicates")
-        refresh_button.clicked.connect(self.refresh_duplicates)
-        layout.addWidget(refresh_button)
-        
-        # Duplicates tree widget
-        self.duplicates_tree = QTreeWidget()
-        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type"])
-        self.duplicates_tree.setAlternatingRowColors(True)
-        self.duplicates_tree.setSortingEnabled(True)
-        layout.addWidget(self.duplicates_tree)
-        
-        # Button layout
-        button_layout = QHBoxLayout()
-        
-        # Delete duplicates button
-        self.delete_button = QPushButton("Delete Duplicate Files")
-        self.delete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: white;
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:disabled {
-                background-color: #666666;
-                color: #cccccc;
-            }
-        """)
-        self.delete_button.clicked.connect(self.delete_duplicates)
-        self.delete_button.setEnabled(False)
-        
-        # Info label
-        self.info_label = QLabel("No duplicates found.")
-        self.info_label.setAlignment(Qt.AlignLeft)
-        
-        button_layout.addWidget(self.info_label)
-        button_layout.addStretch()
-        button_layout.addWidget(self.delete_button)
-        
-        layout.addLayout(button_layout)
-    
-    def refresh_duplicates(self):
-        """Refresh the list of duplicate files"""
-        from astrofiler_db import fitsFile
-        
-        self.duplicates_tree.clear()
-        duplicate_groups = []
-        
-        try:
-            # Query for files with duplicate hashes
-            query = """
-            SELECT fitsFileHash, COUNT(*) as count
-            FROM fitsfile 
-            WHERE fitsFileHash IS NOT NULL 
-            GROUP BY fitsFileHash 
-            HAVING COUNT(*) > 1
-            """
-            
-            import sqlite3
-            conn = sqlite3.connect('astrofiler.db')
-            cursor = conn.cursor()
-            cursor.execute(query)
-            duplicate_hashes = cursor.fetchall()
-            conn.close()
-            
-            total_duplicates = 0
-            
-            for hash_value, count in duplicate_hashes:
-                # Get all files with this hash
-                files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value)
-                
-                if files_with_hash.count() > 1:
-                    # Create a parent item for this duplicate group
-                    group_item = QTreeWidgetItem(self.duplicates_tree)
-                    group_item.setText(0, f"Duplicate Group (Hash: {hash_value[:16]}...)")
-                    group_item.setText(1, f"{count} files")
-                    group_item.setExpanded(True)
-                    
-                    # Style the group item
-                    font = group_item.font(0)
-                    font.setBold(True)
-                    for i in range(6):
-                        group_item.setFont(i, font)
-                    
-                    # Add individual files as children
-                    for fits_file in files_with_hash:
-                        file_item = QTreeWidgetItem(group_item)
-                        file_item.setText(0, os.path.basename(fits_file.fitsFileName or "Unknown"))
-                        file_item.setText(1, fits_file.fitsFileObject or "Unknown")
-                        file_item.setText(2, str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "Unknown")
-                        file_item.setText(3, fits_file.fitsFileFilter or "Unknown")
-                        file_item.setText(4, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "Unknown")
-                        file_item.setText(5, fits_file.fitsFileType or "Unknown")
-                        
-                        # Store the file object for deletion
-                        file_item.setData(0, Qt.UserRole, fits_file)
-                    
-                    duplicate_groups.append((hash_value, count))
-                    total_duplicates += count - 1  # count - 1 because we keep one copy
-            
-            # Update info label and button state
-            if duplicate_groups:
-                self.info_label.setText(f"Found {len(duplicate_groups)} duplicate groups with {total_duplicates} files that can be removed.")
-                self.delete_button.setEnabled(True)
-            else:
-                self.info_label.setText("No duplicate files found.")
-                self.delete_button.setEnabled(False)
-                
-        except Exception as e:
-            logging.error(f"Error refreshing duplicates: {str(e)}")
-            self.info_label.setText(f"Error loading duplicates: {str(e)}")
-            self.delete_button.setEnabled(False)
-    
-    def delete_duplicates(self):
-        """Delete duplicate files, keeping only one copy of each"""
-        from astrofiler_db import fitsFile
-        
-        # Confirm deletion
-        reply = QMessageBox.question(
-            self, 
-            "Confirm Deletion", 
-            "This will permanently delete duplicate files from both the database and disk.\n"
-            "One copy of each file will be kept. This action cannot be undone.\n\n"
-            "Are you sure you want to continue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply != QMessageBox.Yes:
-            return
-        
-        deleted_count = 0
-        error_count = 0
-        
-        try:
-            # Get all duplicate groups
-            query = """
-            SELECT fitsFileHash
-            FROM fitsfile 
-            WHERE fitsFileHash IS NOT NULL 
-            GROUP BY fitsFileHash 
-            HAVING COUNT(*) > 1
-            """
-            
-            import sqlite3
-            conn = sqlite3.connect('astrofiler.db')
-            cursor = conn.cursor()
-            cursor.execute(query)
-            duplicate_hashes = [row[0] for row in cursor.fetchall()]
-            conn.close()
-            
-            for hash_value in duplicate_hashes:
-                # Get all files with this hash, ordered by date (keep the earliest)
-                files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value).order_by(fitsFile.fitsFileDate)
-                files_list = list(files_with_hash)
-                
-                if len(files_list) > 1:
-                    # Keep the first file, delete the rest
-                    files_to_delete = files_list[1:]
-                    
-                    for fits_file in files_to_delete:
+                # Create symbolic links for light files
+                for file_record in light_files:
+                    if file_record.fitsFileName and os.path.exists(file_record.fitsFileName):
+                        dest_path = os.path.join(dest_folder, "lights", os.path.basename(file_record.fitsFileName))
                         try:
-                            # Delete the physical file if it exists
-                            if fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
-                                os.remove(fits_file.fitsFileName)
-                                logging.info(f"Deleted file: {fits_file.fitsFileName}")
-                            
-                            # Delete from database
-                            fits_file.delete_instance()
-                            deleted_count += 1
-                            
-                        except Exception as e:
-                            logging.error(f"Error deleting file {fits_file.fitsFileName}: {str(e)}")
-                            error_count += 1
+                            os.symlink(file_record.fitsFileName, dest_path)
+                        except FileExistsError:
+                            pass  # Link already exists
+                
+                # Handle calibration files
+                calibration_sessions = []
+                if session.fitsBiasSession:
+                    calibration_sessions.append((session.fitsBiasSession, "Bias", "biases"))
+                if session.fitsDarkSession:
+                    calibration_sessions.append((session.fitsDarkSession, "Dark", "darks"))
+                if session.fitsFlatSession:
+                    calibration_sessions.append((session.fitsFlatSession, "Flat", "flats"))
+                
+                for cal_session_id, cal_type, folder_name in calibration_sessions:
+                    cal_files = FitsFileModel.select().where(
+                        FitsFileModel.fitsFileSession == cal_session_id,
+                        FitsFileModel.fitsFileType == cal_type
+                    )
+                    
+                    for file_record in cal_files:
+                        if file_record.fitsFileName and os.path.exists(file_record.fitsFileName):
+                            dest_path = os.path.join(dest_folder, folder_name, os.path.basename(file_record.fitsFileName))
+                            try:
+                                os.symlink(file_record.fitsFileName, dest_path)
+                            except FileExistsError:
+                                pass  # Link already exists
+                
+                dialog.accept()
+                QMessageBox.information(self, "Success", 
+                                      f"Session files exported successfully to:\n{dest_folder}\n\n"
+                                      f"Folder structure: {structure_type}\n"
+                                      f"Format: {format_type}")
             
-            # Show results
-            if error_count == 0:
-                QMessageBox.information(
-                    self, 
-                    "Deletion Complete", 
-                    f"Successfully deleted {deleted_count} duplicate files."
-                )
             else:
-                QMessageBox.warning(
-                    self, 
-                    "Deletion Complete with Errors", 
-                    f"Deleted {deleted_count} files successfully.\n"
-                    f"Failed to delete {error_count} files. Check the log for details."
-                )
-            
-            # Refresh the display
-            self.refresh_duplicates()
-            
+                QMessageBox.warning(dialog, "Error", f"Folder structure '{structure_type}' not implemented yet.")
+                
         except Exception as e:
-            logging.error(f"Error during duplicate deletion: {str(e)}")
-            QMessageBox.critical(
-                self, 
-                "Deletion Error", 
-                f"An error occurred during deletion: {str(e)}"
-            )
-
-
-class AstroFilerGUI(QWidget):
-    """Main GUI class that encapsulates the entire AstroFiler application interface"""
-    
-    def __init__(self):
-        super().__init__()
-        self.current_theme = "Dark"
-        self.init_ui()
-        self.apply_initial_theme()
-    
-    def init_ui(self):
-        """Initialize the user interface"""
-        # Set window properties
-        self.setWindowTitle("AstroFiler - Astronomy File Management Tool")
-        self.resize(1000, 700)
-        
-        # Main layout
-        layout = QVBoxLayout(self)
-        
-        # Create tab widget
-        self.tab_widget = QTabWidget()
-        
-        # Create and add tabs
-        self.images_tab = ImagesTab()
-        self.sessions_tab = SessionsTab()
-        self.merge_tab = MergeTab()
-        self.config_tab = ConfigTab()
-        self.duplicates_tab = DuplicatesTab()
-        self.log_tab = LogTab()
-        self.about_tab = AboutTab()
-        
-        self.tab_widget.addTab(self.images_tab, "Images")
-        self.tab_widget.addTab(self.sessions_tab, "Sessions")
-        self.tab_widget.addTab(self.merge_tab, "Merge")
-        self.tab_widget.addTab(self.duplicates_tab, "Duplicates")
-        self.tab_widget.addTab(self.log_tab, "Log")
-        self.tab_widget.addTab(self.config_tab, "Config")
-        self.tab_widget.addTab(self.about_tab, "About")
-        # Set the default tab to be the Images tab
-        self.tab_widget.setCurrentWidget(self.images_tab)
-        
-        layout.addWidget(self.tab_widget)
-    
-    def apply_initial_theme(self):
-        """Apply dark theme as default"""
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        self.config_tab.theme.setCurrentText("Dark")
-    
-    def get_config_settings(self):
-        """Get current configuration settings from the GUI"""
-        return {
-            'source_path': self.config_tab.source_path.text(),
-            'repo_path': self.config_tab.repo_path.text(),
-            'refresh_on_startup': self.config_tab.refresh_on_startup.isChecked(),
-            'theme': self.config_tab.theme.currentText(),
-            'font_size': self.config_tab.font_size.value(),
-            'grid_size': self.config_tab.grid_size.value()
-        }
-    
-    def set_config_settings(self, settings):
-        """Set configuration settings in the GUI"""
-        if 'source_path' in settings:
-            self.config_tab.source_path.setText(settings['source_path'])
-        if 'repo_path' in settings:
-            self.config_tab.repo_path.setText(settings['repo_path'])
-        if 'refresh_on_startup' in settings:
-            self.config_tab.refresh_on_startup.setChecked(settings['refresh_on_startup'])
-        if 'theme' in settings:
-            index = self.config_tab.theme.findText(settings['theme'])
-            if index >= 0:
-                self.config_tab.theme.setCurrentIndex(index)
-        if 'font_size' in settings:
-            self.config_tab.font_size.setValue(settings['font_size'])
-        if 'grid_size' in settings:
-            self.config_tab.grid_size.setValue(settings['grid_size'])
-
-    def showEvent(self, event):
-        """Handle show events to reload data when tab regains focus"""
-        super().showEvent(event)
-        # Reload FITS data when tab becomes visible
-        self.images_tab.load_fits_data()
+            logger.error(f"Error exporting session files: {e}")
+            QMessageBox.warning(dialog, "Error", f"Failed to export session files: {e}")
