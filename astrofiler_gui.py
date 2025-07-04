@@ -641,8 +641,9 @@ class SessionsTab(QWidget):
                     sessions_by_object[object_name] = []
                 sessions_by_object[object_name].append(session)
             
-            # Create hierarchical tree structure
-            for object_name, object_sessions in sessions_by_object.items():
+            # Create hierarchical tree structure - sort objects alphabetically
+            for object_name in sorted(sessions_by_object.keys()):
+                object_sessions = sessions_by_object[object_name]
                 # Create parent item for each object
                 parent_item = QTreeWidgetItem()
                 parent_item.setText(0, object_name)
