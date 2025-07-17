@@ -327,13 +327,15 @@ class fitsProcessing:
                     logging.info("Session creation cancelled by user")
                     break
             
-            logging.info("Current Object is "+currentFitsFile.fitsFileObject)
+            logging.info("Current Object is "+currentFitsFile.fitsFileObject+" with date "+str(currentFitsFile.fitsFileDate))
             logging.info("Processing "+str(currentFitsFile.fitsFileName))
 
-            # If the object name has changed, create a new session
-            if str(currentFitsFile.fitsFileObject) != currentObject:
+            # If the object name or date has changed, create a new session
+            if str(currentFitsFile.fitsFileObject) != currentObject or self.dateToDateField(currentFitsFile.fitsFileDate) != currentDate:
                 # Create a new fitsSession record
                 currentSessionId = uuid.uuid4()
+                currentDate = self.dateToDateField(currentFitsFile.fitsFileDate)
+
                 try:
                     newFitsSession=fitsSessionModel.create(fitsSessionId=currentSessionId,
                                                     fitsSessionObjectName=currentFitsFile.fitsFileObject,
