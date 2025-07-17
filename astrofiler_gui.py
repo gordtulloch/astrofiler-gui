@@ -3,6 +3,7 @@ import os
 import configparser
 import logging
 import datetime
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -13,14 +14,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import necessary PySide6 modules
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, 
                                QHBoxLayout, QWidget, QTabWidget, QListWidget, 
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
-                               QMessageBox, QScrollArea)
-from PySide6.QtGui import QPixmap, QFont, QTextCursor
+                               QMessageBox, QScrollArea,QMenu,QProgressDialog)
+from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 
@@ -472,6 +473,10 @@ class SessionsTab(QWidget):
         self.sessions_tree.setColumnWidth(2, 150)  # Telescope
         self.sessions_tree.setColumnWidth(3, 150)  # Imager
         
+        # Enable context menu
+        self.sessions_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sessions_tree.customContextMenuRequested.connect(self.show_context_menu)
+
         layout.addLayout(controls_layout)
         layout.addWidget(self.sessions_tree)
         
@@ -481,6 +486,201 @@ class SessionsTab(QWidget):
         self.link_sessions_button.clicked.connect(self.link_sessions)
         self.clear_sessions_button.clicked.connect(self.clear_sessions)
     
+    def show_context_menu(self, position):
+        """Show context menu for session items"""
+        item = self.sessions_tree.itemAt(position)
+        if not item:
+            return
+            
+        # Determine if this is a session item (child of an object)
+        parent = item.parent()
+        if not parent:
+            return  # This is a parent item (object name), not a session
+            
+        # Create context menu
+        context_menu = QMenu(self)
+        checkout_action = context_menu.addAction("Check out")
+        # don't really need delete action but maybe later
+        #delete_action = context_menu.addAction("Delete Session")
+
+        # Show the menu and get the selected action
+        action = context_menu.exec_(self.sessions_tree.viewport().mapToGlobal(position))
+        
+        if action == checkout_action:
+            logging.info(f"Checking out session: {item.text(0)} on {item.text(1)}")
+            self.checkout_session(item)
+        #elif action == delete_action:
+        #    logging.info(f"Deleting session: {item.text(0)} on {item.text(1)}")
+        #    self.delete_session(item)
+
+    def checkout_session(self, item):
+        """Create symbolic links for session files in a Siril-friendly format"""
+        try:
+            # Get session information from the tree item
+            session_date = item.text(1)
+            object_name = item.parent().text(0)
+            
+            # Get the session from database
+            session = FitsSessionModel.select().where(
+                (FitsSessionModel.fitsSessionObjectName == object_name) & 
+                (FitsSessionModel.fitsSessionDate == session_date)
+            ).first()
+            
+            if not session:
+                QMessageBox.warning(self, "Error", f"Session not found in database")
+                return
+            else:
+                logging.info(f"Found session: {object_name} on {session_date}")
+            # Get light files
+            light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
+            
+            # Get calibration files if this is a light session
+            dark_files = []
+            bias_files = []
+            flat_files = []
+            
+            if object_name not in ['Bias', 'Dark', 'Flat']:
+                # Get linked calibration files
+                if session.fitsBiasSession:
+                    bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
+                    logging.info(f"Found {bias_files.count()} bias files")
+                    
+                if session.fitsDarkSession:
+                    dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
+                    logging.info(f"Found {dark_files.count()} dark files")
+                    
+                if session.fitsFlatSession:
+                    flat_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsFlatSession)
+                    logging.info(f"Found {flat_files.count()} flat files")
+            
+            # Combine all files for progress tracking
+            all_files = list(light_files) + list(dark_files) + list(bias_files) + list(flat_files)
+            total_files = len(all_files)
+            
+            if total_files == 0:
+                QMessageBox.information(self, "Information", "No files found for this session")
+                return
+            logging.info(f"Found {total_files} files for session {object_name} on {session_date}")
+
+            # Ask user for destination directory
+            dest_dir = QFileDialog.getExistingDirectory(
+                self, 
+                "Select Destination Directory",
+                os.path.expanduser("~"),
+                QFileDialog.ShowDirsOnly
+            )
+            
+            if not dest_dir:
+                return  # User cancelled
+                    
+            # Create destination directory structure
+            session_dir = os.path.join(dest_dir, f"{object_name}_{session_date.replace(':', '-')}")
+            light_dir = os.path.join(session_dir, "lights")
+            dark_dir = os.path.join(session_dir, "darks")
+            flat_dir = os.path.join(session_dir, "flats")
+            bias_dir = os.path.join(session_dir, "bias")
+            process_dir = os.path.join(session_dir, "process")
+            
+            # Create directories if they don't exist
+            os.makedirs(light_dir, exist_ok=True)
+            os.makedirs(dark_dir, exist_ok=True)
+            os.makedirs(flat_dir, exist_ok=True)
+            os.makedirs(bias_dir, exist_ok=True)
+            os.makedirs(process_dir, exist_ok=True)
+            logging.info(f"Created session directory structure at {session_dir}")  
+
+            # Progress dialog
+            progress = QProgressDialog("Creating symbolic links...", "Cancel", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModal)
+
+            # Create symbolic links for each file
+            created_links = 0
+            for i, file in enumerate(all_files):
+                # Update progress
+                progress.setValue(int(i * 100 / total_files))
+                if progress.wasCanceled():
+                    break
+                    
+                # Determine destination directory based on file type
+                if "LIGHT" in file.fitsFileType.upper():
+                    dest_folder = light_dir
+                elif "DARK" in file.fitsFileType.upper():
+                    dest_folder = dark_dir
+                elif "FLAT" in file.fitsFileType.upper():
+                    dest_folder = flat_dir
+                elif "BIAS" in file.fitsFileType.upper():
+                    dest_folder = bias_dir
+                else:
+                    logging.warning(f"Unknown file type for {file.fitsFileName}, skipping")
+                    continue  # Skip unknown file types
+                    
+                # Extract filename from path
+                logging.info(f"Processing file: {file.fitsFileName} of type {file.fitsFileType}")
+                filename = os.path.basename(file.fitsFileName)
+                
+                # Create destination path
+                dest_path = os.path.join(dest_folder, filename)
+                
+                # Create symbolic link based on platform
+                try:
+                    if os.path.exists(dest_path):
+                        continue  # Skip if link already exists
+                        
+                    if sys.platform == "win32":
+                        # Windows - use directory junction or symlink (requires admin privileges)
+                        import subprocess
+                        subprocess.run(["mklink", dest_path, file.fitsFileName], shell=True)
+                    else:
+                        # Mac/Linux - use symbolic link
+                        os.symlink(file.fitsFileName, dest_path)
+                    created_links += 1
+                    logging.info(f"Created link for {file.fitsFileName} -> {dest_path}")
+                except Exception as e:
+                    logging.error(f"Error creating link for {file.fitsFileName}: {e}")
+            
+            # Close progress dialog
+            progress.setValue(100)
+            
+            # Create a simple Siril script
+            script_path = os.path.join(session_dir, "process.ssf")
+            with open(script_path, "w") as f:
+                f.write(f"# Siril processing script for {object_name} {session_date}\n")
+                f.write("requires 1.0.0\n\n")
+                f.write("# Convert to .fit files\n")
+                f.write("cd lights\n")
+                f.write("convert fits\n")
+                f.write("cd ../darks\n")
+                f.write("convert fits\n")
+                f.write("cd ../flats\n")
+                f.write("convert fits\n")
+                f.write("cd ../bias\n")
+                f.write("convert fits\n")
+                f.write("cd ..\n\n")
+                f.write("# Stack calibration frames\n")
+                f.write("stack darks rej 3 3 -nonorm\n")
+                f.write("stack bias rej 3 3 -nonorm\n")
+                f.write("stack flats rej 3 3 -norm=mul\n\n")
+                f.write("# Calibrate light frames\n")
+                f.write("calibrate lights bias=bias_stacked flat=flat_stacked dark=dark_stacked\n\n")
+                f.write("# Register light frames\n")
+                f.write("register pp_lights\n\n")
+                f.write("# Stack registered light frames\n")
+                f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
+            
+            # Display success message
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"Created {created_links} symbolic links and Siril script in {session_dir}"
+            )
+            
+            # Open the directory
+            QDesktopServices.openUrl(QUrl.fromLocalFile(session_dir))
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create symbolic links: {str(e)}")
+            logging.error(f"Error in checkout_session: {str(e)}")
+
     def update_sessions(self):
         """Update light sessions by running createLightSessions method with progress dialog."""
         from PySide6.QtWidgets import QProgressDialog
