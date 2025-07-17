@@ -4,17 +4,7 @@
 
 **A comprehensive astronomical image file management tool**
 
-[![Python#### 📊 **Sessions Tab**
-- **Session Management**: View and manage automatically created Session groups
-- **Session Display**: Shows Object Name, Date, Telescope, Imager, and calibration session dates
-- **Calibration Linking**: Displays actual dates of linked bias, dark, and flat sessions
-- **Light Sessions**: Update and organize light frame Sessions by object
-- **Calibration Sessions**: Group bias, dark, and flat calibration files
-- **Session Operations**:
-  - **Update Lights**: Create sessions for unassigned light frames
-  - **Update Calibrations**: Group calibration frames by type and date
-  - **Link Sessions**: Automatically link calibration sessions to light sessions
-  - **Clear Sessions**: Remove all session records (files remain unassigned)/img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Python#### (https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
 [![AstroPy](https://img.shields.io/badge/astronomy-AstroPy-orange.svg)](https://www.astropy.org/)
 
