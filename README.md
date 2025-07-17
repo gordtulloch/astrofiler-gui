@@ -4,7 +4,7 @@
 
 **A comprehensive astronomical image file management tool**
 
-[![Python#### (https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Python3.8+] (https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
 [![AstroPy](https://img.shields.io/badge/astronomy-AstroPy-orange.svg)](https://www.astropy.org/)
 
