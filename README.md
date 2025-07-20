@@ -38,7 +38,7 @@ AstroFiler is a powerful Python application designed for astronomers and astroph
 
 ### **Future Versions**
 - **XISF support**: Load XISF files and extract FITS headers
-- **Processed Images**: Support for processed images and formats (TIFF, JPG)
+- **Processed Images**: Support for processed images and formats (XISF, TIFF, JPG)
 - **Archiving**: Saving images to Google Cloud Services, Dropbox, Amazon etc.
 - **Auto-Calibration**: Calibrate any lights with calibration files (build masters first) with Siril
 - **Thumbnails/Sample Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
