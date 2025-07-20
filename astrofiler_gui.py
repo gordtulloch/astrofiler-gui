@@ -415,22 +415,30 @@ class ImagesTab(QWidget):
                 QMessageBox.warning(self, "No Viewer Configured", 
                                   "Please configure an external FITS viewer in the Config tab.")
                 return
-            
-            if not os.path.exists(viewer_path):
-                QMessageBox.warning(self, "Viewer Not Found", 
-                                  f"The configured FITS viewer was not found: {viewer_path}")
-                return
-            
-            if not os.path.exists(file_path):
-                QMessageBox.warning(self, "File Not Found", 
-                                  f"The FITS file was not found: {file_path}")
-                return
-            
+            logger.info(f"Launching external FITS viewer: {viewer_path} with file {file_path}")            
             try:
                 import subprocess
+                import shlex
+                
+                # Check if viewer_path contains spaces or multiple arguments
+                if ' ' in viewer_path:
+                    # Parse command with arguments using shlex for proper shell-like parsing
+                    # This handles quoted arguments, escaping, etc.
+                    try:
+                        cmd_parts = shlex.split(viewer_path)
+                        cmd_args = cmd_parts + [file_path]
+                    except ValueError as e:
+                        # If shlex parsing fails (malformed quotes, etc.), fall back to simple split
+                        logger.warning(f"shlex parsing failed for '{viewer_path}', using simple split: {e}")
+                        cmd_parts = viewer_path.split()
+                        cmd_args = cmd_parts + [file_path]
+                else:
+                    # Single executable path with no arguments
+                    cmd_args = [viewer_path, file_path]
+                
                 # Launch the external viewer with the file path as argument
-                subprocess.Popen([viewer_path, file_path])
-                logger.info(f"Launched external FITS viewer: {viewer_path} with file: {file_path}")
+                subprocess.Popen(cmd_args)
+                logger.info(f"Launched external FITS viewer: {cmd_args}")
             except Exception as e:
                 logger.error(f"Error launching external viewer: {e}")
                 QMessageBox.warning(self, "Launch Error", 
