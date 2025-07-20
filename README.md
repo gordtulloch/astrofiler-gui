@@ -36,6 +36,13 @@ AstroFiler is a powerful Python application designed for astronomers and astroph
 - **Session Linking**: Automatically link calibration sessions to light sessions
 - **Session Export**: Export Lights and Calibration files ready for SIRIL processing
 
+### **Future Versions**
+- **XISF support**: Load XISF files and extract FITS headers
+- **Processed Images**: Support for processed images and formats (TIFF, JPG)
+- **Archiving**: Saving images to Google Cloud Services, Dropbox, Amazon etc.
+- **Auto-Calibration**: Calibrate any lights with calibration files (build masters first) with Siril
+- **Thumbnails/Sample Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
+
 ## 🤝 Contributing
 
 We welcome contributions! Please:
