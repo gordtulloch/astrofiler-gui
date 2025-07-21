@@ -488,7 +488,7 @@ class fitsProcessing:
         return createdCalibrationSessions
 
     #################################################################################################################
-    ## - this function submits a fits file to the database                                          ##
+    ## submitFileToDB- this function submits a fits file to the database                                          ##
     #################################################################################################################
     def submitFileToDB(self,fileName,hdr,fileHash=None):
         if "DATE-OBS" in hdr:
