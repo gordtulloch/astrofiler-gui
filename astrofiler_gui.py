@@ -1068,7 +1068,7 @@ class MergeTab(QWidget):
         main_layout = QVBoxLayout(main_widget)
         
         # Title
-        title_label = QLabel("Object Name Merge Tool")
+        title_label = QLabel("Object Name Merge/Rename Tool")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -1080,6 +1080,7 @@ class MergeTab(QWidget):
         instructions = QLabel(
             "This tool allows you to merge object names in the database. "
             "All instances of the 'From' object name will be changed to the 'To' object name. "
+            "If the 'To' object name does not exist, it will be created, if necessary. "
             "Optionally, you can also rename the actual files on disk."
         )
         instructions.setWordWrap(True)
