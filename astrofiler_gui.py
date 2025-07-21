@@ -1989,6 +1989,320 @@ class DuplicatesTab(QWidget):
             )
 
 
+class StatsTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        self.load_stats_data()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Refresh button
+        refresh_layout = QHBoxLayout()
+        self.refresh_button = QPushButton("Refresh Stats")
+        self.refresh_button.clicked.connect(self.load_stats_data)
+        refresh_layout.addWidget(self.refresh_button)
+        refresh_layout.addStretch()
+        layout.addLayout(refresh_layout)
+        
+        # Main content area with splitter
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Left side - Top 10 Objects List
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        
+        # Summary statistics table
+        summary_label = QLabel("Summary Statistics")
+        summary_label.setFont(QFont("Arial", 12, QFont.Bold))
+        left_layout.addWidget(summary_label)
+        
+        self.summary_table = QTreeWidget()
+        self.summary_table.setMinimumWidth(400)
+        self.summary_table.setMaximumHeight(170)  # Limit height to show only the summary rows (increased for 6 items)
+        self.summary_table.setHeaderLabels(["Item", "Count"])
+        self.summary_table.setRootIsDecorated(False)  # Hide tree expand/collapse icons
+        self.summary_table.setAlternatingRowColors(True)
+        
+        # Set column widths for summary table
+        self.summary_table.setColumnWidth(0, 200)  # Item
+        self.summary_table.setColumnWidth(1, 100)  # Count
+        
+        # Set header alignment for "Count" column
+        self.summary_table.headerItem().setTextAlignment(1, Qt.AlignRight)
+        
+        left_layout.addWidget(self.summary_table)
+        
+        # Add some spacing
+        left_layout.addSpacing(10)
+        
+        # Top 10 objects label
+        objects_label = QLabel("Top 10 Objects by Total Integration Time")
+        objects_label.setFont(QFont("Arial", 12, QFont.Bold))
+        left_layout.addWidget(objects_label)
+        
+        # Objects table with columns
+        self.objects_table = QTreeWidget()
+        self.objects_table.setMinimumWidth(400)
+        self.objects_table.setHeaderLabels(["Rank", "Object Name", "Total Seconds"])
+        self.objects_table.setRootIsDecorated(False)  # Hide tree expand/collapse icons
+        self.objects_table.setAlternatingRowColors(True)
+        
+        # Set column widths
+        self.objects_table.setColumnWidth(0, 50)   # Rank
+        self.objects_table.setColumnWidth(1, 200)  # Object Name  
+        self.objects_table.setColumnWidth(2, 120)  # Total Seconds
+        
+        # Set header alignment for "Total Seconds" column
+        self.objects_table.headerItem().setTextAlignment(2, Qt.AlignRight)
+        
+        left_layout.addWidget(self.objects_table)
+        
+        splitter.addWidget(left_widget)
+        
+        # Right side - Pie chart
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        
+        # Pie chart label
+        chart_label = QLabel("Total Imaging Time by Filter")
+        chart_label.setFont(QFont("Arial", 12, QFont.Bold))
+        right_layout.addWidget(chart_label)
+        
+        # Chart area
+        self.chart_label = QLabel()
+        self.chart_label.setMinimumSize(400, 400)
+        self.chart_label.setAlignment(Qt.AlignCenter)
+        self.chart_label.setStyleSheet("border: 1px solid gray; background-color: white;")
+        right_layout.addWidget(self.chart_label)
+        
+        # Add stretch to push chart to top
+        right_layout.addStretch()
+        
+        splitter.addWidget(right_widget)
+        
+        # Set splitter proportions
+        splitter.setSizes([400, 500])
+        layout.addWidget(splitter)
+    
+    def load_stats_data(self):
+        """Load and display statistics data"""
+        try:
+            # Load summary statistics
+            self.load_summary_stats()
+            
+            # Load top 10 objects by integration time
+            self.load_top_objects()
+            
+            # Load and create pie chart for filters
+            self.create_filter_pie_chart()
+            
+        except Exception as e:
+            logging.error(f"Error loading stats data: {str(e)}")
+            QMessageBox.warning(self, "Stats Error", f"Error loading statistics: {str(e)}")
+    
+    def load_summary_stats(self):
+        """Load summary statistics for FITS files and sessions"""
+        try:
+            self.summary_table.clear()
+            
+            # Count different types of FITS files
+            total_lights = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains('Light')).count()
+            total_darks = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains('Dark')).count()
+            total_biases = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains('Bias')).count()
+            total_flats = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains('Flat')).count()
+            
+            # Count total sessions
+            total_sessions = FitsSessionModel.select().count()
+            
+            # Count unique nights of imaging (distinct dates from light frames)
+            from peewee import fn
+            try:
+                # Get distinct dates from light frames
+                unique_dates = (FitsFileModel
+                              .select(fn.DISTINCT(fn.DATE(FitsFileModel.fitsFileDate)))
+                              .where(FitsFileModel.fitsFileType.contains('Light'))
+                              .count())
+                total_nights = unique_dates
+            except Exception as date_error:
+                logging.warning(f"Error calculating unique nights: {str(date_error)}")
+                total_nights = 0
+            
+            # Create summary items
+            summary_items = [
+                ("Total Lights", total_lights),
+                ("Total Darks", total_darks),
+                ("Total Biases", total_biases),
+                ("Total Flats", total_flats),
+                ("Total Sessions", total_sessions),
+                ("Total Nights Imaging", total_nights)
+            ]
+            
+            for item_name, count in summary_items:
+                item = QTreeWidgetItem([
+                    item_name,
+                    f"{count:,}"  # Format with commas for large numbers
+                ])
+                
+                # Right-align the count column
+                item.setTextAlignment(1, Qt.AlignRight)
+                
+                self.summary_table.addTopLevelItem(item)
+                
+        except Exception as e:
+            logging.error(f"Error loading summary stats: {str(e)}")
+            # Add error item to table
+            error_item = QTreeWidgetItem([
+                "Error loading summary",
+                "N/A"
+            ])
+            self.summary_table.addTopLevelItem(error_item)
+    
+    def load_top_objects(self):
+        """Load top 10 objects by total integration time"""
+        try:
+            self.objects_table.clear()
+            
+            # Query to get total integration time per object for Light frames only
+            from peewee import fn
+            
+            query = (FitsFileModel
+                    .select(FitsFileModel.fitsFileObject, 
+                           fn.SUM(FitsFileModel.fitsFileExpTime.cast('float')).alias('total_time'))
+                    .where(FitsFileModel.fitsFileType.contains('Light'))
+                    .group_by(FitsFileModel.fitsFileObject)
+                    .order_by(fn.SUM(FitsFileModel.fitsFileExpTime.cast('float')).desc())
+                    .limit(10))
+            
+            for i, obj in enumerate(query, 1):
+                total_seconds = float(obj.total_time)
+                
+                # Create table row with only 3 columns
+                item = QTreeWidgetItem([
+                    str(i),                          # Rank
+                    obj.fitsFileObject,              # Object Name
+                    f"{total_seconds:,.0f}s"         # Total Seconds
+                ])
+                
+                # Right-align numeric columns
+                item.setTextAlignment(0, Qt.AlignCenter)  # Rank - center
+                item.setTextAlignment(2, Qt.AlignRight)   # Total Seconds - right
+                
+                self.objects_table.addTopLevelItem(item)
+                
+        except Exception as e:
+            logging.error(f"Error loading top objects: {str(e)}")
+            # Add error item to table
+            error_item = QTreeWidgetItem([
+                "Error",
+                f"Failed to load data: {str(e)}",
+                ""
+            ])
+            self.objects_table.addTopLevelItem(error_item)
+    
+    def create_filter_pie_chart(self):
+        """Create and display pie chart for filter usage"""
+        try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend
+            import matplotlib.pyplot as plt
+            from matplotlib.figure import Figure
+            import io
+            from PySide6.QtGui import QPixmap
+            
+            # Query to get total time per filter for Light frames only
+            from peewee import fn
+            
+            query = (FitsFileModel
+                    .select(FitsFileModel.fitsFileFilter, 
+                           fn.SUM(FitsFileModel.fitsFileExpTime.cast('float')).alias('total_time'))
+                    .where(FitsFileModel.fitsFileType.contains('Light'))
+                    .group_by(FitsFileModel.fitsFileFilter)
+                    .order_by(fn.SUM(FitsFileModel.fitsFileExpTime.cast('float')).desc()))
+            
+            filters = []
+            times = []
+            
+            for result in query:
+                filter_name = result.fitsFileFilter if result.fitsFileFilter else 'Unknown'
+                total_seconds = float(result.total_time)
+                
+                filters.append(filter_name)
+                times.append(total_seconds)
+            
+            if not filters:
+                self.chart_label.setText("No light frame data available")
+                return
+            
+            # Create matplotlib figure
+            fig = Figure(figsize=(8, 6), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # Convert times to hours for display
+            times_hours = [t / 3600 for t in times]
+            
+            # Define colors for better visibility
+            colors = plt.cm.Set3(range(len(filters)))
+            
+            # Create pie chart
+            wedges, texts, autotexts = ax.pie(times_hours, labels=filters, autopct='%1.1f%%', 
+                                            startangle=90, colors=colors)
+            
+            # Customize the chart
+            ax.set_title('Total Imaging Time by Filter', fontsize=14, fontweight='bold')
+            
+            # Make text more readable
+            for autotext in autotexts:
+                autotext.set_color('black')
+                autotext.set_fontweight('bold')
+                autotext.set_fontsize(10)
+            
+            for text in texts:
+                text.set_fontsize(9)
+            
+            # Add summary text
+            total_hours = sum(times_hours)
+            summary_text = f"Total: {total_hours:.1f} hours"
+            ax.text(0, -1.3, summary_text, ha='center', fontsize=12, fontweight='bold')
+            
+            # Save to buffer and display
+            buffer = io.BytesIO()
+            fig.savefig(buffer, format='png', bbox_inches='tight', facecolor='white', dpi=100)
+            buffer.seek(0)
+            
+            # Convert to QPixmap and display
+            pixmap = QPixmap()
+            pixmap.loadFromData(buffer.getvalue())
+            
+            # Scale pixmap to fit label while maintaining aspect ratio
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(
+                    self.chart_label.size(), 
+                    Qt.KeepAspectRatio, 
+                    Qt.SmoothTransformation
+                )
+                self.chart_label.setPixmap(scaled_pixmap)
+            else:
+                self.chart_label.setText("Error loading chart image")
+            
+            plt.close(fig)  # Clean up the figure
+            buffer.close()
+            
+        except ImportError as e:
+            self.chart_label.setText("Matplotlib not available for charts\nInstall matplotlib to view charts")
+            logging.warning(f"Matplotlib import error: {str(e)}")
+        except Exception as e:
+            logging.error(f"Error creating pie chart: {str(e)}")
+            self.chart_label.setText(f"Error creating chart:\n{str(e)}")
+
+    def showEvent(self, event):
+        """Handle show events to reload data when tab becomes visible"""
+        super().showEvent(event)
+        # Reload stats data when tab becomes visible
+        self.load_stats_data()
+
+
 class AstroFilerGUI(QWidget):
     """Main GUI class that encapsulates the entire AstroFiler application interface"""
     
@@ -2014,11 +2328,13 @@ class AstroFilerGUI(QWidget):
         self.images_tab = ImagesTab()
         self.sessions_tab = SessionsTab()
         self.merge_tab = MergeTab()
+        self.stats_tab = StatsTab()
         self.config_tab = ConfigTab()
         self.duplicates_tab = DuplicatesTab()
         self.log_tab = LogTab()
         self.about_tab = AboutTab()
         
+        self.tab_widget.addTab(self.stats_tab, "Stats")
         self.tab_widget.addTab(self.images_tab, "Images")
         self.tab_widget.addTab(self.sessions_tab, "Sessions")
         self.tab_widget.addTab(self.merge_tab, "Merge")
@@ -2026,8 +2342,8 @@ class AstroFilerGUI(QWidget):
         self.tab_widget.addTab(self.log_tab, "Log")
         self.tab_widget.addTab(self.config_tab, "Config")
         self.tab_widget.addTab(self.about_tab, "About")
-        # Set the default tab to be the Images tab
-        self.tab_widget.setCurrentWidget(self.images_tab)
+        # Set the default tab to be the Stats tab
+        self.tab_widget.setCurrentWidget(self.stats_tab)
         
         layout.addWidget(self.tab_widget)
     
