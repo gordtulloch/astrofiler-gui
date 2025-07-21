@@ -23,10 +23,12 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 - **Command Line Utilities**: Critical functions exposed as command line utilities to facilitate use of scripts and crontab
 
 ### 📊 **Metadata & Analysis**
+- **Stats Page**: Provides basic statistics on the files contained in the Repository
 - **FITS Header Extraction**: Automatically extract and catalog metadata
 - **Object Identification**: Track astronomical targets and sessions
 - **Date/Time Analysis**: Organize by objects, observation dates, instruments, and cameras
 - **File Integrity**: SHA-256 hashing for duplicate detection and verification
+
 ### 🛠️ **Tools & Integration**
 - **External Viewer Support**: Launch your favorite FITS viewer directly from Astrofile
 

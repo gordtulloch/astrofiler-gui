@@ -515,16 +515,21 @@ class fitsProcessing:
     #################################################################################################################
     ## linkSessions - this function links calibration sessions to light sessions based on telescope and imager    ##
     ##                matching. For each light session, it finds the most recent calibration sessions for the     ##
-    ##                same telescope and imager combination.                                                        ##
+    ##                same telescope and imager combination, with additional matching criteria:                    ##
+    ##                - Darks must have the same exposure time as the light frames                                 ##
+    ##                - All calibration frames must have the same binning settings as the light frames            ##
+    ##                - Flats must match the filter of the light frames                                            ##
     #################################################################################################################
     def linkSessions(self, progress_callback=None):
         """
-        Link calibration sessions to light sessions based on telescope and imager matching.
+        Link calibration sessions to light sessions based on telescope, imager, and specific matching criteria.
         
         This function iterates through all light sessions and finds the most recent 
-        calibration sessions (bias, dark, flat) that match the telescope and imager.
-        It then updates the light session records to link them to the appropriate 
-        calibration sessions.
+        calibration sessions (bias, dark, flat) that match:
+        - Telescope and imager (all calibration types)
+        - Binning settings (all calibration types)
+        - Exposure time (darks only)
+        - Filter (flats only)
         
         Args:
             progress_callback: Optional callback function for progress updates
@@ -560,53 +565,87 @@ class fitsProcessing:
                 
                 session_updated = False
                 
-                # Find most recent bias session for this telescope/imager combination
+                # Get representative light file to determine matching criteria
+                light_file = (FitsFileModel
+                             .select()
+                             .where(FitsFileModel.fitsFileSession == str(light_session.fitsSessionId))
+                             .first())
+                
+                if not light_file:
+                    logging.warning(f"No files found for light session {light_session.fitsSessionId}, skipping")
+                    continue
+                
+                light_exp_time = light_file.fitsFileExpTime
+                light_x_binning = light_file.fitsFileXBinning
+                light_y_binning = light_file.fitsFileYBinning
+                light_filter = light_file.fitsFileFilter
+                
+                logging.debug(f"Light session {light_session.fitsSessionId} criteria: exp={light_exp_time}, binning={light_x_binning}x{light_y_binning}, filter={light_filter}")
+                
+                # Find most recent bias session with matching telescope/imager/binning
                 if not light_session.fitsBiasSession:
                     bias_session = (fitsSessionModel
                                    .select()
+                                   .join(FitsFileModel, on=(FitsFileModel.fitsFileSession == fitsSessionModel.fitsSessionId))
                                    .where(fitsSessionModel.fitsSessionObjectName == 'Bias',
                                          fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
                                          fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
-                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate)
+                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
+                                         FitsFileModel.fitsFileXBinning == light_x_binning,
+                                         FitsFileModel.fitsFileYBinning == light_y_binning)
                                    .order_by(fitsSessionModel.fitsSessionDate.desc())
                                    .first())
                     
                     if bias_session:
                         light_session.fitsBiasSession = str(bias_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked bias session {bias_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                        logging.info(f"Linked bias session {bias_session.fitsSessionId} to light session {light_session.fitsSessionId} (binning: {light_x_binning}x{light_y_binning})")
+                    else:
+                        logging.debug(f"No matching bias session found for light session {light_session.fitsSessionId}")
                 
-                # Find most recent dark session for this telescope/imager combination
+                # Find most recent dark session with matching telescope/imager/binning/exposure
                 if not light_session.fitsDarkSession:
                     dark_session = (fitsSessionModel
                                    .select()
+                                   .join(FitsFileModel, on=(FitsFileModel.fitsFileSession == fitsSessionModel.fitsSessionId))
                                    .where(fitsSessionModel.fitsSessionObjectName == 'Dark',
                                          fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
                                          fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
-                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate)
+                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
+                                         FitsFileModel.fitsFileXBinning == light_x_binning,
+                                         FitsFileModel.fitsFileYBinning == light_y_binning,
+                                         FitsFileModel.fitsFileExpTime == light_exp_time)
                                    .order_by(fitsSessionModel.fitsSessionDate.desc())
                                    .first())
                     
                     if dark_session:
                         light_session.fitsDarkSession = str(dark_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                        logging.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId} (exp: {light_exp_time}s, binning: {light_x_binning}x{light_y_binning})")
+                    else:
+                        logging.debug(f"No matching dark session found for light session {light_session.fitsSessionId} (exp: {light_exp_time}s)")
                 
-                # Find most recent flat session for this telescope/imager combination
+                # Find most recent flat session with matching telescope/imager/binning/filter
                 if not light_session.fitsFlatSession:
                     flat_session = (fitsSessionModel
                                    .select()
+                                   .join(FitsFileModel, on=(FitsFileModel.fitsFileSession == fitsSessionModel.fitsSessionId))
                                    .where(fitsSessionModel.fitsSessionObjectName == 'Flat',
                                          fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
                                          fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
-                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate)
+                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
+                                         FitsFileModel.fitsFileXBinning == light_x_binning,
+                                         FitsFileModel.fitsFileYBinning == light_y_binning,
+                                         FitsFileModel.fitsFileFilter == light_filter)
                                    .order_by(fitsSessionModel.fitsSessionDate.desc())
                                    .first())
                     
                     if flat_session:
                         light_session.fitsFlatSession = str(flat_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked flat session {flat_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                        logging.info(f"Linked flat session {flat_session.fitsSessionId} to light session {light_session.fitsSessionId} (filter: {light_filter}, binning: {light_x_binning}x{light_y_binning})")
+                    else:
+                        logging.debug(f"No matching flat session found for light session {light_session.fitsSessionId} (filter: {light_filter})")
                 
                 # Save the session if any links were updated
                 if session_updated:
