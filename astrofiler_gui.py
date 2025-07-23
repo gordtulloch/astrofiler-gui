@@ -3,6 +3,7 @@ import os
 import configparser
 import logging
 import datetime
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(
@@ -2006,23 +2007,48 @@ class StatsTab(QWidget):
         refresh_layout.addStretch()
         layout.addLayout(refresh_layout)
         
-        # Main content area with splitter
+        # Main content area with horizontal splitter for two columns
         splitter = QSplitter(Qt.Horizontal)
         
-        # Left side - Top 10 Objects List
+        # Left column
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         
-        # Summary statistics table
+        # Last 10 Objects Observed section
+        recent_objects_label = QLabel("Last 10 Objects Observed")
+        recent_objects_label.setFont(QFont("Arial", 12, QFont.Bold))
+        left_layout.addWidget(recent_objects_label)
+        
+        # Recent objects table
+        self.recent_objects_table = QTreeWidget()
+        self.recent_objects_table.setMaximumHeight(300)
+        self.recent_objects_table.setHeaderLabels(["Rank", "Object Name", "Last Observed"])
+        self.recent_objects_table.setRootIsDecorated(False)
+        self.recent_objects_table.setAlternatingRowColors(True)
+        
+        # Set column widths for recent objects table
+        self.recent_objects_table.setColumnWidth(0, 50)   # Rank
+        self.recent_objects_table.setColumnWidth(1, 200)  # Object Name
+        self.recent_objects_table.setColumnWidth(2, 120)  # Last Observed
+        
+        # Set header alignment
+        self.recent_objects_table.headerItem().setTextAlignment(0, Qt.AlignCenter)  # Rank
+        self.recent_objects_table.headerItem().setTextAlignment(2, Qt.AlignRight)   # Last Observed
+        
+        left_layout.addWidget(self.recent_objects_table)
+        
+        # Add spacing
+        left_layout.addSpacing(20)
+        
+        # Summary Statistics section
         summary_label = QLabel("Summary Statistics")
         summary_label.setFont(QFont("Arial", 12, QFont.Bold))
         left_layout.addWidget(summary_label)
         
         self.summary_table = QTreeWidget()
-        self.summary_table.setMinimumWidth(400)
-        self.summary_table.setMaximumHeight(170)  # Limit height to show only the summary rows (increased for 6 items)
+        self.summary_table.setMaximumHeight(170)
         self.summary_table.setHeaderLabels(["Item", "Count"])
-        self.summary_table.setRootIsDecorated(False)  # Hide tree expand/collapse icons
+        self.summary_table.setRootIsDecorated(False)
         self.summary_table.setAlternatingRowColors(True)
         
         # Set column widths for summary table
@@ -2034,19 +2060,25 @@ class StatsTab(QWidget):
         
         left_layout.addWidget(self.summary_table)
         
-        # Add some spacing
-        left_layout.addSpacing(10)
+        # Add stretch to push content to top
+        left_layout.addStretch()
         
-        # Top 10 objects label
+        splitter.addWidget(left_widget)
+        
+        # Right column
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        
+        # Top 10 Objects section
         objects_label = QLabel("Top 10 Objects by Total Integration Time")
         objects_label.setFont(QFont("Arial", 12, QFont.Bold))
-        left_layout.addWidget(objects_label)
+        right_layout.addWidget(objects_label)
         
         # Objects table with columns
         self.objects_table = QTreeWidget()
-        self.objects_table.setMinimumWidth(400)
+        self.objects_table.setMaximumHeight(300)
         self.objects_table.setHeaderLabels(["Rank", "Object Name", "Total Seconds"])
-        self.objects_table.setRootIsDecorated(False)  # Hide tree expand/collapse icons
+        self.objects_table.setRootIsDecorated(False)
         self.objects_table.setAlternatingRowColors(True)
         
         # Set column widths
@@ -2055,17 +2087,15 @@ class StatsTab(QWidget):
         self.objects_table.setColumnWidth(2, 120)  # Total Seconds
         
         # Set header alignment for "Total Seconds" column
-        self.objects_table.headerItem().setTextAlignment(2, Qt.AlignRight)
+        self.objects_table.headerItem().setTextAlignment(0, Qt.AlignCenter)  # Rank
+        self.objects_table.headerItem().setTextAlignment(2, Qt.AlignRight)   # Total Seconds
         
-        left_layout.addWidget(self.objects_table)
+        right_layout.addWidget(self.objects_table)
         
-        splitter.addWidget(left_widget)
+        # Add spacing
+        right_layout.addSpacing(20)
         
-        # Right side - Pie chart
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        
-        # Pie chart label
+        # Filter Chart section
         chart_label = QLabel("Total Imaging Time by Filter")
         chart_label.setFont(QFont("Arial", 12, QFont.Bold))
         right_layout.addWidget(chart_label)
@@ -2077,18 +2107,23 @@ class StatsTab(QWidget):
         self.chart_label.setStyleSheet("border: 1px solid gray; background-color: white;")
         right_layout.addWidget(self.chart_label)
         
-        # Add stretch to push chart to top
+        # Add stretch to push content to top
         right_layout.addStretch()
         
         splitter.addWidget(right_widget)
         
-        # Set splitter proportions
-        splitter.setSizes([400, 500])
+        # Set splitter proportions (equal columns)
+        splitter.setSizes([400, 400])
+        
+        # Add the splitter to the main layout
         layout.addWidget(splitter)
     
     def load_stats_data(self):
         """Load and display statistics data"""
         try:
+            # Load last 10 objects observed
+            self.load_recent_objects()
+            
             # Load summary statistics
             self.load_summary_stats()
             
@@ -2101,6 +2136,53 @@ class StatsTab(QWidget):
         except Exception as e:
             logging.error(f"Error loading stats data: {str(e)}")
             QMessageBox.warning(self, "Stats Error", f"Error loading statistics: {str(e)}")
+    
+    def load_recent_objects(self):
+        """Load last 10 objects observed based on most recent sessions"""
+        try:
+            self.recent_objects_table.clear()
+            
+            # Query to get the 10 most recent light sessions with their objects and dates
+            # We need to get unique objects from the most recent sessions
+            from peewee import fn
+            
+            query = (FitsSessionModel
+                    .select(FitsSessionModel.fitsSessionObjectName, 
+                           fn.MAX(FitsSessionModel.fitsSessionDate).alias('last_observed'))
+                    .where(FitsSessionModel.fitsSessionObjectName.is_null(False),
+                           FitsSessionModel.fitsSessionObjectName != 'Bias',
+                           FitsSessionModel.fitsSessionObjectName != 'Dark',
+                           FitsSessionModel.fitsSessionObjectName != 'Flat')
+                    .group_by(FitsSessionModel.fitsSessionObjectName)
+                    .order_by(fn.MAX(FitsSessionModel.fitsSessionDate).desc())
+                    .limit(10))
+            
+            for i, session in enumerate(query, 1):
+                # Format the date for display
+                last_observed_str = str(session.last_observed) if session.last_observed else "Unknown"
+                
+                # Create table row
+                item = QTreeWidgetItem([
+                    str(i),                          # Rank
+                    session.fitsSessionObjectName,  # Object Name
+                    last_observed_str                # Last Observed
+                ])
+                
+                # Center-align rank column, right-align date column
+                item.setTextAlignment(0, Qt.AlignCenter)  # Rank
+                item.setTextAlignment(2, Qt.AlignRight)   # Last Observed
+                
+                self.recent_objects_table.addTopLevelItem(item)
+                
+        except Exception as e:
+            logging.error(f"Error loading recent objects: {str(e)}")
+            # Add error item to table
+            error_item = QTreeWidgetItem([
+                "Error",
+                f"Failed to load data: {str(e)}",
+                ""
+            ])
+            self.recent_objects_table.addTopLevelItem(error_item)
     
     def load_summary_stats(self):
         """Load summary statistics for FITS files and sessions"""
@@ -2116,15 +2198,22 @@ class StatsTab(QWidget):
             # Count total sessions
             total_sessions = FitsSessionModel.select().count()
             
-            # Count unique nights of imaging (distinct dates from light frames)
+            # Count unique nights of imaging (using 12-hour period definition)
             from peewee import fn
             try:
-                # Get distinct dates from light frames
-                unique_dates = (FitsFileModel
-                              .select(fn.DISTINCT(fn.DATE(FitsFileModel.fitsFileDate)))
-                              .where(FitsFileModel.fitsFileType.contains('Light'))
-                              .count())
-                total_nights = unique_dates
+                # Get all distinct dates from light frames, then group by 12-hour periods
+                light_files = (FitsFileModel
+                             .select(FitsFileModel.fitsFileDate)
+                             .where(FitsFileModel.fitsFileType.contains('Light'),
+                                   FitsFileModel.fitsFileDate.is_null(False))
+                             .distinct())
+                
+                # Convert to list and process dates to group by astronomical nights
+                dates = [file.fitsFileDate for file in light_files]
+                if dates:
+                    total_nights = self._count_astronomical_nights(dates)
+                else:
+                    total_nights = 0
             except Exception as date_error:
                 logging.warning(f"Error calculating unique nights: {str(date_error)}")
                 total_nights = 0
@@ -2158,6 +2247,78 @@ class StatsTab(QWidget):
                 "N/A"
             ])
             self.summary_table.addTopLevelItem(error_item)
+    
+    def _count_astronomical_nights(self, dates):
+        """
+        Count unique astronomical nights from a list of dates.
+        An astronomical night is defined as a 12-hour period surrounding midnight.
+        Two dates belong to the same night if they are within 12 hours of each other.
+        """
+        if not dates:
+            return 0
+        
+        # Convert all dates to datetime objects for proper comparison
+        datetime_objects = []
+        for date in dates:
+            if date is None:
+                continue
+                
+            try:
+                # Handle different date formats
+                if isinstance(date, str):
+                    # Try parsing different date string formats
+                    if 'T' in date:
+                        # ISO format with time: 2023-07-15T03:26:15
+                        dt = datetime.fromisoformat(date.replace('Z', '+00:00'))
+                    elif ' ' in date and len(date) > 10:
+                        # Space-separated format: 2023-07-15 03:26:15
+                        dt = datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
+                    else:
+                        # Just date: 2023-07-15
+                        dt = datetime.strptime(date, '%Y-%m-%d')
+                elif hasattr(date, 'strftime'):
+                    # It's already a datetime or date object
+                    if hasattr(date, 'hour'):
+                        dt = date  # It's a datetime
+                    else:
+                        dt = datetime.combine(date, datetime.min.time())  # It's a date
+                else:
+                    continue
+                    
+                datetime_objects.append(dt)
+            except (ValueError, TypeError) as e:
+                logging.warning(f"Could not parse date: {date}, error: {e}")
+                continue
+        
+        if not datetime_objects:
+            return 0
+        
+        # Sort dates for easier processing
+        datetime_objects.sort()
+        
+        # Group dates into astronomical nights
+        nights = []
+        
+        for dt in datetime_objects:
+            # Find if this datetime belongs to an existing night
+            found_night = False
+            
+            for night_group in nights:
+                # Check if any date in this night group is within 12 hours
+                for night_dt in night_group:
+                    time_diff = abs((dt - night_dt).total_seconds() / 3600)  # Convert to hours
+                    if time_diff <= 12:
+                        night_group.append(dt)
+                        found_night = True
+                        break
+                if found_night:
+                    break
+            
+            # If no existing night found, create a new night
+            if not found_night:
+                nights.append([dt])
+        
+        return len(nights)
     
     def load_top_objects(self):
         """Load top 10 objects by total integration time"""
