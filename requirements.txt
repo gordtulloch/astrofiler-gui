@@ -5,8 +5,3 @@ matplotlib
 pytz
 PySide6
 
-# Optional testing dependencies (in test/ folder)
-# Install with: pip install -r test/test_requirements.txt
-# pytest>=7.0.0
-# pytest-mock>=3.10.0
-# pytest-cov>=4.0.0
