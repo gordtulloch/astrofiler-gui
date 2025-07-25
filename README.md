@@ -74,7 +74,7 @@ chmod +x install/install_macos.sh && ./install/install_macos.sh
 **Auto-Update Feature:**
 Desktop launchers automatically check for and install updates from GitHub when starting AstroFiler (if installed via git clone).
 
-📖 **See [INSTALL.md](INSTALL.md) for detailed installation instructions and troubleshooting.**
+📖 **See the Wiki for detailed installation instructions and troubleshooting.**
 
 ## 🤝 Contributing
 
@@ -104,4 +104,4 @@ This project is licensed under the terms specified in the LICENSE file.
 
 *For questions, bug reports, or feature requests, please open an issue on the project repository.*
 
-[![Telescope icon created by Freepik - Flaticon](https://www.flaticon.com/free-icons/telescope)](https://www.flaticon.com/free-icons/telescope)
+Telescope icon created by Freepik - [!Flaticon](https://www.flaticon.com/free-icons/telescope)](https://www.flaticon.com/free-icons/telescope)
