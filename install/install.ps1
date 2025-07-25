@@ -251,19 +251,6 @@ Write-Host "  - run_astrofiler.ps1 (PowerShell)" -ForegroundColor White
 Write-Host "  - run_astrofiler.bat (Command Prompt)" -ForegroundColor White
 Write-Host
 
-# Create desktop launcher
-Write-Host "Creating desktop launcher..." -ForegroundColor Yellow
-
-$launcherScript = @"
-@echo off
-cd /d "%~dp0"
-call install\launch_astrofiler.bat
-"@
-
-$launcherScript | Out-File -FilePath "astrofiler_launcher.bat" -Encoding ASCII
-
-Write-Host "Desktop launcher created: astrofiler_launcher.bat" -ForegroundColor Green
-
 # Ask if user wants to create desktop shortcut
 $createShortcut = "Y"
 if (-not $Quiet) {
@@ -276,12 +263,13 @@ if ($createShortcut -match "^[Yy].*" -or $createShortcut -eq "") {
     try {
         $WshShell = New-Object -comObject WScript.Shell
         $DesktopPath = $WshShell.SpecialFolders("Desktop")
+        $CurrentPath = $PWD.Path
         $Shortcut = $WshShell.CreateShortcut("$DesktopPath\AstroFiler.lnk")
-        $Shortcut.TargetPath = "$PWD\astrofiler_launcher.bat"
-        $Shortcut.WorkingDirectory = $PWD
+        $Shortcut.TargetPath = "$CurrentPath\install\launch_astrofiler.bat"
+        $Shortcut.WorkingDirectory = $CurrentPath
         $Shortcut.Description = "AstroFiler - Astronomy File Management Tool"
         if (Test-Path "astrofiler.ico") {
-            $Shortcut.IconLocation = "$PWD\astrofiler.ico"
+            $Shortcut.IconLocation = "$CurrentPath\astrofiler.ico"
         }
         $Shortcut.Save()
         
