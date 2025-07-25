@@ -52,11 +52,12 @@ AstroFiler includes automated installation scripts for all major platforms:
 ### Windows
 Install Git - There are also a few ways to install Git on Windows. The most official build is available for download on the Git website. Just go to https://git-scm.com/download/win and the download will start automatically. Note that this is a project called Git for Windows, which is separate from Git itself; for more information on it, go to https://gitforwindows.org.
 
-Once git is installed, you can open a powershell command line and enter:
+Once git is installed, you can open a powershell command line (run as Admin) and enter:
 
 ```powershell
 C:
 cd \
+Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force
 git clone https://github.com/gordtulloch/astrofiler-gui.git
 cd astrofiler-gui
 .\install\install.ps1
