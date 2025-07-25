@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
-                               QMessageBox, QScrollArea,QMenu,QProgressDialog)
+                               QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy)
 from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
@@ -2103,10 +2103,10 @@ class StatsTab(QWidget):
         chart_label.setFont(QFont("Arial", 12, QFont.Bold))
         right_layout.addWidget(chart_label)
         
-        # Chart area - appropriately sized for the remaining space
+        # Chart area - responsive sizing that scales with window
         self.chart_label = QLabel()
-        self.chart_label.setMinimumSize(350, 280)  # Reduced from 400x400 to give more space to table
-        self.chart_label.setMaximumSize(400, 320)  # Set max size to prevent it from taking too much space
+        self.chart_label.setMinimumSize(300, 250)  # Minimum size to ensure readability
+        self.chart_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # Allow expansion
         self.chart_label.setAlignment(Qt.AlignCenter)
         self.chart_label.setStyleSheet("border: 1px solid gray; background-color: white;")
         right_layout.addWidget(self.chart_label)
@@ -2400,8 +2400,18 @@ class StatsTab(QWidget):
                 self.chart_label.setText("No light frame data available")
                 return
             
-            # Create matplotlib figure - adjusted size for better fit
-            fig = Figure(figsize=(6, 5), dpi=100)  # Reduced from 8x6 to 6x5
+            # Get the current size of the chart label to determine optimal figure size
+            label_width = max(300, self.chart_label.width())  # Ensure minimum width
+            label_height = max(250, self.chart_label.height())  # Ensure minimum height
+            
+            # Calculate figure size based on available space (convert pixels to inches, assuming 100 DPI)
+            fig_width = max(4, min(12, label_width / 100))   # Between 4-12 inches wide
+            fig_height = max(3, min(10, label_height / 100))  # Between 3-10 inches tall
+            
+            logging.debug(f"Chart label size: {label_width}x{label_height}, figure size: {fig_width:.1f}x{fig_height:.1f}")
+            
+            # Create matplotlib figure - dynamically sized
+            fig = Figure(figsize=(fig_width, fig_height), dpi=100)
             ax = fig.add_subplot(111)
             
             # Convert times to hours for display
@@ -2410,27 +2420,33 @@ class StatsTab(QWidget):
             # Define colors for better visibility
             colors = plt.cm.Set3(range(len(filters)))
             
+            # Calculate appropriate font sizes based on figure size
+            title_font_size = max(10, min(16, int(fig_width * 2)))
+            label_font_size = max(7, min(12, int(fig_width * 1.5)))
+            percent_font_size = max(8, min(14, int(fig_width * 1.5)))
+            
             # Create pie chart with improved spacing
             wedges, texts, autotexts = ax.pie(times_hours, labels=filters, autopct='%1.1f%%', 
                                             startangle=90, colors=colors, 
                                             pctdistance=0.85)  # Move percentages closer to edge
             
-            # Customize the chart
-            ax.set_title('Total Imaging Time by Filter', fontsize=12, fontweight='bold', pad=10)
+            # Customize the chart with dynamic font sizes
+            ax.set_title('Total Imaging Time by Filter', fontsize=title_font_size, fontweight='bold', pad=15)
             
-            # Make text more readable with smaller fonts
+            # Make text more readable with scaled fonts
             for autotext in autotexts:
                 autotext.set_color('black')
                 autotext.set_fontweight('bold')
-                autotext.set_fontsize(9)  # Reduced from 10
+                autotext.set_fontsize(percent_font_size)
             
             for text in texts:
-                text.set_fontsize(8)  # Reduced from 9
+                text.set_fontsize(label_font_size)
             
-            # Add summary text positioned better for smaller chart
+            # Add summary text positioned appropriately for chart size
             total_hours = sum(times_hours)
             summary_text = f"Total: {total_hours:.1f} hours"
-            ax.text(0, -1.25, summary_text, ha='center', fontsize=11, fontweight='bold')
+            summary_font_size = max(9, min(14, int(fig_width * 1.8)))
+            ax.text(0, -1.25, summary_text, ha='center', fontsize=summary_font_size, fontweight='bold')
             
             # Save to buffer and display
             buffer = io.BytesIO()
@@ -2467,6 +2483,20 @@ class StatsTab(QWidget):
         super().showEvent(event)
         # Reload stats data when tab becomes visible
         self.load_stats_data()
+    
+    def resizeEvent(self, event):
+        """Handle resize events to update chart size"""
+        super().resizeEvent(event)
+        # Only regenerate chart if the size change is significant (more than 50 pixels)
+        if hasattr(self, '_last_size'):
+            width_diff = abs(event.size().width() - self._last_size.width())
+            height_diff = abs(event.size().height() - self._last_size.height())
+            if width_diff > 50 or height_diff > 50:
+                # Regenerate the chart with new size after a short delay
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(100, self.create_filter_pie_chart)
+        
+        self._last_size = event.size()
 
 
 class AstroFilerGUI(QWidget):
