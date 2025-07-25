@@ -2,10 +2,11 @@
 Version=1.0
 Name=AstroFiler
 Comment=Astronomy File Management Tool
-Exec=ASTROFILER_PATH/launch_astrofiler.sh
+Exec=ASTROFILER_PATH/install/launch_astrofiler.sh
 Icon=ASTROFILER_PATH/astrofiler.ico
 Terminal=false
 Type=Application
 Categories=Science;Education;Astronomy;
 StartupWMClass=astrofiler
 StartupNotify=true
+Keywords=astronomy;files;organization;FITS;
