@@ -45,6 +45,37 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 - **Auto-Calibration**: Calibrate any lights with calibration files (build masters first) with Siril
 - **Thumbnails/Sample Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
 
+## 🚀 Quick Installation
+
+AstroFiler includes automated installation scripts for all major platforms:
+
+### Windows
+```powershell
+.\install\install.ps1
+```
+
+### Linux
+```bash
+chmod +x install/install.sh && ./install/install.sh
+```
+
+### macOS
+```bash
+chmod +x install/install_macos.sh && ./install/install_macos.sh
+```
+
+**What it does:**
+- Checks for Python 3.8+ (installs if needed)
+- Creates virtual environment
+- Installs all dependencies
+- Creates desktop shortcuts and application menu entries
+- Sets up automatic update checking from GitHub
+
+**Auto-Update Feature:**
+Desktop launchers automatically check for and install updates from GitHub when starting AstroFiler (if installed via git clone).
+
+📖 **See [INSTALL.md](INSTALL.md) for detailed installation instructions and troubleshooting.**
+
 ## 🤝 Contributing
 
 We welcome contributions! Please:
