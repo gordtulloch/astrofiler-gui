@@ -2019,16 +2019,17 @@ class StatsTab(QWidget):
         recent_objects_label.setFont(QFont("Arial", 12, QFont.Bold))
         left_layout.addWidget(recent_objects_label)
         
-        # Recent objects table
+        # Recent objects table - provide adequate space for 10 entries
         self.recent_objects_table = QTreeWidget()
-        self.recent_objects_table.setMaximumHeight(300)
+        self.recent_objects_table.setMinimumHeight(280)  # Ensure space for 10 entries plus header
+        self.recent_objects_table.setMaximumHeight(320)  # Limit to prevent excessive growth
         self.recent_objects_table.setHeaderLabels(["Rank", "Object Name", "Last Observed"])
         self.recent_objects_table.setRootIsDecorated(False)
         self.recent_objects_table.setAlternatingRowColors(True)
         
         # Set column widths for recent objects table
         self.recent_objects_table.setColumnWidth(0, 50)   # Rank
-        self.recent_objects_table.setColumnWidth(1, 200)  # Object Name
+        self.recent_objects_table.setColumnWidth(1, 220)  # Object Name - increased width
         self.recent_objects_table.setColumnWidth(2, 120)  # Last Observed
         
         # Set header alignment
@@ -2046,13 +2047,14 @@ class StatsTab(QWidget):
         left_layout.addWidget(summary_label)
         
         self.summary_table = QTreeWidget()
-        self.summary_table.setMaximumHeight(170)
+        self.summary_table.setMinimumHeight(160)   # Ensure adequate space for summary data
+        self.summary_table.setMaximumHeight(200)   # Increased slightly for better visibility
         self.summary_table.setHeaderLabels(["Item", "Count"])
         self.summary_table.setRootIsDecorated(False)
         self.summary_table.setAlternatingRowColors(True)
         
         # Set column widths for summary table
-        self.summary_table.setColumnWidth(0, 200)  # Item
+        self.summary_table.setColumnWidth(0, 220)  # Item - increased width to match object name
         self.summary_table.setColumnWidth(1, 100)  # Count
         
         # Set header alignment for "Count" column
@@ -2074,16 +2076,17 @@ class StatsTab(QWidget):
         objects_label.setFont(QFont("Arial", 12, QFont.Bold))
         right_layout.addWidget(objects_label)
         
-        # Objects table with columns
+        # Objects table with columns - give it more dedicated space
         self.objects_table = QTreeWidget()
-        self.objects_table.setMaximumHeight(300)
+        self.objects_table.setMinimumHeight(280)  # Increased minimum height
+        self.objects_table.setMaximumHeight(350)  # Increased maximum height for better space
         self.objects_table.setHeaderLabels(["Rank", "Object Name", "Total Seconds"])
         self.objects_table.setRootIsDecorated(False)
         self.objects_table.setAlternatingRowColors(True)
         
-        # Set column widths
+        # Set column widths - make object name column wider
         self.objects_table.setColumnWidth(0, 50)   # Rank
-        self.objects_table.setColumnWidth(1, 200)  # Object Name  
+        self.objects_table.setColumnWidth(1, 220)  # Object Name - increased width
         self.objects_table.setColumnWidth(2, 120)  # Total Seconds
         
         # Set header alignment for "Total Seconds" column
@@ -2093,16 +2096,17 @@ class StatsTab(QWidget):
         right_layout.addWidget(self.objects_table)
         
         # Add spacing
-        right_layout.addSpacing(20)
+        right_layout.addSpacing(15)
         
         # Filter Chart section
         chart_label = QLabel("Total Imaging Time by Filter")
         chart_label.setFont(QFont("Arial", 12, QFont.Bold))
         right_layout.addWidget(chart_label)
         
-        # Chart area
+        # Chart area - appropriately sized for the remaining space
         self.chart_label = QLabel()
-        self.chart_label.setMinimumSize(400, 400)
+        self.chart_label.setMinimumSize(350, 280)  # Reduced from 400x400 to give more space to table
+        self.chart_label.setMaximumSize(400, 320)  # Set max size to prevent it from taking too much space
         self.chart_label.setAlignment(Qt.AlignCenter)
         self.chart_label.setStyleSheet("border: 1px solid gray; background-color: white;")
         right_layout.addWidget(self.chart_label)
@@ -2112,8 +2116,8 @@ class StatsTab(QWidget):
         
         splitter.addWidget(right_widget)
         
-        # Set splitter proportions (equal columns)
-        splitter.setSizes([400, 400])
+        # Set splitter proportions - give right side slightly more space for the data table
+        splitter.setSizes([380, 450])
         
         # Add the splitter to the main layout
         layout.addWidget(splitter)
@@ -2396,8 +2400,8 @@ class StatsTab(QWidget):
                 self.chart_label.setText("No light frame data available")
                 return
             
-            # Create matplotlib figure
-            fig = Figure(figsize=(8, 6), dpi=100)
+            # Create matplotlib figure - adjusted size for better fit
+            fig = Figure(figsize=(6, 5), dpi=100)  # Reduced from 8x6 to 6x5
             ax = fig.add_subplot(111)
             
             # Convert times to hours for display
@@ -2406,26 +2410,27 @@ class StatsTab(QWidget):
             # Define colors for better visibility
             colors = plt.cm.Set3(range(len(filters)))
             
-            # Create pie chart
+            # Create pie chart with improved spacing
             wedges, texts, autotexts = ax.pie(times_hours, labels=filters, autopct='%1.1f%%', 
-                                            startangle=90, colors=colors)
+                                            startangle=90, colors=colors, 
+                                            pctdistance=0.85)  # Move percentages closer to edge
             
             # Customize the chart
-            ax.set_title('Total Imaging Time by Filter', fontsize=14, fontweight='bold')
+            ax.set_title('Total Imaging Time by Filter', fontsize=12, fontweight='bold', pad=10)
             
-            # Make text more readable
+            # Make text more readable with smaller fonts
             for autotext in autotexts:
                 autotext.set_color('black')
                 autotext.set_fontweight('bold')
-                autotext.set_fontsize(10)
+                autotext.set_fontsize(9)  # Reduced from 10
             
             for text in texts:
-                text.set_fontsize(9)
+                text.set_fontsize(8)  # Reduced from 9
             
-            # Add summary text
+            # Add summary text positioned better for smaller chart
             total_hours = sum(times_hours)
             summary_text = f"Total: {total_hours:.1f} hours"
-            ax.text(0, -1.3, summary_text, ha='center', fontsize=12, fontweight='bold')
+            ax.text(0, -1.25, summary_text, ha='center', fontsize=11, fontweight='bold')
             
             # Save to buffer and display
             buffer = io.BytesIO()
