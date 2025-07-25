@@ -104,4 +104,4 @@ This project is licensed under the terms specified in the LICENSE file.
 
 *For questions, bug reports, or feature requests, please open an issue on the project repository.*
 
-Telescope icon created by Freepik - [Flaticon](https://www.flaticon.com/free-icons/telescope)](https://www.flaticon.com/free-icons/telescope)
+Telescope icon created by Freepik - [Flaticon](https://www.flaticon.com/free-icons/telescope)
