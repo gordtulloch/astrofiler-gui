@@ -60,6 +60,12 @@ chmod +x install/install.sh && ./install/install.sh
 ```
 
 ### macOS
+There are several ways to install Git on macOS. The easiest is probably to install the Xcode Command Line Tools. On Mavericks (10.9) or above you can do this simply by trying to run git from the Terminal the very first time.
+
+```git --version```
+
+If you don’t have it installed already, it will prompt you to install it.
+
 ```bash
 chmod +x install/install_macos.sh && ./install/install_macos.sh
 ```
