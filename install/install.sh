@@ -133,7 +133,7 @@ if [ -f "requirements.txt" ]; then
 else
     echo "Warning: requirements.txt not found."
     echo "Installing packages manually..."
-    python -m pip install astropy peewee numpy matplotlib pytz PySide6
+    python -m pip install astropy peewee numpy matplotlib pytz PySide6 Pillow
 fi
 
 echo
@@ -175,8 +175,63 @@ case "$create_desktop" in
         # Get current directory
         CURRENT_DIR="$(pwd)"
         
+        # Convert ICO to PNG for better Linux compatibility using Python
+        echo "Converting icon to PNG format for better compatibility..."
+        python3 -c "
+try:
+    from PIL import Image
+    import sys
+    
+    # Open the ICO file and convert to PNG
+    with Image.open('astrofiler.ico') as img:
+        # Convert to RGBA if necessary
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+        
+        # Save as PNG
+        img.save('astrofiler.png', 'PNG')
+        print('Icon converted successfully!')
+except ImportError:
+    print('PIL not available, trying without it...')
+    # Fallback: just copy the ico file and rename it
+    import shutil
+    shutil.copy2('astrofiler.ico', 'astrofiler.png')
+    print('Icon copied (may not display correctly)')
+except Exception as e:
+    print(f'Icon conversion failed: {e}')
+    print('Will use original ICO file')
+" 2>/dev/null || echo "Note: Icon conversion failed, using ICO file"
+        
+        # Validate that the launcher script exists and is executable
+        if [ ! -f "install/launch_astrofiler.sh" ]; then
+            echo "Error: launch_astrofiler.sh not found!"
+            exit 1
+        fi
+        
+        # Make sure the launcher is executable
+        chmod +x install/launch_astrofiler.sh
+        
         # Create desktop file with correct paths
-        sed "s|ASTROFILER_PATH|$CURRENT_DIR|g" install/astrofiler.desktop > install/astrofiler_configured.desktop
+        if [ -f "astrofiler.png" ]; then
+            # Use PNG icon if available
+            sed "s|ASTROFILER_PATH|$CURRENT_DIR|g; s|astrofiler\.ico|astrofiler.png|g" install/astrofiler.desktop > install/astrofiler_configured.desktop
+        else
+            # Fall back to ICO icon
+            sed "s|ASTROFILER_PATH|$CURRENT_DIR|g" install/astrofiler.desktop > install/astrofiler_configured.desktop
+        fi
+        
+        # Make the desktop file executable
+        chmod +x install/astrofiler_configured.desktop
+        
+        # Validate the desktop file if desktop-file-validate is available
+        if command_exists desktop-file-validate; then
+            echo "Validating desktop file..."
+            if desktop-file-validate install/astrofiler_configured.desktop; then
+                echo "Desktop file validation passed."
+            else
+                echo "Warning: Desktop file validation failed, but continuing anyway."
+            fi
+        fi
         
         # Copy to desktop if it exists
         if [ -d "$HOME/Desktop" ]; then
@@ -189,6 +244,7 @@ case "$create_desktop" in
         if [ -d "$HOME/.local/share/applications" ]; then
             mkdir -p "$HOME/.local/share/applications"
             cp install/astrofiler_configured.desktop "$HOME/.local/share/applications/astrofiler.desktop"
+            chmod +x "$HOME/.local/share/applications/astrofiler.desktop"
             echo "Application menu entry created: $HOME/.local/share/applications/astrofiler.desktop"
         fi
         
@@ -201,6 +257,12 @@ case "$create_desktop" in
         rm -f install/astrofiler_configured.desktop
         
         echo "Desktop integration completed!"
+        echo
+        echo "If the desktop icon shows as broken:"
+        echo "1. Right-click the icon and select 'Properties' or 'Allow Launching'"
+        echo "2. Check that the 'Allow executing file as program' option is enabled"
+        echo "3. If the icon doesn't appear, try logging out and back in"
+        echo "4. You can also run: update-desktop-database ~/.local/share/applications"
         ;;
     * )
         echo "Skipping desktop shortcut creation."

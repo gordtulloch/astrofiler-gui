@@ -8,6 +8,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Change to the AstroFiler directory (parent of install folder)
 cd "$SCRIPT_DIR/.."
 
+# Verify we're in the right directory
+if [ ! -f "astrofiler.py" ]; then
+    echo "Error: Could not find astrofiler.py in the expected location."
+    echo "Current directory: $(pwd)"
+    echo "Script directory: $SCRIPT_DIR"
+    read -p "Press Enter to exit..."
+    exit 1
+fi
+
 # Check for updates from GitHub if this is a git repository
 if [ -d ".git" ]; then
     echo "Checking for updates from GitHub..."
