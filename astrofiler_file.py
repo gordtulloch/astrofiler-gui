@@ -165,7 +165,7 @@ class fitsProcessing:
                 else:
                     newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate)
-            elif hdr["IMAGETYP"]=="Bias":
+            elif "Bias" in hdr["IMAGETYP"]:
                 newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             else:
@@ -182,7 +182,7 @@ class fitsProcessing:
             newFitsFileId=self.submitFileToDB(newPath+newName.replace(" ", "_"),hdr,fileHash)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
-                    logging.debug("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
+                    logging.info("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
                     # Move the file to the new location
                     try:
                         shutil.move(os.path.join(root, file), newPath+newName)
@@ -192,7 +192,7 @@ class fitsProcessing:
                     except OSError as e:
                         logging.error("OS error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
                         return None
-                    logging.debug("File successfully moved to repo - "+newPath+newName)
+                    logging.info("File successfully moved to repo - "+newPath+newName)
                 else:
                     logging.warning("File already exists in repo, no changes - "+newPath+newName)
             else:
