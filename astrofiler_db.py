@@ -47,7 +47,7 @@ def setup_database():
         db.connect()
         db.create_tables([fitsFile, fitsSession])
         db.close()
-        logger.info("Database setup complete. fitsFile and fitsSession tables created.")
+        logger.debug("Database setup complete. fitsFile and fitsSession tables created.")
         
     except pw.OperationalError as e:
         logger.error(f"Database error: {e}")

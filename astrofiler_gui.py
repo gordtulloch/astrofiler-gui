@@ -33,7 +33,7 @@ def load_stylesheet(filename):
     """Load stylesheet from a file"""
     try:
         with open(filename, 'r', encoding='utf-8') as file:
-            logger.info(f"Successfully loaded stylesheet: {filename}")
+            logger.debug(f"Successfully loaded stylesheet: {filename}")
             return file.read()
     except FileNotFoundError:
         logger.warning(f"Stylesheet file '{filename}' not found. Using fallback styles.")
@@ -135,9 +135,28 @@ class ImagesTab(QWidget):
     
     def load_repo(self):
         """Load the repository by running registerFitsImages with progress dialog."""
-        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtWidgets import QProgressDialog, QMessageBox
         from PySide6.QtCore import Qt
         import time
+        
+        # Show warning dialog first
+        warning_msg = ("This function creates folders, renames files, and moves them into the folder structure.\n\n"
+                      "This operation will:\n"
+                      "• Scan your source directory for FITS files\n"
+                      "• Create an organized folder structure\n"
+                      "• Move and rename files according to their metadata\n\n"
+                      "Do you want to continue?")
+        
+        reply = QMessageBox.question(
+            self,
+            "Load Repository Warning",
+            warning_msg,
+            QMessageBox.Ok | QMessageBox.Cancel,
+            QMessageBox.Cancel  # Default to Cancel for safety
+        )
+        
+        if reply != QMessageBox.Ok:
+            return  # User cancelled, exit the function
         
         progress_dialog = None
         was_cancelled = False
@@ -161,16 +180,16 @@ class ImagesTab(QWidget):
                 """Progress callback function"""
                 nonlocal was_cancelled
                 try:
-                    logging.info(f"Progress callback called: {current}/{total} - {filename}")
+                    logging.debug(f"Progress callback called: {current}/{total} - {filename}")
                     
                     # Don't check cancellation if already cancelled
                     if was_cancelled:
-                        logging.info("Already cancelled, returning False")
+                        logging.debug("Already cancelled, returning False")
                         return False
                     
                     # Check if dialog was cancelled before updating
                     if progress_dialog and progress_dialog.wasCanceled():
-                        logging.info("User cancelled the operation")
+                        logging.debug("User cancelled the operation")
                         was_cancelled = True
                         return False  # Signal to stop processing
                     
@@ -182,20 +201,20 @@ class ImagesTab(QWidget):
                         
                         # Check again after processing events
                         if progress_dialog.wasCanceled():
-                            logging.info("User cancelled the operation during update")
+                            logging.debug("User cancelled the operation during update")
                             was_cancelled = True
                             return False
                     
-                    logging.info(f"Progress callback returning True for {filename}")
+                    logging.debug(f"Progress callback returning True for {filename}")
                     return True  # Continue processing
                 except Exception as e:
                     logging.error(f"Error in progress callback: {e}")
                     return True  # Continue on callback errors
             
             # Run the processing with progress callback
-            logging.info("Starting registerFitsImages with progress callback")
+            logging.debug("Starting registerFitsImages with progress callback")
             registered_files = self.fits_file_handler.registerFitsImages(moveFiles=True, progress_callback=update_progress)
-            logging.info(f"registerFitsImages completed, registered {len(registered_files)} files")
+            logging.debug(f"registerFitsImages completed, registered {len(registered_files)} files")
             
             # Close progress dialog
             if progress_dialog:
@@ -204,12 +223,20 @@ class ImagesTab(QWidget):
             # Check if operation was cancelled or completed normally
             if was_cancelled:
                 QMessageBox.information(self, "Cancelled", "Repository loading was cancelled by user.")
-                logging.info("Operation was cancelled by user")
+                logging.debug("Operation was cancelled by user")
             elif len(registered_files) == 0:
                 QMessageBox.information(self, "No Files", "No FITS files found to process in the source directory.")
                 logging.info("No FITS files found to process")
             else:
                 self.load_fits_data()
+                
+                # Invalidate stats cache since new data was loaded
+                parent_widget = self.parent()
+                while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                    parent_widget = parent_widget.parent()
+                if parent_widget:
+                    parent_widget.invalidate_stats_cache()
+                
                 QMessageBox.information(self, "Success", f"Repository loaded successfully! Processed {len(registered_files)} files.")
                 logging.info("Operation completed successfully")
                 
@@ -256,6 +283,14 @@ class ImagesTab(QWidget):
                 QMessageBox.information(self, "Cancelled", "Repository synchronization was cancelled by user.")
             else:
                 self.load_fits_data()
+                
+                # Invalidate stats cache since new data was synced
+                parent_widget = self.parent()
+                while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                    parent_widget = parent_widget.parent()
+                if parent_widget:
+                    parent_widget.invalidate_stats_cache()
+                
                 QMessageBox.information(self, "Success", f"Repository synchronized successfully! Processed {len(registered_files)} files.")
                 
         except Exception as e:
@@ -436,9 +471,9 @@ class ImagesTab(QWidget):
         total_files = len(fits_files)
         total_dates = len(dates_dict)
         if total_files > 0:
-            logger.info(f"Loaded {total_files} FITS files from {total_dates} dates into the display (sorted by date)")
+            logger.debug(f"Loaded {total_files} FITS files from {total_dates} dates into the display (sorted by date)")
         else:
-            logger.info("No FITS files found in database")
+            logger.debug("No FITS files found in database")
 
     def _add_file_item(self, parent_item, fits_file):
         """Helper method to add a file item to a parent tree widget item."""
@@ -502,6 +537,13 @@ class ImagesTab(QWidget):
             
             # Delete all fitsFile records from the database
             deleted_files = FitsFileModel.delete().execute()
+            
+            # Invalidate stats cache since all data was cleared
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                parent_widget = parent_widget.parent()
+            if parent_widget:
+                parent_widget.invalidate_stats_cache()
             
             logger.info(f"Deleted {deleted_sessions} session records and {deleted_files} file records from database")
             QMessageBox.information(self, "Success", f"Repository cleared! Deleted {deleted_sessions} session records and {deleted_files} file records from database.")
@@ -874,6 +916,14 @@ class SessionsTab(QWidget):
                 logging.info("Light session creation was cancelled by user")
             else:
                 self.load_sessions_data()
+                
+                # Invalidate stats cache since session data was updated
+                parent_widget = self.parent()
+                while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                    parent_widget = parent_widget.parent()
+                if parent_widget:
+                    parent_widget.invalidate_stats_cache()
+                
                 QMessageBox.information(self, "Success", f"Light sessions updated successfully! Created {len(created_sessions)} sessions.")
                 logging.info("Light session creation completed successfully")
                 
@@ -946,6 +996,14 @@ class SessionsTab(QWidget):
                 logging.info("Calibration session creation was cancelled by user")
             else:
                 self.load_sessions_data()
+                
+                # Invalidate stats cache since calibration session data was updated
+                parent_widget = self.parent()
+                while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                    parent_widget = parent_widget.parent()
+                if parent_widget:
+                    parent_widget.invalidate_stats_cache()
+                
                 QMessageBox.information(self, "Success", f"Calibration sessions updated successfully! Created {len(created_sessions)} sessions.")
                 logging.info("Calibration session creation completed successfully")
                 
@@ -1051,9 +1109,9 @@ class SessionsTab(QWidget):
             
             count = len(sessions)
             if count > 0:
-                logger.info(f"Loaded {count} sessions into hierarchical display")
+                logger.debug(f"Loaded {count} sessions into hierarchical display")
             else:
-                logger.info("No sessions found in database")
+                logger.debug("No sessions found in database")
             
         except Exception as e:
             logger.error(f"Error loading Sessions data: {e}")
@@ -1099,6 +1157,13 @@ class SessionsTab(QWidget):
             
             # Refresh the display (should be empty now)
             self.load_sessions_data()
+            
+            # Invalidate stats cache since session data was cleared
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                parent_widget = parent_widget.parent()
+            if parent_widget:
+                parent_widget.invalidate_stats_cache()
             
         except Exception as e:
             logger.error(f"Error clearing Sessions: {e}")
@@ -1608,7 +1673,7 @@ class ConfigTab(QWidget):
                 fits_viewer_path = config.get('DEFAULT', 'fits_viewer_path')
                 self.fits_viewer_path.setText(fits_viewer_path)
                 
-            logger.info("Settings loaded from astrofiler.ini!")
+            logger.debug("Settings loaded from astrofiler.ini!")
             
         except Exception as e:
             logger.error(f"Error loading settings: {e}")
@@ -1761,7 +1826,7 @@ class AboutTab(QWidget):
                 
                 self.background_label.setPixmap(scaled_pixmap)
                 self.background_label.setScaledContents(True)
-                logger.info("Successfully loaded images/background.jpg as background")
+                logger.debug("Successfully loaded images/background.jpg as background")
             else:
                 # If image loading fails, use the default background
                 logger.warning("Failed to load images/background.jpg, using default background")
@@ -1845,7 +1910,7 @@ class LogTab(QWidget):
                     cursor = self.log_text.textCursor()
                     cursor.movePosition(QTextCursor.MoveOperation.End)
                     self.log_text.setTextCursor(cursor)
-                    logger.info("Log content loaded successfully")
+                    logger.debug("Log content loaded successfully")
             else:
                 self.log_text.setPlainText("Log file not found.")
                 logger.warning(f"Log file not found: {self.log_file_path}")
@@ -2114,17 +2179,32 @@ class DuplicatesTab(QWidget):
 class StatsTab(QWidget):
     def __init__(self):
         super().__init__()
+        # Initialize cache variables
+        self._stats_cache = {}
+        self._cache_timestamp = None
+        self._cache_validity_seconds = 300  # Cache valid for 5 minutes
+        
         self.init_ui()
         self.load_stats_data()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 10)  # Reduce top margin from default
+        layout.setSpacing(5)  # Reduce spacing between elements
         
         # Refresh button
         refresh_layout = QHBoxLayout()
+        refresh_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins around button layout
         self.refresh_button = QPushButton("Refresh Stats")
-        self.refresh_button.clicked.connect(self.load_stats_data)
+        self.refresh_button.clicked.connect(self.force_refresh_stats)
+        self.refresh_button.setToolTip("Force refresh of statistics (clears cache)")
+        
+        # Add cache status label
+        self.cache_status_label = QLabel("")
+        self.cache_status_label.setStyleSheet("color: gray; font-size: 10px;")
+        
         refresh_layout.addWidget(self.refresh_button)
+        refresh_layout.addWidget(self.cache_status_label)
         refresh_layout.addStretch()
         layout.addLayout(refresh_layout)
         
@@ -2134,6 +2214,8 @@ class StatsTab(QWidget):
         # Left column
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(5, 0, 5, 5)  # Reduce margins
+        left_layout.setSpacing(10)  # Reduce spacing between sections
         
         # Last 10 Objects Observed section
         recent_objects_label = QLabel("Last 10 Objects Observed")
@@ -2160,7 +2242,7 @@ class StatsTab(QWidget):
         left_layout.addWidget(self.recent_objects_table)
         
         # Add spacing
-        left_layout.addSpacing(20)
+        left_layout.addSpacing(10)  # Reduce spacing between sections
         
         # Summary Statistics section
         summary_label = QLabel("Summary Statistics")
@@ -2191,6 +2273,8 @@ class StatsTab(QWidget):
         # Right column
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(5, 0, 5, 5)  # Reduce margins
+        right_layout.setSpacing(10)  # Reduce spacing between sections
         
         # Top 10 Objects section
         objects_label = QLabel("Top 10 Objects by Total Integration Time")
@@ -2217,7 +2301,7 @@ class StatsTab(QWidget):
         right_layout.addWidget(self.objects_table)
         
         # Add spacing
-        right_layout.addSpacing(15)
+        right_layout.addSpacing(10)  # Reduce spacing between sections
         
         # Filter Chart section
         chart_label = QLabel("Total Imaging Time by Filter")
@@ -2243,9 +2327,65 @@ class StatsTab(QWidget):
         # Add the splitter to the main layout
         layout.addWidget(splitter)
     
+    def _is_cache_valid(self):
+        """Check if the stats cache is still valid"""
+        if self._cache_timestamp is None:
+            return False
+        
+        import time
+        current_time = time.time()
+        cache_age = current_time - self._cache_timestamp
+        
+        return cache_age < self._cache_validity_seconds
+    
+    def _update_cache_status(self):
+        """Update the cache status label"""
+        if self._cache_timestamp is None:
+            self.cache_status_label.setText("")
+        else:
+            import time
+            cache_age = int(time.time() - self._cache_timestamp)
+            if cache_age < 60:
+                self.cache_status_label.setText(f"Cache: {cache_age}s ago")
+            else:
+                minutes = cache_age // 60
+                self.cache_status_label.setText(f"Cache: {minutes}m ago")
+    
+    def _invalidate_cache(self):
+        """Invalidate the stats cache"""
+        self._stats_cache.clear()
+        self._cache_timestamp = None
+        self.cache_status_label.setText("")
+        logger.debug("Stats cache invalidated")
+    
+    def force_refresh_stats(self):
+        """Force refresh statistics by clearing cache first"""
+        self._invalidate_cache()
+        self.load_stats_data()
+    
+    def invalidate_stats_cache(self):
+        """Public method to invalidate stats cache when data changes"""
+        self._invalidate_cache()
+        logger.debug("Stats cache invalidated due to data changes")
+    
+    def set_cache_validity_duration(self, seconds):
+        """Set how long the cache remains valid (in seconds)"""
+        self._cache_validity_seconds = seconds
+        logger.debug(f"Stats cache validity duration set to {seconds} seconds")
+    
     def load_stats_data(self):
-        """Load and display statistics data"""
+        """Load and display statistics data with caching"""
         try:
+            # Check if we can use cached data
+            if self._is_cache_valid():
+                logger.debug("Using cached statistics data")
+                self._load_from_cache()
+                self._update_cache_status()
+                return
+            
+            # Cache is invalid, load fresh data
+            logger.debug("Loading fresh statistics data")
+            
             # Load last 10 objects observed
             self.load_recent_objects()
             
@@ -2258,9 +2398,23 @@ class StatsTab(QWidget):
             # Load and create pie chart for filters
             self.create_filter_pie_chart()
             
+            # Update cache timestamp
+            import time
+            self._cache_timestamp = time.time()
+            self._update_cache_status()
+            
+            logger.debug("Statistics data loaded and cached")
+            
         except Exception as e:
             logging.error(f"Error loading stats data: {str(e)}")
             QMessageBox.warning(self, "Stats Error", f"Error loading statistics: {str(e)}")
+    
+    def _load_from_cache(self):
+        """Load statistics from cache if available"""
+        # Note: Since the data is displayed in Qt widgets, we don't need to cache the actual data
+        # The widgets retain their state, so we just need to avoid requerying the database
+        # This method exists for completeness and future enhancements
+        pass
     
     def load_recent_objects(self):
         """Load last 10 objects observed based on most recent sessions"""
@@ -2602,8 +2756,12 @@ class StatsTab(QWidget):
     def showEvent(self, event):
         """Handle show events to reload data when tab becomes visible"""
         super().showEvent(event)
-        # Reload stats data when tab becomes visible
-        self.load_stats_data()
+        # Only reload stats data if cache is invalid
+        if not self._is_cache_valid():
+            self.load_stats_data()
+        else:
+            logger.debug("Stats tab shown - using cached data")
+            self._update_cache_status()
     
     def resizeEvent(self, event):
         """Handle resize events to update chart size"""
@@ -2663,6 +2821,11 @@ class AstroFilerGUI(QWidget):
         self.tab_widget.setCurrentWidget(self.stats_tab)
         
         layout.addWidget(self.tab_widget)
+    
+    def invalidate_stats_cache(self):
+        """Helper method to invalidate stats cache from any tab"""
+        if hasattr(self, 'stats_tab'):
+            self.stats_tab.invalidate_stats_cache()
     
     def apply_initial_theme(self):
         """Apply dark theme as default"""
