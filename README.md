@@ -50,16 +50,40 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 AstroFiler includes automated installation scripts for all major platforms:
 
 ### Windows
+Install Git - There are also a few ways to install Git on Windows. The most official build is available for download on the Git website. Just go to https://git-scm.com/download/win and the download will start automatically. Note that this is a project called Git for Windows, which is separate from Git itself; for more information on it, go to https://gitforwindows.org.
+
+Once git is installed, you can open a powershell command line (run as Admin) and enter:
+
 ```powershell
+C:
+cd \
+Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force
+git clone https://github.com/gordtulloch/astrofiler-gui.git
+cd astrofiler-gui
 .\install\install.ps1
 ```
 
 ### Linux
+In Linux you can install git from Debian distros via:
+
 ```bash
+apt install git      # Debian distros
+sudo yum install git # CentOS distros
+cd $HOME
+git clone https://github.com/gordtulloch/astrofiler-gui.git
+cd astrofiler-gui
 chmod +x install/install.sh && ./install/install.sh
 ```
 
 ### macOS
+There are several ways to install Git on macOS. The easiest is probably to install the Xcode Command Line Tools. On Mavericks (10.9) or above you can do this simply by trying to run git from the Terminal the very first time.
+
+```bash
+git --version
+```
+
+If you don’t have it installed already, it will prompt you to install it.
+
 ```bash
 chmod +x install/install_macos.sh && ./install/install_macos.sh
 ```
