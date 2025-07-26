@@ -2210,6 +2210,7 @@ class StatsTab(QWidget):
         
         # Main content area with horizontal splitter for two columns
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Left column
         left_widget = QWidget()
@@ -2265,8 +2266,8 @@ class StatsTab(QWidget):
         
         left_layout.addWidget(self.summary_table)
         
-        # Add stretch to push content to top
-        left_layout.addStretch()
+        # Don't add stretch - let content naturally fill the space
+        # left_layout.addStretch()  # Removed to prevent excessive spacing in fullscreen
         
         splitter.addWidget(left_widget)
         
@@ -2316,8 +2317,8 @@ class StatsTab(QWidget):
         self.chart_label.setStyleSheet("border: 1px solid gray; background-color: white;")
         right_layout.addWidget(self.chart_label)
         
-        # Add stretch to push content to top
-        right_layout.addStretch()
+        # Don't add stretch - let content naturally fill the space  
+        # right_layout.addStretch()  # Removed to prevent excessive spacing in fullscreen
         
         splitter.addWidget(right_widget)
         
@@ -2326,6 +2327,9 @@ class StatsTab(QWidget):
         
         # Add the splitter to the main layout
         layout.addWidget(splitter)
+        
+        # Add stretch at the bottom to push content to top in fullscreen mode
+        layout.addStretch(1)  # Use factor of 1 to control expansion
     
     def _is_cache_valid(self):
         """Check if the stats cache is still valid"""
