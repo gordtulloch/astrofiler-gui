@@ -66,6 +66,15 @@ def detect_system_theme():
         return False
 
 class ImagesTab(QWidget):
+    """
+    Images tab for viewing and managing FITS files.
+    
+    Features:
+    - Hierarchical view of FITS files
+    - Sortable by Object (default) or Date
+    - File loading and repository synchronization
+    - Context menus and double-click actions
+    """
     def __init__(self):
         super().__init__()
         self.init_ui()        # Load existing data on startup
@@ -81,11 +90,23 @@ class ImagesTab(QWidget):
         self.clear_button = QPushButton("Clear Repo")
         self.refresh_button = QPushButton("Refresh")
         
+        # Add sort control
+        sort_label = QLabel("Sort by:")
+        sort_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Object", "Date"])
+        self.sort_combo.setCurrentText("Object")  # Set default to Object
+        self.sort_combo.setToolTip("Choose how to organize the file tree:\n• Object: Group by astronomical object, then by date\n• Date: Group by observation date, then by object")
+        self.sort_combo.setMinimumWidth(80)
+        self.sort_combo.setStyleSheet("QComboBox { padding: 3px; }")
+        
         controls_layout.addWidget(self.load_repo_button)
         controls_layout.addWidget(self.sync_repo_button)
         controls_layout.addWidget(self.clear_button)
         controls_layout.addWidget(self.refresh_button)
         controls_layout.addStretch()
+        controls_layout.addWidget(sort_label)
+        controls_layout.addWidget(self.sort_combo)
           # File list
         self.file_tree = QTreeWidget()
         self.file_tree.setHeaderLabels(["Object", "Type", "Date", "Exposure", "Filter", "Telescope", "Instrument", "Temperature", "Filename"])
@@ -109,6 +130,7 @@ class ImagesTab(QWidget):
         self.sync_repo_button.clicked.connect(self.sync_repo)
         self.clear_button.clicked.connect(self.clear_files)
         self.refresh_button.clicked.connect(self.load_fits_data)
+        self.sort_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when sort changes
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
     
     def load_repo(self):
@@ -243,132 +265,231 @@ class ImagesTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
 
     def load_fits_data(self):
-        """Load FITS file data from the database and populate the tree widget categorized by object name and date."""
+        """Load FITS file data from the database and populate the tree widget based on selected sort criteria."""
         try:
             self.file_tree.clear()
 
-            # Query all FITS files from the database where fitsFileType contains "Light"
-            fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
-
-            # Group files by object name and date
-            objects_dict = {}
-            for fits_file in fits_files:
-                object_name = fits_file.fitsFileObject or "Unknown"
-                date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
-
-                if object_name not in objects_dict:
-                    objects_dict[object_name] = {}
-                if date_str not in objects_dict[object_name]:
-                    objects_dict[object_name][date_str] = []
-
-                objects_dict[object_name][date_str].append(fits_file)
-
-            # Create parent items for each object
-            for object_name, dates_dict in objects_dict.items():
-                # Create parent item for the object
-                parent_item = QTreeWidgetItem()
-                parent_item.setText(0, object_name)  # Object name in first column
-                parent_item.setText(1, f"({sum(len(files) for files in dates_dict.values())} files)")  # File count in Type column
-                parent_item.setText(2, "")  # Empty other columns for parent
-                parent_item.setText(3, "")
-                parent_item.setText(4, "")
-                parent_item.setText(5, "")
-                parent_item.setText(6, "")
-                parent_item.setText(7, "")
-
-                # Make parent item bold and slightly different color
-                font = parent_item.font(0)
-                font.setBold(True)
-                for col in range(9):
-                    parent_item.setFont(col, font)
-
-                # Add sub-parent items for each date
-                for date_str, files in dates_dict.items():
-                    date_item = QTreeWidgetItem()
-                    date_item.setText(0, date_str)  # Date in first column
-                    date_item.setText(1, f"({len(files)} files)")  # File count in Type column
-                    date_item.setText(2, "")  # Empty other columns for date
-                    date_item.setText(3, "")
-                    date_item.setText(4, "")
-                    date_item.setText(5, "")
-                    date_item.setText(6, "")
-                    date_item.setText(7, "")
-                    date_item.setText(8, "")
-
-                    # Add child items for each file
-                    for fits_file in files:
-                        child_item = QTreeWidgetItem()
-
-                        # Populate the child item with database fields
-                        child_item.setText(0, "")  # Empty object column for child (parent shows object)
-                        child_item.setText(1, fits_file.fitsFileType or "N/A")    # Type
-
-                        # Format date to be more readable
-                        date_str = str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "N/A"
-                        if date_str != "N/A" and "T" in date_str:
-                            try:
-                                from datetime import datetime
-                                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                                date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                            except:
-                                pass  # Keep original format if parsing fails
-                        child_item.setText(2, date_str)  # Date
-
-                        # Format exposure time
-                        exp_time = fits_file.fitsFileExpTime or ""
-                        if exp_time:
-                            child_item.setText(3, f"{exp_time}s")  # Exposure
-                        else:
-                            child_item.setText(3, "N/A")
-
-                        child_item.setText(4, fits_file.fitsFileFilter or "N/A")  # Filter
-                        child_item.setText(5, fits_file.fitsFileTelescop or "N/A")  # Telescope
-                        child_item.setText(6, fits_file.fitsFileInstrument or "N/A")  # Instrument
-
-                        # Format temperature
-                        temp = fits_file.fitsFileCCDTemp or ""
-                        if temp:
-                            child_item.setText(7, f"{temp}°C")  # Temperature
-                        else:
-                            child_item.setText(7, "N/A")
-
-                        # Extract just the filename from the full path for display
-                        filename = fits_file.fitsFileName or ""
-                        if filename:
-                            filename = os.path.basename(filename)
-                            child_item.setText(8, filename)  # Filename
-                        else:
-                            child_item.setText(8, "N/A")
-
-                        # Store the full database record for potential future use
-                        child_item.setData(0, Qt.UserRole, fits_file.fitsFileId)
-
-                        # Add child to date item
-                        date_item.addChild(child_item)
-
-                    # Add date item to parent
-                    parent_item.addChild(date_item)
-
-                    # Keep the date item collapsed by default
-                    date_item.setExpanded(False)
-
-                # Add parent item to tree
-                self.file_tree.addTopLevelItem(parent_item)
-
-                # Keep the parent item collapsed by default
-                parent_item.setExpanded(False)
-
-            total_files = len(fits_files)
-            total_objects = len(objects_dict)
-            if total_files > 0:
-                logger.info(f"Loaded {total_files} FITS files from {total_objects} objects into the display")
+            # Get the current sort criteria (default to Object if UI not yet initialized)
+            sort_by = getattr(self, 'sort_combo', None)
+            if sort_by is not None:
+                sort_by = self.sort_combo.currentText()
             else:
-                logger.info("No FITS files found in database")
-
+                sort_by = "Object"  # Default when UI isn't ready yet
+            
+            if sort_by == "Object":
+                self._load_fits_data_by_object()
+            else:  # Date
+                self._load_fits_data_by_date()
+            
+            logger.info(f"FITS data loaded and organized by {sort_by}")
+                
         except Exception as e:
             logger.error(f"Error loading FITS data: {e}")
             if "no such table" not in str(e).lower():
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
+
+    def _load_fits_data_by_object(self):
+        """Load FITS file data grouped by object name, then by date."""
+        # Query all FITS files from the database where fitsFileType contains "Light"
+        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
+
+        # Group files by object name and date
+        objects_dict = {}
+        for fits_file in fits_files:
+            object_name = fits_file.fitsFileObject or "Unknown"
+            date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
+
+            if object_name not in objects_dict:
+                objects_dict[object_name] = {}
+            if date_str not in objects_dict[object_name]:
+                objects_dict[object_name][date_str] = []
+
+            objects_dict[object_name][date_str].append(fits_file)
+
+        # Create parent items for each object (sorted alphabetically)
+        for object_name in sorted(objects_dict.keys()):
+            dates_dict = objects_dict[object_name]
+            # Create parent item for the object
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, object_name)  # Object name in first column
+            parent_item.setText(1, f"({sum(len(files) for files in dates_dict.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each date (sorted by date)
+            for date_str in sorted(dates_dict.keys(), reverse=True):  # Most recent dates first
+                files = dates_dict[date_str]
+                date_item = QTreeWidgetItem()
+                date_item.setText(0, date_str)  # Date in first column
+                date_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                date_item.setText(2, "")  # Empty other columns for date
+                date_item.setText(3, "")
+                date_item.setText(4, "")
+                date_item.setText(5, "")
+                date_item.setText(6, "")
+                date_item.setText(7, "")
+                date_item.setText(8, "")
+
+                # Add child items for each file
+                for fits_file in files:
+                    self._add_file_item(date_item, fits_file)
+
+                # Add date item to parent
+                parent_item.addChild(date_item)
+
+                # Keep the date item collapsed by default
+                date_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+
+            # Keep the parent item collapsed by default
+            parent_item.setExpanded(False)
+
+        total_files = len(fits_files)
+        total_objects = len(objects_dict)
+        if total_files > 0:
+            logger.info(f"Loaded {total_files} FITS files from {total_objects} objects into the display (sorted by object)")
+        else:
+            logger.info("No FITS files found in database")
+
+    def _load_fits_data_by_date(self):
+        """Load FITS file data grouped by date, then by object."""
+        # Query all FITS files from the database where fitsFileType contains "Light"
+        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject)
+
+        # Group files by date and object
+        dates_dict = {}
+        for fits_file in fits_files:
+            object_name = fits_file.fitsFileObject or "Unknown"
+            date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
+
+            if date_str not in dates_dict:
+                dates_dict[date_str] = {}
+            if object_name not in dates_dict[date_str]:
+                dates_dict[date_str][object_name] = []
+
+            dates_dict[date_str][object_name].append(fits_file)
+
+        # Create parent items for each date (sorted by date, newest first)
+        for date_str in sorted(dates_dict.keys(), reverse=True):
+            objects_dict = dates_dict[date_str]
+            # Create parent item for the date
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, date_str)  # Date in first column
+            parent_item.setText(1, f"({sum(len(files) for files in objects_dict.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each object (sorted alphabetically)
+            for object_name in sorted(objects_dict.keys()):
+                files = objects_dict[object_name]
+                object_item = QTreeWidgetItem()
+                object_item.setText(0, object_name)  # Object name in first column
+                object_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                object_item.setText(2, "")  # Empty other columns for object
+                object_item.setText(3, "")
+                object_item.setText(4, "")
+                object_item.setText(5, "")
+                object_item.setText(6, "")
+                object_item.setText(7, "")
+                object_item.setText(8, "")
+
+                # Add child items for each file
+                for fits_file in files:
+                    self._add_file_item(object_item, fits_file)
+
+                # Add object item to parent
+                parent_item.addChild(object_item)
+
+                # Keep the object item collapsed by default
+                object_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+
+            # Keep the parent item collapsed by default
+            parent_item.setExpanded(False)
+
+        total_files = len(fits_files)
+        total_dates = len(dates_dict)
+        if total_files > 0:
+            logger.info(f"Loaded {total_files} FITS files from {total_dates} dates into the display (sorted by date)")
+        else:
+            logger.info("No FITS files found in database")
+
+    def _add_file_item(self, parent_item, fits_file):
+        """Helper method to add a file item to a parent tree widget item."""
+        child_item = QTreeWidgetItem()
+
+        # Populate the child item with database fields
+        child_item.setText(0, "")  # Empty object column for child (parent shows object/date)
+        child_item.setText(1, fits_file.fitsFileType or "N/A")    # Type
+
+        # Format date to be more readable
+        date_str = str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "N/A"
+        if date_str != "N/A" and "T" in date_str:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                pass  # Keep original format if parsing fails
+        child_item.setText(2, date_str)  # Date
+
+        # Format exposure time
+        exp_time = fits_file.fitsFileExpTime or ""
+        if exp_time:
+            child_item.setText(3, f"{exp_time}s")  # Exposure
+        else:
+            child_item.setText(3, "N/A")
+
+        child_item.setText(4, fits_file.fitsFileFilter or "N/A")  # Filter
+        child_item.setText(5, fits_file.fitsFileTelescop or "N/A")  # Telescope
+        child_item.setText(6, fits_file.fitsFileInstrument or "N/A")  # Instrument
+
+        # Format temperature
+        temp = fits_file.fitsFileCCDTemp or ""
+        if temp:
+            child_item.setText(7, f"{temp}°C")  # Temperature
+        else:
+            child_item.setText(7, "N/A")
+
+        # Extract just the filename from the full path for display
+        filename = fits_file.fitsFileName or ""
+        if filename:
+            filename = os.path.basename(filename)
+            child_item.setText(8, filename)  # Filename
+        else:
+            child_item.setText(8, "N/A")
+
+        # Store the full database record for potential future use
+        child_item.setData(0, Qt.UserRole, fits_file.fitsFileId)
+
+        # Add child to parent item
+        parent_item.addChild(child_item)
 
     def clear_files(self):
         """Clear the file tree and delete all fitsSession and fitsFile records from the database."""
