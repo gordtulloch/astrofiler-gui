@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     logger.info("Starting AstroFiler application")
-    setup_database()  # Initialize the database and table
-    app = QApplication(sys.argv)
-    widget = AstroFilerGUI()
-    widget.show()
-    sys.exit(app.exec())
+    if (setup_database()):  # Initialize the database and table
+        app = QApplication(sys.argv)
+        widget = AstroFilerGUI()
+        widget.show()
+        sys.exit(app.exec())
     logger.info("AstroFiler application closed")
