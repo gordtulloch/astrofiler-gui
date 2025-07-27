@@ -58,3 +58,4 @@ def setup_database():
         
     except pw.OperationalError as e:
         logger.error(f"Database error: {e}")
+        exit(1)
