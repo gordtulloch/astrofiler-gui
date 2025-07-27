@@ -20,21 +20,27 @@ fi
 # Check for updates from GitHub if this is a git repository
 if [ -d ".git" ]; then
     echo "Checking for updates from GitHub..."
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Checking for updates from GitHub..." >> astrofiler.log
     if command -v git >/dev/null 2>&1; then
         git fetch origin main >/dev/null 2>&1
         UPDATE_COUNT=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
         if [ "$UPDATE_COUNT" -gt 0 ] 2>/dev/null; then
             echo "Updates available! Pulling latest changes..."
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Updates available! $UPDATE_COUNT commits behind. Pulling latest changes..." >> astrofiler.log
             if git pull origin main; then
                 echo "Successfully updated to latest version."
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Successfully updated to latest version from GitHub" >> astrofiler.log
             else
                 echo "Warning: Failed to update from GitHub. Continuing with current version."
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - WARNING - Failed to update from GitHub. Continuing with current version" >> astrofiler.log
             fi
         else
             echo "Already up to date."
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Repository already up to date" >> astrofiler.log
         fi
     else
         echo "Note: git not available, skipping update check."
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - git not available, skipping update check" >> astrofiler.log
     fi
     echo
 fi
@@ -49,11 +55,13 @@ if [ ! -f ".venv/bin/activate" ]; then
 fi
 
 echo "Starting AstroFiler..."
+echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Starting AstroFiler application via launch script" >> astrofiler.log
 
 # Activate virtual environment
 source .venv/bin/activate
 if [ $? -ne 0 ]; then
     echo "Error: Failed to activate virtual environment."
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - ERROR - Failed to activate virtual environment" >> astrofiler.log
     read -p "Press Enter to exit..."
     exit 1
 fi

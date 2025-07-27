@@ -11,18 +11,23 @@ cd /d "%SCRIPT_DIR%\.."
 REM Check for updates from GitHub if this is a git repository
 if exist ".git" (
     echo Checking for updates from GitHub...
+    echo %date% %time% - launch_astrofiler.bat - INFO - Checking for updates from GitHub... >> astrofiler.log
     git fetch origin main >nul 2>&1
     for /f %%i in ('git rev-list HEAD..origin/main --count 2^>nul') do set UPDATE_COUNT=%%i
     if not "%UPDATE_COUNT%"=="0" (
         echo Updates available! Pulling latest changes...
+        echo %date% %time% - launch_astrofiler.bat - INFO - Updates available! %UPDATE_COUNT% commits behind. Pulling latest changes... >> astrofiler.log
         git pull origin main
         if errorlevel 1 (
             echo Warning: Failed to update from GitHub. Continuing with current version.
+            echo %date% %time% - launch_astrofiler.bat - WARNING - Failed to update from GitHub. Continuing with current version >> astrofiler.log
         ) else (
             echo Successfully updated to latest version.
+            echo %date% %time% - launch_astrofiler.bat - INFO - Successfully updated to latest version from GitHub >> astrofiler.log
         )
     ) else (
         echo Already up to date.
+        echo %date% %time% - launch_astrofiler.bat - INFO - Repository already up to date >> astrofiler.log
     )
     echo.
 )
@@ -38,9 +43,11 @@ if not exist ".venv\Scripts\activate.bat" (
 
 REM Activate virtual environment and run AstroFiler
 echo Starting AstroFiler...
+echo %date% %time% - launch_astrofiler.bat - INFO - Starting AstroFiler application via launch script >> astrofiler.log
 call ".venv\Scripts\activate.bat"
 if %errorlevel% neq 0 (
     echo Error: Failed to activate virtual environment.
+    echo %date% %time% - launch_astrofiler.bat - ERROR - Failed to activate virtual environment >> astrofiler.log
     pause
     exit /b 1
 )

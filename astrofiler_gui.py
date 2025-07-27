@@ -241,8 +241,27 @@ class ImagesTab(QWidget):
 
     def sync_repo(self):
         """Sync the repository by running registerFitsImages with moveFiles=False and progress dialog."""
-        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtWidgets import QProgressDialog, QMessageBox
         from PySide6.QtCore import Qt
+        
+        # Show warning dialog first
+        warning_msg = ("Sync Repo reloads the repository database with data from files in the specified Repository directory and does not change any data.\n\n"
+                      "If you want to move files from Incoming to the Repository use Load Repo.\n\n"
+                      "Do you want to continue with synchronization?")
+        
+        reply = QMessageBox.question(
+            self,
+            "Sync Repository Information",
+            warning_msg,
+            QMessageBox.Ok | QMessageBox.Cancel,
+            QMessageBox.Ok  # Default to OK since this is informational
+        )
+        
+        if reply != QMessageBox.Ok:
+            return  # User cancelled, exit the function
+        
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             self.fits_file_handler = fitsProcessing()
@@ -256,24 +275,40 @@ class ImagesTab(QWidget):
             
             def update_progress(current, total, filename):
                 """Progress callback function"""
-                if progress_dialog.wasCanceled():
+                nonlocal was_cancelled
+                
+                # Don't check cancellation if already cancelled
+                if was_cancelled:
+                    return False
+                
+                # Check if dialog was cancelled before updating
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
                     return False  # Signal to stop processing
                 
                 progress = int((current / total) * 100) if total > 0 else 0
                 progress_dialog.setValue(progress)
                 progress_dialog.setLabelText(f"Syncing {current}/{total}: {os.path.basename(filename)}")
                 QApplication.processEvents()  # Keep UI responsive
+                
+                # Check again after processing events
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    return False
+                
                 return True  # Continue processing
             
             # Run the processing with progress callback
             registered_files = self.fits_file_handler.registerFitsImages(moveFiles=False, progress_callback=update_progress)
             
             # Close progress dialog
-            progress_dialog.close()
+            if progress_dialog:
+                progress_dialog.close()
             
-            # Check if operation was cancelled
-            if progress_dialog.wasCanceled():
+            # Check if operation was cancelled or completed normally
+            if was_cancelled:
                 QMessageBox.information(self, "Cancelled", "Repository synchronization was cancelled by user.")
+                logger.info("Repository synchronization was cancelled by user")
             else:
                 self.load_fits_data()
                 
@@ -285,9 +320,10 @@ class ImagesTab(QWidget):
                     parent_widget.invalidate_stats_cache()
                 
                 QMessageBox.information(self, "Success", f"Repository synchronized successfully! Processed {len(registered_files)} files.")
+                logger.info("Repository synchronization completed successfully")
                 
         except Exception as e:
-            if 'progress_dialog' in locals():
+            if progress_dialog:
                 progress_dialog.close()
             logger.error(f"Error syncing repository: {e}")
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
@@ -1261,7 +1297,7 @@ class MergeTab(QWidget):
             "This tool allows you to merge object names in the database. "
             "All instances of the 'From' object name will be changed to the 'To' object name. "
             "If the 'To' object name does not exist, it will be created, if necessary. "
-            "Optionally, you can also rename the actual files on disk."
+            "Optionally, you can also rename and move the actual files on disk. The FITS header will also be updated"
         )
         instructions.setWordWrap(True)
         instructions.setStyleSheet("padding: 10px; background-color: rgba(255, 255, 255, 0.1); border-radius: 5px; margin: 10px 0px;")
@@ -1282,7 +1318,7 @@ class MergeTab(QWidget):
         form_layout.addRow("To Object:", self.to_field)
         
         # Change filenames checkbox
-        self.change_filenames = QCheckBox("Change filenames on disk")
+        self.change_filenames = QCheckBox("Change/Move filenames on disk")
         self.change_filenames.setChecked(True)  # Default to true
         self.change_filenames.setToolTip("If checked, actual files on disk will be renamed to match the new object name")
         form_layout.addRow("", self.change_filenames)
@@ -1390,7 +1426,7 @@ class MergeTab(QWidget):
         # Confirm with user
         msg = f"Are you sure you want to merge '{from_object}' into '{to_object}'?\n\n"
         if change_files:
-            msg += "This will change database records AND rename files on disk.\n"
+            msg += "This will change database records AND rename/move files on disk.\n"
         else:
             msg += "This will change database records only.\n"
         msg += "\nThis action cannot be undone!"
@@ -1403,6 +1439,14 @@ class MergeTab(QWidget):
             return
         
         try:
+            # Get repository folder from config
+            import configparser
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            repo_folder = config.get('DEFAULT', 'repo', fallback='.')
+            if not repo_folder.endswith('/'):
+                repo_folder += '/'
+            
             # Get files to merge
             files_to_merge = FitsFileModel.select().where(FitsFileModel.fitsFileObject == from_object)
             
@@ -1412,7 +1456,12 @@ class MergeTab(QWidget):
             
             merged_count = 0
             renamed_count = 0
+            moved_count = 0
+            header_updated_count = 0
             errors = []
+            
+            # Import FITS handling for header updates
+            from astropy.io import fits
             
             result_text = f"MERGE EXECUTION RESULTS:\n\n"
             result_text += f"From: '{from_object}' → To: '{to_object}'\n"
@@ -1427,28 +1476,207 @@ class MergeTab(QWidget):
                     
                     # If changing filenames, update the filename in database and rename actual file
                     if change_files and old_filename and os.path.exists(old_filename):
-                        # Create new filename by replacing the object name
+                        # Parse the current file path to extract metadata
+                        # Expected path structure: {repo}/Light/{OBJECT}/{TELESCOPE}/{INSTRUMENT}/{DATE}/filename
                         path_parts = old_filename.split('/')
-                        old_file_part = path_parts[-1]  # Get just the filename
+                        filename = path_parts[-1]  # Get just the filename
                         
-                        # Replace the from_object with to_object in the filename
-                        new_file_part = old_file_part.replace(from_object.replace(" ", "_"), to_object.replace(" ", "_"))
-                        new_filename = '/'.join(path_parts[:-1] + [new_file_part])
-                        
-                        # Rename the actual file
-                        if old_filename != new_filename:
-                            if not os.path.exists(new_filename):
-                                os.rename(old_filename, new_filename)
-                                fits_file.fitsFileName = new_filename
-                                renamed_count += 1
+                        # Try to extract directory structure info
+                        if len(path_parts) >= 5 and 'Light' in old_filename:
+                            # Extract metadata from path
+                            old_object = path_parts[-5] if path_parts[-6] == 'Light' else None
+                            telescope = path_parts[-4] if old_object else None
+                            instrument = path_parts[-3] if telescope else None
+                            date_dir = path_parts[-2] if instrument else None
+                            
+                            if old_object and telescope and instrument and date_dir:
+                                # Create new directory structure with new object name
+                                new_object_clean = to_object.replace(" ", "").replace("-", "")
+                                new_dir_path = f"{repo_folder}Light/{new_object_clean}/{telescope}/{instrument}/{date_dir}/"
+                                
+                                # Parse filename to update object name in filename
+                                filename_parts = filename.split('-')
+                                if len(filename_parts) >= 2:
+                                    # Replace the first part (object name) with the new object name
+                                    filename_parts[0] = new_object_clean
+                                    new_filename = '-'.join(filename_parts)
+                                    new_full_path = new_dir_path + new_filename
+                                    
+                                    # Create new directory if it doesn't exist
+                                    if not os.path.exists(new_dir_path):
+                                        try:
+                                            os.makedirs(new_dir_path, exist_ok=True)
+                                            logger.info(f"Created directory: {new_dir_path}")
+                                        except OSError as e:
+                                            error_msg = f"Cannot create directory {new_dir_path}: {str(e)}"
+                                            errors.append(error_msg)
+                                            logger.error(error_msg)
+                                            continue
+                                    
+                                    # Move and rename the file
+                                    if old_filename != new_full_path:
+                                        if not os.path.exists(new_full_path):
+                                            try:
+                                                os.rename(old_filename, new_full_path)
+                                                fits_file.fitsFileName = new_full_path
+                                                renamed_count += 1
+                                                moved_count += 1
+                                                logger.info(f"Moved and renamed file: {old_filename} → {new_full_path}")
+                                                
+                                                # Update FITS header with new object name
+                                                try:
+                                                    with fits.open(new_full_path, mode='update') as hdul:
+                                                        if 'OBJECT' in hdul[0].header:
+                                                            old_object_name = hdul[0].header['OBJECT']
+                                                            hdul[0].header['OBJECT'] = to_object
+                                                            # Add comment about the change
+                                                            hdul[0].header.comments['OBJECT'] = f'Updated from {old_object_name} via Astrofiler merge'
+                                                            hdul.flush()
+                                                            header_updated_count += 1
+                                                            logger.info(f"Updated OBJECT header from '{old_object_name}' to '{to_object}' in {new_full_path}")
+                                                        else:
+                                                            # Add OBJECT header if it doesn't exist
+                                                            hdul[0].header['OBJECT'] = to_object
+                                                            hdul[0].header.comments['OBJECT'] = 'Added via Astrofiler merge'
+                                                            hdul.flush()
+                                                            header_updated_count += 1
+                                                            logger.info(f"Added OBJECT header '{to_object}' to {new_full_path}")
+                                                except Exception as fits_error:
+                                                    error_msg = f"FITS header update failed for {new_full_path}: {str(fits_error)}"
+                                                    errors.append(error_msg)
+                                                    logger.error(error_msg)
+                                                    
+                                            except OSError as e:
+                                                error_msg = f"Cannot move/rename {old_filename}: {str(e)}"
+                                                errors.append(error_msg)
+                                                logger.error(error_msg)
+                                        else:
+                                            error_msg = f"Cannot move {old_filename} - target file already exists: {new_full_path}"
+                                            errors.append(error_msg)
+                                            logger.warning(error_msg)
+                                    else:
+                                        logger.debug(f"No move needed for {old_filename} (already in correct location)")
+                                else:
+                                    error_msg = f"Cannot parse filename format for {filename}"
+                                    errors.append(error_msg)
+                                    logger.error(error_msg)
                             else:
-                                errors.append(f"Cannot rename {old_filename} - target file already exists")
+                                # Fallback to simple rename without moving directories
+                                filename_parts = filename.split('-')
+                                if len(filename_parts) >= 2:
+                                    new_object_name = to_object.replace(" ", "_").replace("-", "")
+                                    filename_parts[0] = new_object_name
+                                    new_filename = '-'.join(filename_parts)
+                                    new_full_path = '/'.join(path_parts[:-1] + [new_filename])
+                                    
+                                    if old_filename != new_full_path:
+                                        if not os.path.exists(new_full_path):
+                                            try:
+                                                os.rename(old_filename, new_full_path)
+                                                fits_file.fitsFileName = new_full_path
+                                                renamed_count += 1
+                                                logger.info(f"Renamed file: {old_filename} → {new_full_path}")
+                                                
+                                                # Update FITS header with new object name
+                                                try:
+                                                    with fits.open(new_full_path, mode='update') as hdul:
+                                                        if 'OBJECT' in hdul[0].header:
+                                                            old_object_name = hdul[0].header['OBJECT']
+                                                            hdul[0].header['OBJECT'] = to_object
+                                                            # Add comment about the change
+                                                            hdul[0].header.comments['OBJECT'] = f'Updated from {old_object_name} via Astrofiler merge'
+                                                            hdul.flush()
+                                                            header_updated_count += 1
+                                                            logger.info(f"Updated OBJECT header from '{old_object_name}' to '{to_object}' in {new_full_path}")
+                                                        else:
+                                                            # Add OBJECT header if it doesn't exist
+                                                            hdul[0].header['OBJECT'] = to_object
+                                                            hdul[0].header.comments['OBJECT'] = 'Added via Astrofiler merge'
+                                                            hdul.flush()
+                                                            header_updated_count += 1
+                                                            logger.info(f"Added OBJECT header '{to_object}' to {new_full_path}")
+                                                except Exception as fits_error:
+                                                    error_msg = f"FITS header update failed for {new_full_path}: {str(fits_error)}"
+                                                    errors.append(error_msg)
+                                                    logger.error(error_msg)
+                                                    
+                                            except OSError as e:
+                                                error_msg = f"Cannot rename {old_filename}: {str(e)}"
+                                                errors.append(error_msg)
+                                                logger.error(error_msg)
+                                        else:
+                                            error_msg = f"Cannot rename {old_filename} - target file already exists: {new_full_path}"
+                                            errors.append(error_msg)
+                                            logger.warning(error_msg)
+                                else:
+                                    error_msg = f"Cannot parse filename format for {filename}"
+                                    errors.append(error_msg)
+                                    logger.error(error_msg)
+                        else:
+                            # Handle non-standard path structure with simple rename
+                            filename_parts = filename.split('-')
+                            if len(filename_parts) >= 2:
+                                new_object_name = to_object.replace(" ", "_").replace("-", "")
+                                filename_parts[0] = new_object_name
+                                new_filename = '-'.join(filename_parts)
+                                new_full_path = '/'.join(path_parts[:-1] + [new_filename])
+                                
+                                if old_filename != new_full_path:
+                                    if not os.path.exists(new_full_path):
+                                        try:
+                                            os.rename(old_filename, new_full_path)
+                                            fits_file.fitsFileName = new_full_path
+                                            renamed_count += 1
+                                            logger.info(f"Renamed file: {old_filename} → {new_full_path}")
+                                            
+                                            # Update FITS header with new object name
+                                            try:
+                                                with fits.open(new_full_path, mode='update') as hdul:
+                                                    if 'OBJECT' in hdul[0].header:
+                                                        old_object_name = hdul[0].header['OBJECT']
+                                                        hdul[0].header['OBJECT'] = to_object
+                                                        # Add comment about the change
+                                                        hdul[0].header.comments['OBJECT'] = f'Updated from {old_object_name} via Astrofiler merge'
+                                                        hdul.flush()
+                                                        header_updated_count += 1
+                                                        logger.info(f"Updated OBJECT header from '{old_object_name}' to '{to_object}' in {new_full_path}")
+                                                    else:
+                                                        # Add OBJECT header if it doesn't exist
+                                                        hdul[0].header['OBJECT'] = to_object
+                                                        hdul[0].header.comments['OBJECT'] = 'Added via Astrofiler merge'
+                                                        hdul.flush()
+                                                        header_updated_count += 1
+                                                        logger.info(f"Added OBJECT header '{to_object}' to {new_full_path}")
+                                            except Exception as fits_error:
+                                                error_msg = f"FITS header update failed for {new_full_path}: {str(fits_error)}"
+                                                errors.append(error_msg)
+                                                logger.error(error_msg)
+                                                
+                                        except OSError as e:
+                                            error_msg = f"Cannot rename {old_filename}: {str(e)}"
+                                            errors.append(error_msg)
+                                            logger.error(error_msg)
+                                    else:
+                                        error_msg = f"Cannot rename {old_filename} - target file already exists: {new_full_path}"
+                                        errors.append(error_msg)
+                                        logger.warning(error_msg)
+                            else:
+                                error_msg = f"Cannot parse filename format for {filename}"
+                                errors.append(error_msg)
+                                logger.error(error_msg)
+                    elif change_files and old_filename and not os.path.exists(old_filename):
+                        error_msg = f"File not found on disk: {old_filename}"
+                        errors.append(error_msg)
+                        logger.warning(error_msg)
                     
                     fits_file.save()
                     merged_count += 1
                     
                 except Exception as e:
-                    errors.append(f"Error processing {fits_file.fitsFileName}: {str(e)}")
+                    error_msg = f"Error processing {fits_file.fitsFileName}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                    logger.exception("Full exception details for merge error:")  # This logs the full stack trace
             
             # Update Sessions that reference the old object name
             Sessions_updated = 0
@@ -1456,41 +1684,63 @@ class MergeTab(QWidget):
                 from astrofiler_db import fitsSession as FitsSessionModel
                 Sessions = FitsSessionModel.select().where(FitsSessionModel.fitsSessionObjectName == from_object)
                 for Session in Sessions:
-                    Session.fitsSessionObjectName = to_object
-                    Session.save()
-                    Sessions_updated += 1
+                    try:
+                        Session.fitsSessionObjectName = to_object
+                        Session.save()
+                        Sessions_updated += 1
+                        logger.debug(f"Updated session {Session.fitsSessionId} object name from '{from_object}' to '{to_object}'")
+                    except Exception as e:
+                        error_msg = f"Error updating session {Session.fitsSessionId}: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(error_msg)
             except Exception as e:
-                errors.append(f"Error updating Sessions: {str(e)}")
+                error_msg = f"Error querying/updating Sessions: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+                logger.exception("Full exception details for session update error:")
+            
+            # Log summary of operation
+            logger.info(f"Merge operation summary: {merged_count} records processed, {renamed_count} files renamed, {moved_count} files moved, {header_updated_count} FITS headers updated, {Sessions_updated} sessions updated, {len(errors)} errors encountered")
+            
+            # Log all errors for debugging
+            if errors:
+                logger.error(f"Merge operation completed with {len(errors)} errors:")
+                for i, error in enumerate(errors, 1):
+                    logger.error(f"Error {i}: {error}")
             
             result_text += f"Database records updated: {merged_count}\n"
             if change_files:
                 result_text += f"Files renamed on disk: {renamed_count}\n"
+                result_text += f"Files moved to new directory structure: {moved_count}\n"
+                if header_updated_count > 0:
+                    result_text += f"FITS headers updated: {header_updated_count}\n"
             result_text += f"Sessions updated: {Sessions_updated}\n"
             
             if errors:
-                result_text += f"\nErrors encountered:\n"
+                result_text += f"\nErrors encountered ({len(errors)} total):\n"
                 for error in errors:
                     result_text += f"- {error}\n"
             
-            result_text += f"\nMerge completed successfully!"
+            result_text += f"\nMerge completed!"
             
             self.results_text.setPlainText(result_text)
             
             # Show success message
             if errors:
                 QMessageBox.warning(self, "Merge Completed with Errors", 
-                                  f"Merge completed but {len(errors)} errors occurred. Check results for details.")
+                                  f"Merge completed but {len(errors)} errors occurred. Check results and log for details.")
+                logger.warning(f"Merge operation completed with {len(errors)} errors. User notified.")
             else:
                 QMessageBox.information(self, "Merge Successful", 
                                       f"Successfully merged {merged_count} records from '{from_object}' to '{to_object}'.")
-            
-            logger.info(f"Object merge completed: {from_object} → {to_object}, {merged_count} records, {renamed_count} files renamed")
+                logger.info(f"Merge operation completed successfully without errors.")
             
         except Exception as e:
-            error_msg = f"Error during merge execution: {e}"
+            error_msg = f"Critical error during merge execution: {str(e)}"
             logger.error(error_msg)
-            QMessageBox.critical(self, "Merge Error", error_msg)
-            self.results_text.setPlainText(f"ERROR: {error_msg}")
+            logger.exception("Full exception details for critical merge error:")
+            QMessageBox.critical(self, "Merge Error", f"A critical error occurred during merge: {str(e)}\n\nCheck the log file for detailed error information.")
+            self.results_text.setPlainText(f"CRITICAL ERROR: {error_msg}\n\nPlease check the log file for detailed error information.")
 
 
 class ConfigTab(QWidget):
