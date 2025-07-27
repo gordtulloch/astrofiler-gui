@@ -17,9 +17,14 @@ logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     logger.info("Starting AstroFiler application")
-    if (setup_database()):  # Initialize the database and table
+    if (setup_database() == True):  # Initialize the database and table
         app = QApplication(sys.argv)
         widget = AstroFilerGUI()
         widget.show()
         sys.exit(app.exec())
-    logger.info("AstroFiler application closed")
+        return_code = 0
+    else:   
+        logger.error("Failed to set up the database. Exiting application.")
+        return_code = 1
+    logger.info("AstroFiler application exited with return code: %d", return_code)
+    sys.exit(return_code)
