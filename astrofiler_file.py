@@ -342,6 +342,13 @@ class fitsProcessing:
                                                     fitsSessionTelescope=currentFitsFile.fitsFileTelescop,
                                                     fitsSessionImager=currentFitsFile.fitsFileInstrument,
                                                     fitsSessionDate=self.dateToDateField(currentFitsFile.fitsFileDate),
+                                                    fitsSessionExposure=currentFitsFile.fitsFileExpTime,
+                                                    fitsSessionBinningX=currentFitsFile.fitsFileXBinning,
+                                                    fitsSessionBinningY=currentFitsFile.fitsFileYBinning,
+                                                    fitsSessionCCDTemp=currentFitsFile.fitsFileCCDTemp,
+                                                    fitsSessionGain=currentFitsFile.fitsFileGain,
+                                                    fitsSessionOffset=currentFitsFile.fitsFileOffset,
+                                                    fitsSessionFilter=currentFitsFile.fitsFileFilter,
                                                     fitsBiasSession=None,fitsDarkSession=None,fitsFlatSession=None)
                     sessionsCreated.append(currentSessionId)
                     logging.info("New session created for "+str(newFitsSession.fitsSessionId))
@@ -414,6 +421,13 @@ class fitsProcessing:
                                                 fitsSessionObjectName='Bias',
                                                 fitsSessionTelescope=biasFitsFile.fitsFileTelescop,
                                                 fitsSessionImager=biasFitsFile.fitsFileInstrument,
+                                                fitsSessionExposure=biasFitsFile.fitsFileExpTime,
+                                                fitsSessionBinningX=biasFitsFile.fitsFileXBinning,
+                                                fitsSessionBinningY=biasFitsFile.fitsFileYBinning,
+                                                fitsSessionCCDTemp=biasFitsFile.fitsFileCCDTemp,
+                                                fitsSessionGain=biasFitsFile.fitsFileGain,
+                                                fitsSessionOffset=biasFitsFile.fitsFileOffset,
+                                                fitsSessionFilter=biasFitsFile.fitsFileFilter,
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
@@ -445,6 +459,13 @@ class fitsProcessing:
                                                 fitsSessionObjectName='Dark',
                                                 fitsSessionTelescope=darkFitsFile.fitsFileTelescop,
                                                 fitsSessionImager=darkFitsFile.fitsFileInstrument,
+                                                fitsSessionExposure=darkFitsFile.fitsFileExpTime,
+                                                fitsSessionBinningX=darkFitsFile.fitsFileXBinning,
+                                                fitsSessionBinningY=darkFitsFile.fitsFileYBinning,
+                                                fitsSessionCCDTemp=darkFitsFile.fitsFileCCDTemp,
+                                                fitsSessionGain=darkFitsFile.fitsFileGain,
+                                                fitsSessionOffset=darkFitsFile.fitsFileOffset,
+                                                fitsSessionFilter=darkFitsFile.fitsFileFilter,
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
@@ -476,6 +497,13 @@ class fitsProcessing:
                                 fitsSessionObjectName='Flat',
                                 fitsSessionTelescope=flatFitsFile.fitsFileTelescop,
                                 fitsSessionImager=flatFitsFile.fitsFileInstrument,
+                                fitsSessionExposure=flatFitsFile.fitsFileExpTime,
+                                fitsSessionBinningX=flatFitsFile.fitsFileXBinning,
+                                fitsSessionBinningY=flatFitsFile.fitsFileYBinning,
+                                fitsSessionCCDTemp=flatFitsFile.fitsFileCCDTemp,
+                                fitsSessionGain=flatFitsFile.fitsFileGain,
+                                fitsSessionOffset=flatFitsFile.fitsFileOffset,
+                                fitsSessionFilter=flatFitsFile.fitsFileFilter,
                                 fitsBiasSession=None,
                                 fitsDarkSession=None,
                                 fitsFlatSession=None)
@@ -516,8 +544,10 @@ class fitsProcessing:
     ## linkSessions - this function links calibration sessions to light sessions based on telescope and imager    ##
     ##                matching. For each light session, it finds the most recent calibration sessions for the     ##
     ##                same telescope and imager combination, with additional matching criteria:                    ##
-    ##                - Darks must have the same exposure time as the light frames                                 ##
     ##                - All calibration frames must have the same binning settings as the light frames            ##
+    ##                - All calibration frames must have the same gain and offset settings                        ##
+    ##                - Darks must have the same exposure time as the light frames                                 ##
+    ##                - Darks must have CCD temperature within 5 degrees of the light frames                      ##
     ##                - Flats must match the filter of the light frames                                            ##
     #################################################################################################################
     def linkSessions(self, progress_callback=None):
@@ -528,7 +558,9 @@ class fitsProcessing:
         calibration sessions (bias, dark, flat) that match:
         - Telescope and imager (all calibration types)
         - Binning settings (all calibration types)
+        - Gain and offset settings (all calibration types)
         - Exposure time (darks only)
+        - CCD temperature within 5 degrees (darks only)
         - Filter (flats only)
         
         Args:
@@ -565,85 +597,104 @@ class fitsProcessing:
                 
                 session_updated = False
                 
-                # Get representative light file to determine matching criteria
-                light_file = (FitsFileModel
-                             .select()
-                             .where(FitsFileModel.fitsFileSession == str(light_session.fitsSessionId))
-                             .first())
+                # Use session-level fields for matching criteria instead of querying individual files
+                light_exp_time = light_session.fitsSessionExposure
+                light_x_binning = light_session.fitsSessionBinningX
+                light_y_binning = light_session.fitsSessionBinningY
+                light_filter = light_session.fitsSessionFilter
+                light_gain = light_session.fitsSessionGain
+                light_offset = light_session.fitsSessionOffset
+                light_ccd_temp = light_session.fitsSessionCCDTemp
                 
-                if not light_file:
-                    logging.warning(f"No files found for light session {light_session.fitsSessionId}, skipping")
-                    continue
+                logging.debug(f"Light session {light_session.fitsSessionId} criteria: exp={light_exp_time}, binning={light_x_binning}x{light_y_binning}, filter={light_filter}, gain={light_gain}, offset={light_offset}, temp={light_ccd_temp}")
                 
-                light_exp_time = light_file.fitsFileExpTime
-                light_x_binning = light_file.fitsFileXBinning
-                light_y_binning = light_file.fitsFileYBinning
-                light_filter = light_file.fitsFileFilter
-                
-                logging.debug(f"Light session {light_session.fitsSessionId} criteria: exp={light_exp_time}, binning={light_x_binning}x{light_y_binning}, filter={light_filter}")
-                
-                # Find most recent bias session with matching telescope/imager/binning
+                # Find most recent bias session with matching telescope/imager/binning/gain/offset
                 if not light_session.fitsBiasSession:
                     bias_session = (fitsSessionModel
                                    .select()
-                                   .join(FitsFileModel, on=(FitsFileModel.fitsFileSession == fitsSessionModel.fitsSessionId))
                                    .where(fitsSessionModel.fitsSessionObjectName == 'Bias',
                                          fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
                                          fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
                                          fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
-                                         FitsFileModel.fitsFileXBinning == light_x_binning,
-                                         FitsFileModel.fitsFileYBinning == light_y_binning)
+                                         fitsSessionModel.fitsSessionBinningX == light_x_binning,
+                                         fitsSessionModel.fitsSessionBinningY == light_y_binning,
+                                         fitsSessionModel.fitsSessionGain == light_gain,
+                                         fitsSessionModel.fitsSessionOffset == light_offset)
                                    .order_by(fitsSessionModel.fitsSessionDate.desc())
                                    .first())
                     
                     if bias_session:
                         light_session.fitsBiasSession = str(bias_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked bias session {bias_session.fitsSessionId} to light session {light_session.fitsSessionId} (binning: {light_x_binning}x{light_y_binning})")
+                        logging.info(f"Linked bias session {bias_session.fitsSessionId} to light session {light_session.fitsSessionId} (binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset})")
                     else:
                         logging.debug(f"No matching bias session found for light session {light_session.fitsSessionId}")
                 
-                # Find most recent dark session with matching telescope/imager/binning/exposure
+                # Find most recent dark session with matching telescope/imager/binning/exposure/gain/offset/ccd_temp (within 5 degrees)
                 if not light_session.fitsDarkSession:
-                    dark_session = (fitsSessionModel
+                    # For CCD temperature matching, we need to use a custom query with temperature tolerance
+                    dark_sessions = (fitsSessionModel
                                    .select()
-                                   .join(FitsFileModel, on=(FitsFileModel.fitsFileSession == fitsSessionModel.fitsSessionId))
                                    .where(fitsSessionModel.fitsSessionObjectName == 'Dark',
                                          fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
                                          fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
                                          fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
-                                         FitsFileModel.fitsFileXBinning == light_x_binning,
-                                         FitsFileModel.fitsFileYBinning == light_y_binning,
-                                         FitsFileModel.fitsFileExpTime == light_exp_time)
-                                   .order_by(fitsSessionModel.fitsSessionDate.desc())
-                                   .first())
+                                         fitsSessionModel.fitsSessionBinningX == light_x_binning,
+                                         fitsSessionModel.fitsSessionBinningY == light_y_binning,
+                                         fitsSessionModel.fitsSessionExposure == light_exp_time,
+                                         fitsSessionModel.fitsSessionGain == light_gain,
+                                         fitsSessionModel.fitsSessionOffset == light_offset)
+                                   .order_by(fitsSessionModel.fitsSessionDate.desc()))
+                    
+                    # Filter by CCD temperature tolerance (within 5 degrees)
+                    dark_session = None
+                    if light_ccd_temp is not None:
+                        try:
+                            light_temp_float = float(light_ccd_temp)
+                            for candidate in dark_sessions:
+                                if candidate.fitsSessionCCDTemp is not None:
+                                    try:
+                                        dark_temp_float = float(candidate.fitsSessionCCDTemp)
+                                        if abs(light_temp_float - dark_temp_float) <= 5.0:
+                                            dark_session = candidate
+                                            break
+                                    except (ValueError, TypeError):
+                                        continue
+                        except (ValueError, TypeError):
+                            # If light temp can't be parsed, fall back to first match without temp check
+                            dark_session = dark_sessions.first()
+                    else:
+                        # If no light temp, get first match
+                        dark_session = dark_sessions.first()
                     
                     if dark_session:
                         light_session.fitsDarkSession = str(dark_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId} (exp: {light_exp_time}s, binning: {light_x_binning}x{light_y_binning})")
+                        temp_info = f", temp: {light_ccd_temp}°C" if light_ccd_temp else ""
+                        logging.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId} (exp: {light_exp_time}s, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset}{temp_info})")
                     else:
                         logging.debug(f"No matching dark session found for light session {light_session.fitsSessionId} (exp: {light_exp_time}s)")
                 
-                # Find most recent flat session with matching telescope/imager/binning/filter
+                # Find most recent flat session with matching telescope/imager/binning/filter/gain/offset
                 if not light_session.fitsFlatSession:
                     flat_session = (fitsSessionModel
                                    .select()
-                                   .join(FitsFileModel, on=(FitsFileModel.fitsFileSession == fitsSessionModel.fitsSessionId))
                                    .where(fitsSessionModel.fitsSessionObjectName == 'Flat',
                                          fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
                                          fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
                                          fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
-                                         FitsFileModel.fitsFileXBinning == light_x_binning,
-                                         FitsFileModel.fitsFileYBinning == light_y_binning,
-                                         FitsFileModel.fitsFileFilter == light_filter)
+                                         fitsSessionModel.fitsSessionBinningX == light_x_binning,
+                                         fitsSessionModel.fitsSessionBinningY == light_y_binning,
+                                         fitsSessionModel.fitsSessionFilter == light_filter,
+                                         fitsSessionModel.fitsSessionGain == light_gain,
+                                         fitsSessionModel.fitsSessionOffset == light_offset)
                                    .order_by(fitsSessionModel.fitsSessionDate.desc())
                                    .first())
                     
                     if flat_session:
                         light_session.fitsFlatSession = str(flat_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked flat session {flat_session.fitsSessionId} to light session {light_session.fitsSessionId} (filter: {light_filter}, binning: {light_x_binning}x{light_y_binning})")
+                        logging.info(f"Linked flat session {flat_session.fitsSessionId} to light session {light_session.fitsSessionId} (filter: {light_filter}, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset})")
                     else:
                         logging.debug(f"No matching flat session found for light session {light_session.fitsSessionId} (filter: {light_filter})")
                 

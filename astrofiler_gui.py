@@ -1,17 +1,10 @@
 import sys
 import os
 import configparser
-import logging
 import datetime
 from datetime import datetime
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    filename='astrofiler.log',
-    filemode='a'
-)
+import logging
 logger = logging.getLogger(__name__)
 
 # Import necessary PySide6 modules
@@ -316,7 +309,7 @@ class ImagesTab(QWidget):
             else:  # Date
                 self._load_fits_data_by_date()
             
-            logger.info(f"FITS data loaded and organized by {sort_by}")
+            logger.debug(f"FITS data loaded and organized by {sort_by}")
                 
         except Exception as e:
             logger.error(f"Error loading FITS data: {e}")
@@ -395,7 +388,7 @@ class ImagesTab(QWidget):
         total_files = len(fits_files)
         total_objects = len(objects_dict)
         if total_files > 0:
-            logger.info(f"Loaded {total_files} FITS files from {total_objects} objects into the display (sorted by object)")
+            logger.debug(f"Loaded {total_files} FITS files from {total_objects} objects into the display (sorted by object)")
         else:
             logger.info("No FITS files found in database")
 
