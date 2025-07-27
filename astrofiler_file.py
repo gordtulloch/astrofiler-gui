@@ -110,22 +110,19 @@ class fitsProcessing:
                     else:
                         logging.warning("No WCS information in header, file not updated is "+str(os.path.join(root, file)))
 
-                # Standardize the object name and create a new file name
+                # Create a new file name
                 if ("OBJECT" in hdr):
-                    # Standardize object name, remove spaces and underscores
-                    objectName=hdr["OBJECT"].replace(' ', '').replace('_', '')
-                    hdr.append(('OBJECT', objectName, 'Adjusted via Astrofiler'), end=True)
-                    hdul.flush()  # changes are written back to original.fits
-                    
                     if ("FILTER" in hdr):
-                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"].replace(" ", "_"),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                     else:
-                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"].replace(" ", "_"),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
                     logging.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
                     return False
+                
+
             ############## F L A T S ##################################################################            
             elif "Flat" in hdr["IMAGETYP"]:
                 if ("FILTER" in hdr):
@@ -153,7 +150,7 @@ class fitsProcessing:
             # Create the folder structure (if needed)
             fitsDate=dateobj.strftime("%Y%m%d")
             if "Light" in hdr["IMAGETYP"]:
-                newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(hdr["OBJECT"].replace(" ", ""),hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(hdr["OBJECT"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             elif "Dark" in hdr["IMAGETYP"]:
                 newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Dark",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
