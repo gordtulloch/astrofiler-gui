@@ -653,15 +653,10 @@ class SessionsTab(QWidget):
         
         # Controls
         controls_layout = QHBoxLayout()
-        self.update_button = QPushButton("Update Lights")
-        self.update_calibrations_button = QPushButton("Update Calibrations")
-        self.link_sessions_button = QPushButton("Link Sessions")
-        self.clear_sessions_button = QPushButton("Clear Sessions")
+        self.regenerate_button = QPushButton("Regenerate")
+        self.regenerate_button.setToolTip("Clear all sessions and regenerate: Update Lights → Update Calibrations → Link Sessions")
         
-        controls_layout.addWidget(self.update_button)
-        controls_layout.addWidget(self.update_calibrations_button)
-        controls_layout.addWidget(self.link_sessions_button)
-        controls_layout.addWidget(self.clear_sessions_button)
+        controls_layout.addWidget(self.regenerate_button)
         controls_layout.addStretch()
         
         # Sessions list
@@ -682,10 +677,7 @@ class SessionsTab(QWidget):
         layout.addWidget(self.sessions_tree)
         
         # Connect signals
-        self.update_button.clicked.connect(self.update_sessions)
-        self.update_calibrations_button.clicked.connect(self.update_calibration_sessions)
-        self.link_sessions_button.clicked.connect(self.link_sessions)
-        self.clear_sessions_button.clicked.connect(self.clear_sessions)
+        self.regenerate_button.clicked.connect(self.regenerate_sessions)
     
     def show_context_menu(self, position):
         """Show context menu for session items"""
@@ -1271,6 +1263,240 @@ class SessionsTab(QWidget):
             logger.error(f"Error linking sessions: {e}")
             QMessageBox.warning(self, "Error", f"Failed to link sessions: {e}")
 
+    def regenerate_sessions(self):
+        """Regenerate all sessions: Clear → Update Lights → Update Calibrations → Link Sessions"""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        
+        # Confirm regeneration
+        reply = QMessageBox.question(
+            self, 
+            "Confirm Regenerate Sessions", 
+            "This will:\n"
+            "1. Clear all existing session records\n"
+            "2. Create new light sessions\n"
+            "3. Create new calibration sessions\n"
+            "4. Link calibration sessions to light sessions\n\n"
+            "This will NOT delete actual FITS files, only session groupings.\n"
+            "Are you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        progress_dialog = None
+        was_cancelled = False
+        operation_results = {
+            'cleared_sessions': 0,
+            'light_sessions': 0,
+            'calibration_sessions': 0,
+            'linked_sessions': 0
+        }
+        
+        try:
+            # Create overall progress dialog
+            progress_dialog = QProgressDialog("Initializing regeneration...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Regenerating Sessions")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            progress_dialog.show()
+            
+            # Step 1: Clear existing sessions (25% of progress)
+            progress_dialog.setLabelText("Step 1/4: Clearing existing sessions...")
+            progress_dialog.setValue(0)
+            QApplication.processEvents()
+            
+            if progress_dialog.wasCanceled():
+                return
+            
+            logger.info("Regenerate Sessions: Starting step 1 - clearing existing sessions")
+            try:
+                # Clear the tree widget first
+                self.sessions_tree.clear()
+                
+                # Delete all fitsSession records from the database
+                deleted_sessions = FitsSessionModel.delete().execute()
+                operation_results['cleared_sessions'] = deleted_sessions
+                
+                # Also clear the session assignments from FITS files
+                from astrofiler_db import fitsFile as FitsFileModel
+                FitsFileModel.update(fitsFileSession=None).execute()
+                
+                logger.info(f"Regenerate Sessions: Cleared {deleted_sessions} existing sessions")
+                progress_dialog.setValue(25)
+                QApplication.processEvents()
+                
+            except Exception as e:
+                logger.error(f"Error in step 1 (clear sessions): {e}")
+                if progress_dialog:
+                    progress_dialog.close()
+                QMessageBox.warning(self, "Error", f"Failed to clear existing sessions: {e}")
+                return
+            
+            if progress_dialog.wasCanceled():
+                return
+            
+            # Step 2: Create light sessions (25-50% of progress)
+            progress_dialog.setLabelText("Step 2/4: Creating light sessions...")
+            QApplication.processEvents()
+            
+            logger.info("Regenerate Sessions: Starting step 2 - creating light sessions")
+            try:
+                self.fits_file_handler = fitsProcessing()
+                
+                def light_progress_callback(current, total, filename):
+                    nonlocal was_cancelled
+                    if was_cancelled or (progress_dialog and progress_dialog.wasCanceled()):
+                        was_cancelled = True
+                        return False
+                    
+                    if progress_dialog:
+                        # Light sessions take 25% of total progress (25-50%)
+                        step_progress = int((current / total) * 25) if total > 0 else 0
+                        overall_progress = 25 + step_progress
+                        progress_dialog.setValue(overall_progress)
+                        progress_dialog.setLabelText(f"Step 2/4: Creating light sessions {current}/{total}: {os.path.basename(filename)}")
+                        QApplication.processEvents()
+                    
+                    return not was_cancelled
+                
+                created_light_sessions = self.fits_file_handler.createLightSessions(progress_callback=light_progress_callback)
+                if was_cancelled:
+                    return
+                
+                operation_results['light_sessions'] = len(created_light_sessions)
+                logger.info(f"Regenerate Sessions: Created {len(created_light_sessions)} light sessions")
+                progress_dialog.setValue(50)
+                QApplication.processEvents()
+                
+            except Exception as e:
+                logger.error(f"Error in step 2 (create light sessions): {e}")
+                if progress_dialog:
+                    progress_dialog.close()
+                QMessageBox.warning(self, "Error", f"Failed to create light sessions: {e}")
+                return
+            
+            if progress_dialog.wasCanceled():
+                return
+            
+            # Step 3: Create calibration sessions (50-75% of progress)
+            progress_dialog.setLabelText("Step 3/4: Creating calibration sessions...")
+            QApplication.processEvents()
+            
+            logger.info("Regenerate Sessions: Starting step 3 - creating calibration sessions")
+            try:
+                def calibration_progress_callback(current, total, filename):
+                    nonlocal was_cancelled
+                    if was_cancelled or (progress_dialog and progress_dialog.wasCanceled()):
+                        was_cancelled = True
+                        return False
+                    
+                    if progress_dialog:
+                        # Calibration sessions take 25% of total progress (50-75%)
+                        step_progress = int((current / total) * 25) if total > 0 else 0
+                        overall_progress = 50 + step_progress
+                        progress_dialog.setValue(overall_progress)
+                        progress_dialog.setLabelText(f"Step 3/4: Creating calibration sessions {current}/{total}: {filename}")
+                        QApplication.processEvents()
+                    
+                    return not was_cancelled
+                
+                created_calibration_sessions = self.fits_file_handler.createCalibrationSessions(progress_callback=calibration_progress_callback)
+                if was_cancelled:
+                    return
+                
+                operation_results['calibration_sessions'] = len(created_calibration_sessions)
+                logger.info(f"Regenerate Sessions: Created {len(created_calibration_sessions)} calibration sessions")
+                progress_dialog.setValue(75)
+                QApplication.processEvents()
+                
+            except Exception as e:
+                logger.error(f"Error in step 3 (create calibration sessions): {e}")
+                if progress_dialog:
+                    progress_dialog.close()
+                QMessageBox.warning(self, "Error", f"Failed to create calibration sessions: {e}")
+                return
+            
+            if progress_dialog.wasCanceled():
+                return
+            
+            # Step 4: Link sessions (75-100% of progress)
+            progress_dialog.setLabelText("Step 4/4: Linking sessions...")
+            QApplication.processEvents()
+            
+            logger.info("Regenerate Sessions: Starting step 4 - linking sessions")
+            try:
+                def link_progress_callback(current, total, session_name):
+                    nonlocal was_cancelled
+                    if was_cancelled or (progress_dialog and progress_dialog.wasCanceled()):
+                        was_cancelled = True
+                        return False
+                    
+                    if progress_dialog:
+                        # Linking takes 25% of total progress (75-100%)
+                        step_progress = int((current / total) * 25) if total > 0 else 0
+                        overall_progress = 75 + step_progress
+                        progress_dialog.setValue(overall_progress)
+                        progress_dialog.setLabelText(f"Step 4/4: Linking sessions {current}/{total}: {session_name}")
+                        QApplication.processEvents()
+                    
+                    return not was_cancelled
+                
+                updated_sessions = self.fits_file_handler.linkSessions(progress_callback=link_progress_callback)
+                if was_cancelled:
+                    return
+                
+                operation_results['linked_sessions'] = len(updated_sessions)
+                logger.info(f"Regenerate Sessions: Linked {len(updated_sessions)} sessions")
+                progress_dialog.setValue(100)
+                QApplication.processEvents()
+                
+            except Exception as e:
+                logger.error(f"Error in step 4 (link sessions): {e}")
+                if progress_dialog:
+                    progress_dialog.close()
+                QMessageBox.warning(self, "Error", f"Failed to link sessions: {e}")
+                return
+            
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
+            # Check if operation was cancelled
+            if was_cancelled:
+                QMessageBox.information(self, "Cancelled", "Session regeneration was cancelled by user.")
+                logger.info("Session regeneration was cancelled by user")
+            else:
+                # Refresh the display
+                self.load_sessions_data()
+                
+                # Invalidate stats cache since session data was updated
+                parent_widget = self.parent()
+                while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                    parent_widget = parent_widget.parent()
+                if parent_widget:
+                    parent_widget.invalidate_stats_cache()
+                
+                # Show success message with detailed results
+                result_message = (
+                    f"Session regeneration completed successfully!\n\n"
+                    f"• Cleared: {operation_results['cleared_sessions']} existing sessions\n"
+                    f"• Created: {operation_results['light_sessions']} light sessions\n"
+                    f"• Created: {operation_results['calibration_sessions']} calibration sessions\n"
+                    f"• Linked: {operation_results['linked_sessions']} sessions with calibration frames"
+                )
+                
+                QMessageBox.information(self, "Success", result_message)
+                logger.info(f"Session regeneration completed successfully: {operation_results}")
+                
+        except Exception as e:
+            if progress_dialog:
+                progress_dialog.close()
+            logger.error(f"Error during session regeneration: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to regenerate sessions: {e}")
+
 class MergeTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -1470,11 +1696,10 @@ class MergeTab(QWidget):
             for fits_file in files_to_merge:
                 try:
                     old_filename = fits_file.fitsFileName
+                    new_full_path = None
+                    file_operation_successful = True
                     
-                    # Update database record
-                    fits_file.fitsFileObject = to_object
-                    
-                    # If changing filenames, update the filename in database and rename actual file
+                    # If changing filenames, perform file operations first before updating database
                     if change_files and old_filename and os.path.exists(old_filename):
                         # Parse the current file path to extract metadata
                         # Expected path structure: {repo}/Light/{OBJECT}/{TELESCOPE}/{INSTRUMENT}/{DATE}/filename
@@ -1518,7 +1743,21 @@ class MergeTab(QWidget):
                                         if not os.path.exists(new_full_path):
                                             try:
                                                 os.rename(old_filename, new_full_path)
-                                                fits_file.fitsFileName = new_full_path
+                                                # Verify the file was actually moved/renamed
+                                                if not os.path.exists(new_full_path):
+                                                    error_msg = f"File move verification failed: {new_full_path} does not exist after rename"
+                                                    errors.append(error_msg)
+                                                    logger.error(error_msg)
+                                                    file_operation_successful = False
+                                                    continue
+                                                elif os.path.exists(old_filename):
+                                                    error_msg = f"File move verification failed: {old_filename} still exists after rename"
+                                                    errors.append(error_msg)
+                                                    logger.error(error_msg)
+                                                    file_operation_successful = False
+                                                    continue
+                                                
+                                                # File move successful, now update FITS header
                                                 renamed_count += 1
                                                 moved_count += 1
                                                 logger.info(f"Moved and renamed file: {old_filename} → {new_full_path}")
@@ -1545,15 +1784,19 @@ class MergeTab(QWidget):
                                                     error_msg = f"FITS header update failed for {new_full_path}: {str(fits_error)}"
                                                     errors.append(error_msg)
                                                     logger.error(error_msg)
+                                                    # Header update failure doesn't fail the file operation
                                                     
                                             except OSError as e:
                                                 error_msg = f"Cannot move/rename {old_filename}: {str(e)}"
                                                 errors.append(error_msg)
                                                 logger.error(error_msg)
+                                                file_operation_successful = False
+                                                continue
                                         else:
                                             error_msg = f"Cannot move {old_filename} - target file already exists: {new_full_path}"
                                             errors.append(error_msg)
                                             logger.warning(error_msg)
+                                            file_operation_successful = False
                                     else:
                                         logger.debug(f"No move needed for {old_filename} (already in correct location)")
                                 else:
@@ -1573,7 +1816,21 @@ class MergeTab(QWidget):
                                         if not os.path.exists(new_full_path):
                                             try:
                                                 os.rename(old_filename, new_full_path)
-                                                fits_file.fitsFileName = new_full_path
+                                                # Verify the file was actually renamed
+                                                if not os.path.exists(new_full_path):
+                                                    error_msg = f"File rename verification failed: {new_full_path} does not exist after rename"
+                                                    errors.append(error_msg)
+                                                    logger.error(error_msg)
+                                                    file_operation_successful = False
+                                                    continue
+                                                elif os.path.exists(old_filename):
+                                                    error_msg = f"File rename verification failed: {old_filename} still exists after rename"
+                                                    errors.append(error_msg)
+                                                    logger.error(error_msg)
+                                                    file_operation_successful = False
+                                                    continue
+                                                
+                                                # File rename successful
                                                 renamed_count += 1
                                                 logger.info(f"Renamed file: {old_filename} → {new_full_path}")
                                                 
@@ -1599,15 +1856,19 @@ class MergeTab(QWidget):
                                                     error_msg = f"FITS header update failed for {new_full_path}: {str(fits_error)}"
                                                     errors.append(error_msg)
                                                     logger.error(error_msg)
+                                                    # Header update failure doesn't fail the file operation
                                                     
                                             except OSError as e:
                                                 error_msg = f"Cannot rename {old_filename}: {str(e)}"
                                                 errors.append(error_msg)
                                                 logger.error(error_msg)
+                                                file_operation_successful = False
+                                                continue
                                         else:
                                             error_msg = f"Cannot rename {old_filename} - target file already exists: {new_full_path}"
                                             errors.append(error_msg)
                                             logger.warning(error_msg)
+                                            file_operation_successful = False
                                 else:
                                     error_msg = f"Cannot parse filename format for {filename}"
                                     errors.append(error_msg)
@@ -1625,7 +1886,21 @@ class MergeTab(QWidget):
                                     if not os.path.exists(new_full_path):
                                         try:
                                             os.rename(old_filename, new_full_path)
-                                            fits_file.fitsFileName = new_full_path
+                                            # Verify the file was actually renamed
+                                            if not os.path.exists(new_full_path):
+                                                error_msg = f"File rename verification failed: {new_full_path} does not exist after rename"
+                                                errors.append(error_msg)
+                                                logger.error(error_msg)
+                                                file_operation_successful = False
+                                                continue
+                                            elif os.path.exists(old_filename):
+                                                error_msg = f"File rename verification failed: {old_filename} still exists after rename"
+                                                errors.append(error_msg)
+                                                logger.error(error_msg)
+                                                file_operation_successful = False
+                                                continue
+                                            
+                                            # File rename successful
                                             renamed_count += 1
                                             logger.info(f"Renamed file: {old_filename} → {new_full_path}")
                                             
@@ -1651,26 +1926,47 @@ class MergeTab(QWidget):
                                                 error_msg = f"FITS header update failed for {new_full_path}: {str(fits_error)}"
                                                 errors.append(error_msg)
                                                 logger.error(error_msg)
+                                                # Header update failure doesn't fail the file operation
                                                 
                                         except OSError as e:
                                             error_msg = f"Cannot rename {old_filename}: {str(e)}"
                                             errors.append(error_msg)
                                             logger.error(error_msg)
+                                            file_operation_successful = False
+                                            continue
                                     else:
                                         error_msg = f"Cannot rename {old_filename} - target file already exists: {new_full_path}"
                                         errors.append(error_msg)
                                         logger.warning(error_msg)
+                                        file_operation_successful = False
                             else:
                                 error_msg = f"Cannot parse filename format for {filename}"
                                 errors.append(error_msg)
                                 logger.error(error_msg)
+                                file_operation_successful = False
                     elif change_files and old_filename and not os.path.exists(old_filename):
                         error_msg = f"File not found on disk: {old_filename}"
                         errors.append(error_msg)
                         logger.warning(error_msg)
+                        file_operation_successful = False
+                    elif not change_files:
+                        # Database-only operation, no file operations needed
+                        logger.debug(f"Database-only merge for {old_filename}")
                     
-                    fits_file.save()
-                    merged_count += 1
+                    # Only update database if file operations were successful (or if not changing files)
+                    if file_operation_successful:
+                        # Update database record with new object name
+                        fits_file.fitsFileObject = to_object
+                        
+                        # Update filename in database if file was actually moved/renamed
+                        if new_full_path and change_files:
+                            fits_file.fitsFileName = new_full_path
+                        
+                        fits_file.save()
+                        merged_count += 1
+                        logger.debug(f"Database updated for file: {fits_file.fitsFileName}")
+                    else:
+                        logger.warning(f"Skipping database update for {old_filename} due to file operation failure")
                     
                 except Exception as e:
                     error_msg = f"Error processing {fits_file.fitsFileName}: {str(e)}"
