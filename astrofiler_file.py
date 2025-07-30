@@ -75,7 +75,12 @@ class fitsProcessing:
             logger.warning("Invalid FITS file. File not processed is "+str(os.path.join(root, file)))
             return False
 
-        hdr = hdul[0].header
+        try:
+            hdr = hdul[0].header
+        except Exception as e:
+            logger.warning("Error reading FITS header. File not processed is "+str(os.path.join(root, file)))
+            return False
+        
         if "IMAGETYP" in hdr:
             # Fix variances in header cards
             if ("EXPTIME" in hdr):
@@ -117,14 +122,11 @@ class fitsProcessing:
                         fitsCD1_2 = -fitsCDELT2 * sin(fitsCROTA2)
                         fitsCD2_1 =  fitsCDELT1 * sin (fitsCROTA2)
                         fitsCD2_2 = fitsCDELT2 * cos(fitsCROTA2)
-                        hdr.append(('CD1_1', str(fitsCD1_1), 'Adjusted via Astrofiler'), end=True)
-                        hdr.append(('CD1_2', str(fitsCD1_2), 'Adjusted via Astrofiler'), end=True)
-                        hdr.append(('CD2_1', str(fitsCD2_1), 'Adjusted via Astrofiler'), end=True)
-                        hdr.append(('CD2_2', str(fitsCD2_2), 'Adjusted via Astrofiler'), end=True)
-                        hdul.flush()  # changes are written back to original.fits
-                    else:
-                        logger.warning("No WCS information in header, file not updated is "+str(os.path.join(root, file)))
-                
+                        hdr.append(('CD1_1', str(fitsCD1_1), 'Rotation Matrix'), end=True)
+                        hdr.append(('CD1_2', str(fitsCD1_2), 'Rotation Matrix'), end=True)
+                        hdr.append(('CD2_1', str(fitsCD2_1), 'Rotation Matrix'), end=True)
+                        hdr.append(('CD2_2', str(fitsCD2_2), 'Rotation Matrix'), end=True)
+                        hdul.flush()  # changes are written back to original.fits               
                 
                 # Create a new file name
                 if ("OBJECT" in hdr):
@@ -289,7 +291,12 @@ class fitsProcessing:
                     logger.debug(f"Processing file {currCount}/{total_files} ({progress_percent:.1f}%): {file}{eta_str}")
                     
                     # Try to register the file
-                    newFitsFileId = self.registerFitsImage(root, file, moveFiles)
+                    try:
+                        newFitsFileId = self.registerFitsImage(root, file, moveFiles)
+                    except Exception as e:
+                        logger.error(f"Exception registering file {file}: {str(e)}")
+                        newFitsFileId=None
+
                     if newFitsFileId is not None:
                         # Add the file to the list of registered files
                         registeredFiles.append(newFitsFileId)
