@@ -21,7 +21,7 @@ import configparser
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as fitsSessionModel
 
 import logging
-logging=logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class fitsProcessing:
     """
@@ -52,7 +52,7 @@ class fitsProcessing:
                     hash_sha256.update(chunk)
             return hash_sha256.hexdigest()
         except Exception as e:
-            logging.error(f"Error calculating hash for {filePath}: {str(e)}")
+            logger.error(f"Error calculating hash for {filePath}: {str(e)}")
             return None
 
     #################################################################################################################
@@ -66,13 +66,13 @@ class fitsProcessing:
 
         # Ignore everything not a *fit* file
         if "fit" not in file_extension:
-            logging.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
+            logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
             return False
 
         try:
             hdul = fits.open(os.path.join(root, file), mode='update')
         except ValueError as e:
-            logging.warning("Invalid FITS file. File not processed is "+str(os.path.join(root, file)))
+            logger.warning("Invalid FITS file. File not processed is "+str(os.path.join(root, file)))
             return False
 
         hdr = hdul[0].header
@@ -80,14 +80,14 @@ class fitsProcessing:
             # Create an os-friendly date
             try:
                 if "DATE-OBS" not in hdr:
-                    logging.warning("No DATE-OBS card in header. File not processed is "+str(os.path.join(root, file)))
+                    logger.warning("No DATE-OBS card in header. File not processed is "+str(os.path.join(root, file)))
                     return False
                 datestr=hdr["DATE-OBS"].replace("T", " ")
                 datestr=datestr[0:datestr.find('.')]
                 dateobj=datetime.strptime(datestr, '%Y-%m-%d %H:%M:%S')
                 fitsDate=dateobj.strftime("%Y%m%d%H%M%S")
             except ValueError as e:
-                logging.warning("Invalid date format in header. File not processed is "+str(os.path.join(root, file)))
+                logger.warning("Invalid date format in header. File not processed is "+str(os.path.join(root, file)))
                 return False
 
             ############## L I G H T S ################################################################
@@ -108,7 +108,7 @@ class fitsProcessing:
                         hdr.append(('CD2_2', str(fitsCD2_2), 'Adjusted via Obsy'), end=True)
                         hdul.flush()  # changes are written back to original.fits
                     else:
-                        logging.warning("No WCS information in header, file not updated is "+str(os.path.join(root, file)))
+                        logger.warning("No WCS information in header, file not updated is "+str(os.path.join(root, file)))
 
                 # Create a new file name
                 if ("OBJECT" in hdr):
@@ -119,7 +119,7 @@ class fitsProcessing:
                         newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
-                    logging.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
+                    logger.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
                     return False
                 
 
@@ -142,7 +142,7 @@ class fitsProcessing:
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
 
             else:
-                logging.warning("File not processed as IMAGETYP -"+hdr["IMAGETYP"]+"- not recognized: "+str(os.path.join(root, file)))
+                logger.warning("File not processed as IMAGETYP -"+hdr["IMAGETYP"]+"- not recognized: "+str(os.path.join(root, file)))
             hdul.close()
             newPath=""
 
@@ -166,7 +166,7 @@ class fitsProcessing:
                 newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             else:
-                logging.warning("File not processed as IMAGETYP not recognized: "+str(os.path.join(root, file)))
+                logger.warning("File not processed as IMAGETYP not recognized: "+str(os.path.join(root, file)))
                 return None
 
             if not os.path.isdir(newPath) and moveFiles:
@@ -175,27 +175,27 @@ class fitsProcessing:
             # Calculate file hash for duplicate detection
             currentFilePath = os.path.join(root, file)
             fileHash = self.calculateFileHash(currentFilePath)
-            logging.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName.replace(" ", "_"))
+            logger.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName.replace(" ", "_"))
             newFitsFileId=self.submitFileToDB(newPath+newName.replace(" ", "_"),hdr,fileHash)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
-                    logging.info("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
+                    logger.info("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
                     # Move the file to the new location
                     try:
                         shutil.move(os.path.join(root, file), newPath+newName)
                     except shutil.Error as e:
-                        logging.error("Shutil error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
+                        logger.error("Shutil error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
                         return None
                     except OSError as e:
-                        logging.error("OS error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
+                        logger.error("OS error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
                         return None
-                    logging.info("File successfully moved to repo - "+newPath+newName)
+                    logger.info("File successfully moved to repo - "+newPath+newName)
                 else:
-                    logging.warning("File already exists in repo, no changes - "+newPath+newName)
+                    logger.warning("File already exists in repo, no changes - "+newPath+newName)
             else:
-                logging.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
+                logger.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
         else:
-            logging.warning("File not added to repo - no IMAGETYP card - "+str(os.path.join(root, file)))
+            logger.warning("File not added to repo - no IMAGETYP card - "+str(os.path.join(root, file)))
 
         return newFitsFileId
 
@@ -210,10 +210,10 @@ class fitsProcessing:
 
         # Scan the pictures folder
         if moveFiles:
-            logging.info("Processing images in "+self.sourceFolder)
+            logger.info("Processing images in "+self.sourceFolder)
             workFolder=self.sourceFolder
         else:
-            logging.info("Syncronizing images in "+os.path.abspath(self.repoFolder))
+            logger.info("Syncronizing images in "+os.path.abspath(self.repoFolder))
             workFolder=self.repoFolder
 
         # First pass: count total files to process
@@ -224,11 +224,11 @@ class fitsProcessing:
                 if "fit" in file_extension:
                     total_files += 1
         
-        logging.info(f"Found {total_files} FITS files to process")
+        logger.info(f"Found {total_files} FITS files to process")
         
         # If no files found, return early
         if total_files == 0:
-            logging.info("No FITS files found to process")
+            logger.info("No FITS files found to process")
             if progress_callback:
                 progress_callback(0, 0, "No FITS files found")
             return registeredFiles
@@ -238,27 +238,27 @@ class fitsProcessing:
         failed_files = 0
         cancelled_by_user = False
         
-        logging.info(f"Starting second pass to process {total_files} FITS files")
+        logger.info(f"Starting second pass to process {total_files} FITS files")
         
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
-            logging.debug(f"Processing directory: {root} with {len(files)} files")
+            logger.debug(f"Processing directory: {root} with {len(files)} files")
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
                 if "fit" in file_extension:
                     currCount += 1
-                    logging.info(f"Found FITS file #{currCount}: {file}")
+                    logger.info(f"Found FITS file #{currCount}: {file}")
                     
                     # Call progress callback if provided
                     if progress_callback:
-                        logging.info(f"Calling progress callback for file {currCount}/{total_files}: {file}")
+                        logger.info(f"Calling progress callback for file {currCount}/{total_files}: {file}")
                         should_continue = progress_callback(currCount, total_files, file)
-                        logging.info(f"Progress callback returned: {should_continue}")
+                        logger.info(f"Progress callback returned: {should_continue}")
                         if not should_continue:
-                            logging.info("Processing cancelled by user")
+                            logger.info("Processing cancelled by user")
                             cancelled_by_user = True
                             break
                     else:
-                        logging.debug("No progress callback provided")
+                        logger.debug("No progress callback provided")
                     
                     # Calculate and display progress
                     progress_percent = (currCount / total_files) * 100 if total_files > 0 else 0
@@ -270,7 +270,7 @@ class fitsProcessing:
                     else:
                         eta_str = ""
                     
-                    logging.info(f"Processing file {currCount}/{total_files} ({progress_percent:.1f}%): {file}{eta_str}")
+                    logger.info(f"Processing file {currCount}/{total_files} ({progress_percent:.1f}%): {file}{eta_str}")
                     
                     # Try to register the file
                     newFitsFileId = self.registerFitsImage(root, file, moveFiles)
@@ -278,22 +278,22 @@ class fitsProcessing:
                         # Add the file to the list of registered files
                         registeredFiles.append(newFitsFileId)
                         successful_files += 1
-                        logging.info(f"Successfully registered file: {file}")
+                        logger.info(f"Successfully registered file: {file}")
                     else:
                         failed_files += 1
-                        logging.warning(f"Failed to register file: {file}")
+                        logger.warning(f"Failed to register file: {file}")
                 else:
-                    logging.debug("Ignoring non-FITS file: "+file)
+                    logger.debug("Ignoring non-FITS file: "+file)
             
             # Check if processing was cancelled
             if cancelled_by_user:
                 break
         
         total_time = datetime.now() - start_time
-        logging.info(f"Processing complete! Found {total_files} files, successfully registered {successful_files} files, failed {failed_files} files in {total_time}")
+        logger.info(f"Processing complete! Found {total_files} files, successfully registered {successful_files} files, failed {failed_files} files in {total_time}")
         
         if cancelled_by_user:
-            logging.info("Processing was cancelled by user")
+            logger.info("Processing was cancelled by user")
         
         return registeredFiles
 
@@ -307,7 +307,7 @@ class fitsProcessing:
         unassigned_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Light"))
         
         # How many unassigned_files are there?
-        logging.info("createSessions found "+str(len(unassigned_files))+" unassigned files to session")
+        logger.info("createSessions found "+str(len(unassigned_files))+" unassigned files to session")
 
         # Loop through each unassigned file and create a session each time the object changes
         currentObject= ""
@@ -321,11 +321,11 @@ class fitsProcessing:
             if progress_callback:
                 should_continue = progress_callback(current_count, total_files, str(currentFitsFile.fitsFileName))
                 if not should_continue:
-                    logging.info("Session creation cancelled by user")
+                    logger.info("Session creation cancelled by user")
                     break
             
-            logging.info("Current Object is "+currentFitsFile.fitsFileObject+" with date "+str(currentFitsFile.fitsFileDate))
-            logging.info("Processing "+str(currentFitsFile.fitsFileName))
+            logger.info("Current Object is "+currentFitsFile.fitsFileObject+" with date "+str(currentFitsFile.fitsFileDate))
+            logger.info("Processing "+str(currentFitsFile.fitsFileName))
 
             # If the object name or date has changed, create a new session
             if str(currentFitsFile.fitsFileObject) != currentObject or self.dateToDateField(currentFitsFile.fitsFileDate) != currentDate:
@@ -348,16 +348,16 @@ class fitsProcessing:
                                                     fitsSessionFilter=currentFitsFile.fitsFileFilter,
                                                     fitsBiasSession=None,fitsDarkSession=None,fitsFlatSession=None)
                     sessionsCreated.append(currentSessionId)
-                    logging.info("New session created for "+str(newFitsSession.fitsSessionId))
+                    logger.info("New session created for "+str(newFitsSession.fitsSessionId))
                 except IntegrityError as e:
                     # Handle the integrity error
-                    logging.error("IntegrityError: "+str(e))
+                    logger.error("IntegrityError: "+str(e))
                     continue     
                 currentObject = str(currentFitsFile.fitsFileObject)
             # Assign the current session to the fits file
             currentFitsFile.fitsFileSession=currentSessionId
             currentFitsFile.save()
-            logging.info("Assigned "+str(currentFitsFile.fitsFileName)+" to session "+str(currentSessionId))
+            logger.info("Assigned "+str(currentFitsFile.fitsFileName)+" to session "+str(currentSessionId))
             sessionsCreated.append(currentSessionId)
             
         return sessionsCreated
@@ -391,9 +391,9 @@ class fitsProcessing:
         current_count = 0
         
         # How many unassigned_files are there?
-        logging.info("createCalibrationSessions found "+str(total_biases)+" unassigned Bias calibration files to Session")
-        logging.info("createCalibrationSessions found "+str(total_darks)+" unassigned Dark calibration files to Session")
-        logging.info("createCalibrationSessions found "+str(total_flats)+" unassigned Flat calibration files to Session")
+        logger.info("createCalibrationSessions found "+str(total_biases)+" unassigned Bias calibration files to Session")
+        logger.info("createCalibrationSessions found "+str(total_darks)+" unassigned Dark calibration files to Session")
+        logger.info("createCalibrationSessions found "+str(total_flats)+" unassigned Flat calibration files to Session")
 
         # Bias calibration files
         currDate="0001-01-01"
@@ -406,11 +406,11 @@ class fitsProcessing:
             if progress_callback:
                 should_continue = progress_callback(current_count, total_files, f"Bias: {biasFitsFile.fitsFileName}")
                 if not should_continue:
-                    logging.info("Calibration Session creation cancelled by user")
+                    logger.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
             if not self.sameDay(self.dateToString(biasFitsFile.fitsFileDate), currDate):
-                logging.info("Current date for bias is " + str(biasFitsFile.fitsFileDate))
+                logger.info("Current date for bias is " + str(biasFitsFile.fitsFileDate))
                 currDate = self.dateToString(biasFitsFile.fitsFileDate)
                 uuidStr = uuid.uuid4()  # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
@@ -428,10 +428,10 @@ class fitsProcessing:
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
-                logging.info("New date for bias "+currDate) 
+                logger.info("New date for bias "+currDate) 
             biasFitsFile.fitsFileSession=uuidStr
             biasFitsFile.save()   
-            logging.info("Set Session for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
+            logger.info("Set Session for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
             createdCalibrationSessions.append(uuidStr)
         
         # Dark calibration files
@@ -444,12 +444,12 @@ class fitsProcessing:
             if progress_callback:
                 should_continue = progress_callback(current_count, total_files, f"Dark: {darkFitsFile.fitsFileName}")
                 if not should_continue:
-                    logging.info("Calibration Session creation cancelled by user")
+                    logger.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
             if not self.sameDay(self.dateToString(darkFitsFile.fitsFileDate), currDate):
                 currDate = self.dateToString(darkFitsFile.fitsFileDate)
-                logging.info("Current date for dark is " + str(darkFitsFile.fitsFileDate))
+                logger.info("Current date for dark is " + str(darkFitsFile.fitsFileDate))
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                                 fitsSessionDate=self.dateToDateField(darkFitsFile.fitsFileDate),
@@ -466,10 +466,10 @@ class fitsProcessing:
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
-                logging.info("New date "+currDate) 
+                logger.info("New date "+currDate) 
             darkFitsFile.fitsFileSession=uuidStr
             darkFitsFile.save()   
-            logging.info("Set Session for dark "+darkFitsFile.fitsFileName+" to "+str(uuidStr))
+            logger.info("Set Session for dark "+darkFitsFile.fitsFileName+" to "+str(uuidStr))
             createdCalibrationSessions.append(uuidStr)
             
         # Flat calibration files
@@ -482,12 +482,12 @@ class fitsProcessing:
             if progress_callback:
                 should_continue = progress_callback(current_count, total_files, f"Flat: {flatFitsFile.fitsFileName}")
                 if not should_continue:
-                    logging.info("Calibration Session creation cancelled by user")
+                    logger.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
             if not self.sameDay(self.dateToString(flatFitsFile.fitsFileDate), currDate):
                 currDate = self.dateToString(flatFitsFile.fitsFileDate)
-                logging.info("Current date for flat is " + str(flatFitsFile.fitsFileDate))
+                logger.info("Current date for flat is " + str(flatFitsFile.fitsFileDate))
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                 fitsSessionDate=self.dateToDateField(flatFitsFile.fitsFileDate),
@@ -504,10 +504,10 @@ class fitsProcessing:
                                 fitsBiasSession=None,
                                 fitsDarkSession=None,
                                 fitsFlatSession=None)
-                logging.info("New date "+currDate) 
+                logger.info("New date "+currDate) 
             flatFitsFile.fitsFileSession=uuidStr
             flatFitsFile.save()   
-            logging.info("Set Session for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
+            logger.info("Set Session for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
             createdCalibrationSessions.append(uuidStr)
         
         return createdCalibrationSessions
@@ -518,7 +518,7 @@ class fitsProcessing:
     def submitFileToDB(self,fileName,hdr,fileHash=None):
         if "DATE-OBS" in hdr:
             # Create new fitsFile record
-            logging.info("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
+            logger.info("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
             if "OBJECT" in hdr:
                 newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
                             fitsFileObject=hdr["OBJECT"],fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
@@ -533,7 +533,7 @@ class fitsProcessing:
                             fitsFileHash=fileHash,fitsFileSession=None)
             return newfile.fitsFileId
         else:
-            logging.error("Error: File not added to repo due to missing date is "+fileName)
+            logger.error("Error: File not added to repo due to missing date is "+fileName)
             return None
         return True
 
@@ -579,7 +579,7 @@ class fitsProcessing:
             total_sessions = len(light_sessions)
             current_count = 0
             
-            logging.info(f"Found {total_sessions} light sessions to process for calibration linking")
+            logger.info(f"Found {total_sessions} light sessions to process for calibration linking")
             
             for light_session in light_sessions:
                 current_count += 1
@@ -589,7 +589,7 @@ class fitsProcessing:
                     should_continue = progress_callback(current_count, total_sessions, 
                                                       f"Linking: {light_session.fitsSessionObjectName}")
                     if not should_continue:
-                        logging.info("Session linking cancelled by user")
+                        logger.info("Session linking cancelled by user")
                         break
                 
                 session_updated = False
@@ -603,7 +603,7 @@ class fitsProcessing:
                 light_offset = light_session.fitsSessionOffset
                 light_ccd_temp = light_session.fitsSessionCCDTemp
                 
-                logging.debug(f"Light session {light_session.fitsSessionId} criteria: exp={light_exp_time}, binning={light_x_binning}x{light_y_binning}, filter={light_filter}, gain={light_gain}, offset={light_offset}, temp={light_ccd_temp}")
+                logger.debug(f"Light session {light_session.fitsSessionId} criteria: exp={light_exp_time}, binning={light_x_binning}x{light_y_binning}, filter={light_filter}, gain={light_gain}, offset={light_offset}, temp={light_ccd_temp}")
                 
                 # Find most recent bias session with matching telescope/imager/binning/gain/offset
                 if not light_session.fitsBiasSession:
@@ -623,9 +623,9 @@ class fitsProcessing:
                     if bias_session:
                         light_session.fitsBiasSession = str(bias_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked bias session {bias_session.fitsSessionId} to light session {light_session.fitsSessionId} (binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset})")
+                        logger.info(f"Linked bias session {bias_session.fitsSessionId} to light session {light_session.fitsSessionId} (binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset})")
                     else:
-                        logging.debug(f"No matching bias session found for light session {light_session.fitsSessionId}")
+                        logger.debug(f"No matching bias session found for light session {light_session.fitsSessionId}")
                 
                 # Find most recent dark session with matching telescope/imager/binning/exposure/gain/offset/ccd_temp (within 5 degrees)
                 if not light_session.fitsDarkSession:
@@ -668,9 +668,9 @@ class fitsProcessing:
                         light_session.fitsDarkSession = str(dark_session.fitsSessionId)
                         session_updated = True
                         temp_info = f", temp: {light_ccd_temp}°C" if light_ccd_temp else ""
-                        logging.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId} (exp: {light_exp_time}s, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset}{temp_info})")
+                        logger.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId} (exp: {light_exp_time}s, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset}{temp_info})")
                     else:
-                        logging.debug(f"No matching dark session found for light session {light_session.fitsSessionId} (exp: {light_exp_time}s)")
+                        logger.debug(f"No matching dark session found for light session {light_session.fitsSessionId} (exp: {light_exp_time}s)")
                 
                 # Find most recent flat session with matching telescope/imager/binning/filter/gain/offset
                 if not light_session.fitsFlatSession:
@@ -691,20 +691,20 @@ class fitsProcessing:
                     if flat_session:
                         light_session.fitsFlatSession = str(flat_session.fitsSessionId)
                         session_updated = True
-                        logging.info(f"Linked flat session {flat_session.fitsSessionId} to light session {light_session.fitsSessionId} (filter: {light_filter}, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset})")
+                        logger.info(f"Linked flat session {flat_session.fitsSessionId} to light session {light_session.fitsSessionId} (filter: {light_filter}, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset})")
                     else:
-                        logging.debug(f"No matching flat session found for light session {light_session.fitsSessionId} (filter: {light_filter})")
+                        logger.debug(f"No matching flat session found for light session {light_session.fitsSessionId} (filter: {light_filter})")
                 
                 # Save the session if any links were updated
                 if session_updated:
                     light_session.save()
                     updated_sessions.append(str(light_session.fitsSessionId))
-                    logging.info(f"Updated light session {light_session.fitsSessionId} with calibration links")
+                    logger.info(f"Updated light session {light_session.fitsSessionId} with calibration links")
             
-            logging.info(f"Session linking complete. Updated {len(updated_sessions)} light sessions with calibration links")
+            logger.info(f"Session linking complete. Updated {len(updated_sessions)} light sessions with calibration links")
             
         except Exception as e:
-            logging.error(f"Error in linkSessions: {str(e)}")
+            logger.error(f"Error in linkSessions: {str(e)}")
             raise
         
         return updated_sessions
@@ -782,11 +782,11 @@ class fitsProcessing:
                     parsed_date = datetime.strptime(date_obj[:10], '%Y-%m-%d').date()
                     return parsed_date
                 except ValueError:
-                    logging.warning(f"Could not parse date string: {date_obj}")
+                    logger.warning(f"Could not parse date string: {date_obj}")
                     return None
                     
             except Exception as e:
-                logging.warning(f"Error parsing date string '{date_obj}': {e}")
+                logger.warning(f"Error parsing date string '{date_obj}': {e}")
                 return None
         
         # If it's a datetime object, get the date part
@@ -795,5 +795,5 @@ class fitsProcessing:
                 return date_obj.date()
             return date_obj
         except Exception as e:
-            logging.warning(f"Error converting date object: {e}")
+            logger.warning(f"Error converting date object: {e}")
             return None
