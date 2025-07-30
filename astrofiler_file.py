@@ -77,6 +77,21 @@ class fitsProcessing:
 
         hdr = hdul[0].header
         if "IMAGETYP" in hdr:
+            # Fix variances in header cards
+            if ("EXPTIME" in hdr):
+                exposure=hdr["EXPTIME"]
+            else:
+                if ("EXPOSURE" in hdr):
+                    exposure=hdr["EXPOSURE"]
+                else:
+                    logger.warning("No EXPTIME or EXPOSURE card in header. File not processed is "+str(os.path.join(root, file)))
+                    return False
+                
+            if "TELESCOP" in hdr:
+                telescope=hdr["TELESCOP"]
+            else:
+                telescope="Unknown"
+                    
             # Create an os-friendly date
             try:
                 if "DATE-OBS" not in hdr:
@@ -91,7 +106,7 @@ class fitsProcessing:
                 return False
 
             ############## L I G H T S ################################################################
-            if "Light" in hdr["IMAGETYP"]:
+            if "LIGHT" in hdr["IMAGETYP"].upper():
                 # Adjust the WCS for the image
                 if "CD1_1" not in hdr:
                     if "CDELT1" in hdr:
@@ -102,44 +117,45 @@ class fitsProcessing:
                         fitsCD1_2 = -fitsCDELT2 * sin(fitsCROTA2)
                         fitsCD2_1 =  fitsCDELT1 * sin (fitsCROTA2)
                         fitsCD2_2 = fitsCDELT2 * cos(fitsCROTA2)
-                        hdr.append(('CD1_1', str(fitsCD1_1), 'Adjusted via Obsy'), end=True)
-                        hdr.append(('CD1_2', str(fitsCD1_2), 'Adjusted via Obsy'), end=True)
-                        hdr.append(('CD2_1', str(fitsCD2_1), 'Adjusted via Obsy'), end=True)
-                        hdr.append(('CD2_2', str(fitsCD2_2), 'Adjusted via Obsy'), end=True)
+                        hdr.append(('CD1_1', str(fitsCD1_1), 'Adjusted via Astrofiler'), end=True)
+                        hdr.append(('CD1_2', str(fitsCD1_2), 'Adjusted via Astrofiler'), end=True)
+                        hdr.append(('CD2_1', str(fitsCD2_1), 'Adjusted via Astrofiler'), end=True)
+                        hdr.append(('CD2_2', str(fitsCD2_2), 'Adjusted via Astrofiler'), end=True)
                         hdul.flush()  # changes are written back to original.fits
                     else:
                         logger.warning("No WCS information in header, file not updated is "+str(os.path.join(root, file)))
-
+                
+                
                 # Create a new file name
                 if ("OBJECT" in hdr):
                     if ("FILTER" in hdr):
-                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],telescope.replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                     else:
-                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],telescope.replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
                     logger.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
                     return False
                 
 
             ############## F L A T S ##################################################################            
-            elif "Flat" in hdr["IMAGETYP"]:
+            elif "FLAT" in hdr["IMAGETYP"].upper():
                 if ("FILTER" in hdr):
-                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
-                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             
             ############## D A R K S ##################################################################   
-            elif "Dark" in hdr["IMAGETYP"]:
-                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Dark",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+            elif "DARK" in hdr["IMAGETYP"].upper():
+                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Dark",telescope.replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             ############## B I A S E S ################################################################   
-            elif "Bias" in hdr["IMAGETYP"]:
-                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Bias",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate,hdr["EXPTIME"],hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+            elif "BIAS" in hdr["IMAGETYP"].upper():
+                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Bias",telescope.replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
 
             else:
                 logger.warning("File not processed as IMAGETYP -"+hdr["IMAGETYP"]+"- not recognized: "+str(os.path.join(root, file)))
@@ -149,21 +165,21 @@ class fitsProcessing:
             ######################################################################################################
             # Create the folder structure (if needed)
             fitsDate=dateobj.strftime("%Y%m%d")
-            if "Light" in hdr["IMAGETYP"]:
-                newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(hdr["OBJECT"],hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+            if "LIGHT" in hdr["IMAGETYP"].upper():
+                newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(hdr["OBJECT"],telescope.replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
-            elif "Dark" in hdr["IMAGETYP"]:
-                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Dark",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),hdr["EXPTIME"],fitsDate)
-            elif "Flat" in hdr["IMAGETYP"]:
+            elif "DARK" in hdr["IMAGETYP"].upper():
+                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Dark",telescope.replace(" ", "_").replace("\\", "_"),
+                                    hdr["INSTRUME"].replace(" ", "_"),exposure,fitsDate)
+            elif "FLAT" in hdr["IMAGETYP"].upper():
                 if ("FILTER" in hdr):
-                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate)
                 else:
-                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate)
-            elif "Bias" in hdr["IMAGETYP"]:
-                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",hdr["TELESCOP"].replace(" ", "_").replace("\\", "_"),
+            elif "BIAS" in hdr["IMAGETYP"].upper():
+                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",telescope.replace(" ", "_").replace("\\", "_"),
                                     hdr["INSTRUME"].replace(" ", "_"),fitsDate)
             else:
                 logger.warning("File not processed as IMAGETYP not recognized: "+str(os.path.join(root, file)))
@@ -250,9 +266,9 @@ class fitsProcessing:
                     
                     # Call progress callback if provided
                     if progress_callback:
-                        logger.info(f"Calling progress callback for file {currCount}/{total_files}: {file}")
+                        logger.debug(f"Calling progress callback for file {currCount}/{total_files}: {file}")
                         should_continue = progress_callback(currCount, total_files, file)
-                        logger.info(f"Progress callback returned: {should_continue}")
+                        logger.debug(f"Progress callback returned: {should_continue}")
                         if not should_continue:
                             logger.info("Processing cancelled by user")
                             cancelled_by_user = True
@@ -270,7 +286,7 @@ class fitsProcessing:
                     else:
                         eta_str = ""
                     
-                    logger.info(f"Processing file {currCount}/{total_files} ({progress_percent:.1f}%): {file}{eta_str}")
+                    logger.debug(f"Processing file {currCount}/{total_files} ({progress_percent:.1f}%): {file}{eta_str}")
                     
                     # Try to register the file
                     newFitsFileId = self.registerFitsImage(root, file, moveFiles)
@@ -379,9 +395,9 @@ class fitsProcessing:
         createdCalibrationSessions=[]
         
         # Query for all calibration files that are not assigned to a session
-        unassignedBiases = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Bias"))
-        unassignedDarks  = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Dark"))
-        unassignedFlats  = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Flat"))
+        unassignedBiases = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("BIAS"))
+        unassignedDarks  = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("DARK"))
+        unassignedFlats  = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("FLAT"))
         
         # Calculate total files for progress tracking
         total_biases = len(unassignedBiases)
@@ -519,16 +535,32 @@ class fitsProcessing:
         if "DATE-OBS" in hdr:
             # Create new fitsFile record
             logger.info("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
+            
+            # Adjust for different keywords
+            if ("EXPTIME" in hdr):
+                exposure=hdr["EXPTIME"]
+            else:
+                if ("EXPOSURE" in hdr):
+                    exposure=hdr["EXPOSURE"]
+                else:
+                    logger.error("Error: File not added to repo due to missing exposure time in "+fileName)
+                    return None
+            
+            if "TELESCOP" in hdr:
+                telescope=hdr["TELESCOP"]
+            else:
+                telescope="Unknown"
+
             if "OBJECT" in hdr:
-                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
-                            fitsFileObject=hdr["OBJECT"],fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
-                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
+                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"].upper(),
+                            fitsFileObject=hdr["OBJECT"],fitsFileExpTime=exposure,fitsFileXBinning=hdr["XBINNING"],
+                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=telescope,
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", None),
                             fitsFileHash=fileHash,fitsFileSession=None)
             else:
-                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"],
-                            fitsFileExpTime=hdr["EXPTIME"],fitsFileXBinning=hdr["XBINNING"],
-                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=hdr["TELESCOP"],
+                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"].upper(),
+                            fitsFileExpTime=exposure,fitsFileXBinning=hdr["XBINNING"],
+                            fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=telescope,
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", "OSC"),
                             fitsFileHash=fileHash,fitsFileSession=None)
             return newfile.fitsFileId
