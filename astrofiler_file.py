@@ -63,7 +63,7 @@ class fitsProcessing:
     def registerFitsImage(self,root,file,moveFiles):
         newFitsFileId=None
         file_name, file_extension = os.path.splitext(os.path.join(root,file))
-
+        print("Processing file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
         # Ignore everything not a *fit* file
         if "fit" not in file_extension:
             logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
@@ -71,8 +71,8 @@ class fitsProcessing:
 
         try:
             hdul = fits.open(os.path.join(root, file), mode='update')
-        except ValueError as e:
-            logger.warning("Invalid FITS file. File not processed is "+str(os.path.join(root, file)))
+        except Exception as e:
+            logger.warning(f"Invalid FITS file error {e} File not processed is "+str(os.path.join(root, file)))
             return False
 
         try:
@@ -161,7 +161,13 @@ class fitsProcessing:
 
             else:
                 logger.warning("File not processed as IMAGETYP -"+hdr["IMAGETYP"]+"- not recognized: "+str(os.path.join(root, file)))
-            hdul.close()
+            
+            # Close the HDU list
+            try:
+                hdul.close()
+            except Exception as e:
+                logger.warning(f"Non-compliant header warning in {os.path.basename(__file__)} while processing file {os.path.join(root, file)}")
+            
             newPath=""
 
             ######################################################################################################
@@ -214,7 +220,7 @@ class fitsProcessing:
                 logger.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
         else:
             logger.warning("File not added to repo - no IMAGETYP card - "+str(os.path.join(root, file)))
-
+        
         return newFitsFileId
 
     #################################################################################################################
