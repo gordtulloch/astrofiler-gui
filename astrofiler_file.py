@@ -200,7 +200,7 @@ class fitsProcessing:
             currentFilePath = os.path.join(root, file)
             fileHash = self.calculateFileHash(currentFilePath)
             logger.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName.replace(" ", "_"))
-            newFitsFileId=self.submitFileToDB(newPath+newName.replace(" ", "_"),hdr,fileHash)
+            newFitsFileId=self.submitFileToDB(newPath+newName,hdr,fileHash)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
                     logger.info("Moving file "+os.path.join(root, file)+" to "+newPath+newName)

@@ -590,6 +590,7 @@ class ImagesTab(QWidget):
                 # Get the FITS file record from the database
                 fits_file = FitsFileModel.get_by_id(file_id)
                 if fits_file and fits_file.fitsFileName:
+                    logger.info(f"Launching external viewer for file: {fits_file.fitsFileName}")
                     self.launch_external_viewer(fits_file.fitsFileName)
                 else:
                     QMessageBox.warning(self, "File Not Found", "The FITS file path is not available.")
