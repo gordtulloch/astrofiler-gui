@@ -63,7 +63,7 @@ class fitsProcessing:
     def registerFitsImage(self,root,file,moveFiles):
         newFitsFileId=None
         file_name, file_extension = os.path.splitext(os.path.join(root,file))
-        print("Processing file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
+        #print("Processing file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
         # Ignore everything not a *fit* file
         if "fit" not in file_extension:
             logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")

@@ -24,6 +24,19 @@ if exist ".git" (
         ) else (
             echo Successfully updated to latest version.
             echo %date% %time% - launch_astrofiler.bat - INFO - Successfully updated to latest version from GitHub >> astrofiler.log
+            REM Run database migrations after successful update
+            echo Running database migrations...
+            echo %date% %time% - launch_astrofiler.bat - INFO - Running database migrations after update >> astrofiler.log
+            if exist ".venv\Scripts\python.exe" (
+                .venv\Scripts\python.exe migrate.py run
+                if errorlevel 1 (
+                    echo Warning: Database migration failed. AstroFiler may not function correctly.
+                    echo %date% %time% - launch_astrofiler.bat - WARNING - Database migration failed after update >> astrofiler.log
+                ) else (
+                    echo Database migrations completed successfully.
+                    echo %date% %time% - launch_astrofiler.bat - INFO - Database migrations completed successfully >> astrofiler.log
+                )
+            )
         )
     ) else (
         echo Already up to date.
