@@ -114,7 +114,7 @@ class fitsProcessing:
             if "LIGHT" in hdr["IMAGETYP"].upper():
                 # Adjust the WCS for the image
                 if "CD1_1" not in hdr:
-                    if "CDELT1" in hdr:
+                    if "CDELT1" in hdr and "CDELT2" in hdr and "CROTA2" in hdr:
                         fitsCDELT1=float(hdr["CDELT1"])
                         fitsCDELT2=float(hdr["CDELT2"])
                         fitsCROTA2=float(hdr["CROTA2"])
@@ -126,7 +126,9 @@ class fitsProcessing:
                         hdr.append(('CD1_2', str(fitsCD1_2), 'Rotation Matrix'), end=True)
                         hdr.append(('CD2_1', str(fitsCD2_1), 'Rotation Matrix'), end=True)
                         hdr.append(('CD2_2', str(fitsCD2_2), 'Rotation Matrix'), end=True)
-                        hdul.flush()  # changes are written back to original.fits               
+                        hdul.flush()  # changes are written back to original.fits
+                    else:
+                        logger.warning("No CDELT1, CDELT2 or CROTA2 card in header. Unable to update WCS in "+str(os.path.join(root, file)))             
                 
                 # Create a new file name
                 if ("OBJECT" in hdr):
