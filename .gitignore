@@ -6,7 +6,7 @@
 *.sqlite
 *.db
 
-# Ini files
+# Ini files 
 *.ini
 
 # Byte-compiled / optimized / DLL files
