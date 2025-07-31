@@ -30,6 +30,18 @@ if [ -d ".git" ]; then
             if git pull origin main; then
                 echo "Successfully updated to latest version."
                 echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Successfully updated to latest version from GitHub" >> astrofiler.log
+                # Run database migrations after successful update
+                echo "Running database migrations..."
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Running database migrations after update" >> astrofiler.log
+                if [ -f ".venv/bin/python" ]; then
+                    if .venv/bin/python migrate.py run; then
+                        echo "Database migrations completed successfully."
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - INFO - Database migrations completed successfully" >> astrofiler.log
+                    else
+                        echo "Warning: Database migration failed. AstroFiler may not function correctly."
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - WARNING - Database migration failed after update" >> astrofiler.log
+                    fi
+                fi
             else
                 echo "Warning: Failed to update from GitHub. Continuing with current version."
                 echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler.sh - WARNING - Failed to update from GitHub. Continuing with current version" >> astrofiler.log

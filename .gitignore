@@ -1,3 +1,6 @@
+# Misc files
+*.ini
+
 # Log files
 *.log
 

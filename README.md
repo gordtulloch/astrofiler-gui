@@ -97,6 +97,34 @@ Desktop launchers automatically check for and install updates from GitHub when s
 
 📖 **See the Wiki for detailed installation instructions and troubleshooting.**
 
+## 🗄️ Database Migrations
+
+AstroFiler uses `peewee-migrate` for database version control and schema migrations. This ensures smooth upgrades when the database structure changes in future versions.
+
+### For Users
+- **Automatic Migration**: When you start AstroFiler, any pending database migrations are automatically applied
+- **No Manual Action Required**: The application handles database updates transparently
+- **Backup Recommended**: While migrations are tested, it's always good practice to backup your `astrofiler.db` file before major updates
+
+### For Developers
+Database schema changes are managed through migrations:
+
+```bash
+# Check current migration status
+python migrate.py status
+
+# Create a new migration
+python migrate.py create add_new_field
+
+# Run pending migrations
+python migrate.py run
+
+# Initial database setup
+python migrate.py setup
+```
+
+See [MIGRATIONS.md](MIGRATIONS.md) for detailed migration development guidelines.
+
 ## 🤝 Contributing
 
 We welcome contributions! Please:
