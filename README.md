@@ -30,13 +30,16 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 - **File Integrity**: SHA-256 hashing for duplicate detection and verification
 
 ### 🛠️ **Tools & Integration**
-- **External Viewer Support**: Launch your favorite FITS viewer directly from Astrofile
+- **External Viewer Support**: Launch your favorite FITS viewer directly from AstroFiler
+- **Siril CLI Integration**: Create master calibration frames using Siril command-line interface
+- **Automated Master Creation**: Generate master bias, dark, and flat frames with proper naming and metadata
 
 ### 📈 **Session Management**
 - **Session Detection**: Automatically group lights and calibration images
 - **Session Operations**: Create, update, and clear session groupings
 - **Session Linking**: Automatically link calibration sessions to light sessions
 - **Session Export**: Export Lights and Calibration files ready for SIRIL processing
+- **Master Frame Management**: Track and create master calibration frames per session
 
 ### **Future Versions**
 - **XISF support**: Load XISF files and extract FITS headers

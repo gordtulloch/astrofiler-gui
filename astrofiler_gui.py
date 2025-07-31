@@ -656,7 +656,11 @@ class SessionsTab(QWidget):
         self.regenerate_button = QPushButton("Regenerate")
         self.regenerate_button.setToolTip("Clear all sessions and regenerate: Update Lights → Update Calibrations → Link Sessions")
         
+        self.create_masters_button = QPushButton("Create Masters")
+        self.create_masters_button.setToolTip("Create master calibration frames from bias, dark, and flat sessions using Siril CLI")
+        
         controls_layout.addWidget(self.regenerate_button)
+        controls_layout.addWidget(self.create_masters_button)
         controls_layout.addStretch()
         
         # Sessions list
@@ -678,6 +682,7 @@ class SessionsTab(QWidget):
         
         # Connect signals
         self.regenerate_button.clicked.connect(self.regenerate_sessions)
+        self.create_masters_button.clicked.connect(self.create_masters)
     
     def show_context_menu(self, position):
         """Show context menu for session items"""
@@ -1496,6 +1501,96 @@ class SessionsTab(QWidget):
                 progress_dialog.close()
             logger.error(f"Error during session regeneration: {e}")
             QMessageBox.warning(self, "Error", f"Failed to regenerate sessions: {e}")
+
+    def create_masters(self):
+        """Create master calibration frames from bias, dark, and flat sessions using Siril CLI."""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        
+        # Confirm operation
+        reply = QMessageBox.question(
+            self, 
+            "Create Master Calibration Frames", 
+            "This will create master bias, dark, and flat frames from calibration sessions\n"
+            "that don't already have masters using Siril CLI.\n\n"
+            "The process may take some time depending on the number of calibration files.\n"
+            "Are you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        progress_dialog = None
+        was_cancelled = False
+        
+        try:
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Initializing master creation...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Creating Master Calibration Frames")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            progress_dialog.show()
+            
+            # Progress callback function
+            def update_progress(current, total, message):
+                nonlocal was_cancelled
+                if was_cancelled or (progress_dialog and progress_dialog.wasCanceled()):
+                    was_cancelled = True
+                    return False
+                
+                if progress_dialog:
+                    progress_value = int((current / total) * 100) if total > 0 else 0
+                    progress_dialog.setValue(progress_value)
+                    progress_dialog.setLabelText(f"{message} ({current}/{total})")
+                    QApplication.processEvents()
+                
+                return not was_cancelled
+            
+            # Import and run the master creation function
+            from astrofiler_file import fitsProcessing
+            fits_processor = fitsProcessing()
+            
+            # Call the master creation function
+            results = fits_processor.createMasterCalibrationFrames(progress_callback=update_progress)
+            
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
+            # Check if operation was cancelled
+            if was_cancelled:
+                QMessageBox.information(self, "Cancelled", "Master calibration frame creation was cancelled by user.")
+                logger.info("Master calibration frame creation was cancelled by user")
+            else:
+                # Show success message
+                if results:
+                    bias_count = results.get('bias_masters', 0)
+                    dark_count = results.get('dark_masters', 0)
+                    flat_count = results.get('flat_masters', 0)
+                    
+                    result_message = (
+                        f"Master calibration frame creation completed!\n\n"
+                        f"• Bias masters created: {bias_count}\n"
+                        f"• Dark masters created: {dark_count}\n"
+                        f"• Flat masters created: {flat_count}\n"
+                        f"• Total masters created: {bias_count + dark_count + flat_count}"
+                    )
+                    
+                    QMessageBox.information(self, "Success", result_message)
+                    logger.info(f"Master creation completed: {results}")
+                    
+                    # Refresh the sessions display
+                    self.load_sessions_data()
+                else:
+                    QMessageBox.information(self, "Complete", "No new master calibration frames were needed.")
+                
+        except Exception as e:
+            if progress_dialog:
+                progress_dialog.close()
+            logger.error(f"Error creating master calibration frames: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to create master calibration frames: {e}")
 
 class MergeTab(QWidget):
     def __init__(self):
