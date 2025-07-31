@@ -842,3 +842,292 @@ class fitsProcessing:
         except Exception as e:
             logger.warning(f"Error converting date object: {e}")
             return None
+
+    def createMasterCalibrationFrames(self, progress_callback=None):
+        """
+        Create master calibration frames from bias, dark, and flat sessions using Siril CLI.
+        
+        Args:
+            progress_callback: Optional callback function for progress updates
+            
+        Returns:
+            Dictionary with counts of created masters: {'bias_masters': n, 'dark_masters': n, 'flat_masters': n}
+        """
+        import subprocess
+        import configparser
+        from astrofiler_db import fitsSession as FitsSessionModel, fitsFile as FitsFileModel
+        
+        logger.info("Starting master calibration frame creation")
+        
+        # Get Siril CLI path from config
+        config = configparser.ConfigParser()
+        config.read('astrofiler.ini')
+        siril_cli_path = config.get('DEFAULT', 'siril_cli_path', fallback='')
+        
+        if not siril_cli_path or not os.path.exists(siril_cli_path):
+            raise Exception("Siril CLI path not configured or invalid. Please set the Siril CLI location in Config tab.")
+        
+        # Ensure Masters directory exists
+        masters_dir = os.path.join(self.repoFolder, 'Masters')
+        os.makedirs(masters_dir, exist_ok=True)
+        
+        results = {'bias_masters': 0, 'dark_masters': 0, 'flat_masters': 0}
+        
+        # Find calibration sessions without masters
+        calibration_sessions = []
+        
+        # Get bias sessions without master
+        bias_sessions = FitsSessionModel.select().where(
+            (FitsSessionModel.fitsSessionObjectName.in_(['bias', 'Bias', 'BIAS'])) &
+            ((FitsSessionModel.fitsBiasMaster.is_null()) | (FitsSessionModel.fitsBiasMaster == ''))
+        )
+        calibration_sessions.extend([('bias', session) for session in bias_sessions])
+        
+        # Get dark sessions without master
+        dark_sessions = FitsSessionModel.select().where(
+            (FitsSessionModel.fitsSessionObjectName.in_(['dark', 'Dark', 'DARK'])) &
+            ((FitsSessionModel.fitsDarkMaster.is_null()) | (FitsSessionModel.fitsDarkMaster == ''))
+        )
+        calibration_sessions.extend([('dark', session) for session in dark_sessions])
+        
+        # Get flat sessions without master
+        flat_sessions = FitsSessionModel.select().where(
+            (FitsSessionModel.fitsSessionObjectName.in_(['flat', 'Flat', 'FLAT'])) &
+            ((FitsSessionModel.fitsFlatMaster.is_null()) | (FitsSessionModel.fitsFlatMaster == ''))
+        )
+        calibration_sessions.extend([('flat', session) for session in flat_sessions])
+        
+        total_sessions = len(calibration_sessions)
+        logger.info(f"Found {total_sessions} calibration sessions without masters")
+        
+        if total_sessions == 0:
+            return results
+        
+        for i, (cal_type, session) in enumerate(calibration_sessions):
+            if progress_callback:
+                if not progress_callback(i, total_sessions, f"Processing {cal_type} session {session.fitsSessionId}"):
+                    logger.info("Master creation cancelled by user")
+                    return results
+            
+            try:
+                # Get files for this session
+                session_files = FitsFileModel.select().where(
+                    FitsFileModel.fitsFileSession == session.fitsSessionId
+                )
+                
+                file_list = [f.fitsFileName for f in session_files if f.fitsFileName and os.path.exists(f.fitsFileName)]
+                
+                if len(file_list) < 2:
+                    logger.warning(f"Not enough files ({len(file_list)}) for {cal_type} session {session.fitsSessionId}")
+                    continue
+                
+                # Get metadata from first file for naming
+                first_file_path = file_list[0]
+                with fits.open(first_file_path) as hdul:
+                    header = hdul[0].header
+                    
+                    telescope = header.get('TELESCOP', 'Unknown').replace(' ', '-').replace('/', '-')
+                    instrument = header.get('INSTRUME', 'Unknown').replace(' ', '-').replace('/', '-')
+                    xbinning = header.get('XBINNING', '1')
+                    ybinning = header.get('YBINNING', '1')
+                    date_str = session.fitsSessionDate.strftime('%Y-%m-%d') if session.fitsSessionDate else 'Unknown'
+                    
+                    # Type-specific naming
+                    if cal_type == 'bias':
+                        master_filename = f"Master-Bias-{telescope}-{instrument}-{xbinning}x{ybinning}-{date_str}.fits"
+                    elif cal_type == 'dark':
+                        exptime = header.get('EXPTIME', 'Unknown')
+                        ccd_temp = header.get('CCD-TEMP', header.get('SET-TEMP', 'Unknown'))
+                        master_filename = f"Master-Dark-{telescope}-{instrument}-{xbinning}x{ybinning}-{exptime}-{ccd_temp}-{date_str}.fits"
+                    else:  # flat
+                        filter_name = header.get('FILTER', 'Unknown').replace(' ', '-').replace('/', '-')
+                        master_filename = f"Master-Flat-{telescope}-{instrument}-{filter_name}-{xbinning}x{ybinning}-{date_str}.fits"
+                
+                master_path = os.path.join(masters_dir, master_filename)
+                
+                # Skip if master already exists
+                if os.path.exists(master_path):
+                    logger.info(f"Master {master_filename} already exists, skipping")
+                    continue
+                
+                # Create master using Siril CLI
+                success = self._create_master_with_siril(siril_cli_path, file_list, master_path, cal_type)
+                
+                if success:
+                    # Update FITS header with master frame metadata
+                    self._update_master_header(master_path, session, file_list, cal_type)
+                    
+                    # Add master to database
+                    master_fits_id = self._register_master_in_database(master_path, session, cal_type)
+                    
+                    # Update session with master reference
+                    if cal_type == 'bias':
+                        session.fitsBiasMaster = master_path
+                        results['bias_masters'] += 1
+                    elif cal_type == 'dark':
+                        session.fitsDarkMaster = master_path
+                        results['dark_masters'] += 1
+                    else:  # flat
+                        session.fitsFlatMaster = master_path
+                        results['flat_masters'] += 1
+                    
+                    session.save()
+                    logger.info(f"Created {cal_type} master: {master_filename}")
+                else:
+                    logger.error(f"Failed to create {cal_type} master for session {session.fitsSessionId}")
+                    
+            except Exception as e:
+                logger.error(f"Error creating {cal_type} master for session {session.fitsSessionId}: {e}")
+                continue
+        
+        # Final progress update
+        if progress_callback:
+            progress_callback(total_sessions, total_sessions, "Master creation complete")
+        
+        logger.info(f"Master creation completed: {results}")
+        return results
+    
+    def _create_master_with_siril(self, siril_cli_path, file_list, output_path, cal_type):
+        """Create master calibration frame using Siril CLI."""
+        import tempfile
+        import subprocess
+        
+        try:
+            # Create temporary directory for Siril processing
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Create Siril script
+                script_path = os.path.join(temp_dir, 'create_master.ssf')
+                
+                # Create symbolic links to files in temp directory
+                temp_files = []
+                links_created = 0
+                copies_made = 0
+                
+                for i, file_path in enumerate(file_list):
+                    temp_file = os.path.join(temp_dir, f"frame_{i:04d}.fits")
+                    try:
+                        # Try to create symbolic link (more efficient)
+                        os.symlink(file_path, temp_file)
+                        temp_files.append(temp_file)
+                        links_created += 1
+                    except (OSError, NotImplementedError):
+                        # Fall back to hard link if symlink fails
+                        try:
+                            os.link(file_path, temp_file)
+                            temp_files.append(temp_file)
+                            links_created += 1
+                        except OSError:
+                            # Fall back to copying if both link methods fail
+                            shutil.copy2(file_path, temp_file)
+                            temp_files.append(temp_file)
+                            copies_made += 1
+                            logger.warning(f"Could not link file {file_path}, using copy instead")
+                
+                if links_created > 0:
+                    logger.info(f"Successfully linked {links_created} files, copied {copies_made} files for {cal_type} master creation")
+                
+                # Create Siril script content
+                script_content = f"cd {temp_dir}\n"
+                script_content += "convert *.fits . -out=frame_\n"
+                
+                if cal_type == 'bias':
+                    script_content += "stack frame_ rej 3 3 -nonorm -out=master\n"
+                elif cal_type == 'dark':
+                    script_content += "stack frame_ rej 3 3 -nonorm -out=master\n"
+                else:  # flat
+                    script_content += "stack frame_ rej 3 3 -norm=mul -out=master\n"
+                
+                script_content += "close\n"
+                
+                # Write script file
+                with open(script_path, 'w') as f:
+                    f.write(script_content)
+                
+                # Run Siril CLI
+                cmd = [siril_cli_path, '-s', script_path]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                
+                if result.returncode == 0:
+                    # Copy result to final location
+                    temp_master = os.path.join(temp_dir, 'master.fits')
+                    if os.path.exists(temp_master):
+                        shutil.copy2(temp_master, output_path)
+                        return True
+                    else:
+                        logger.error(f"Siril completed but master file not found: {temp_master}")
+                        return False
+                else:
+                    logger.error(f"Siril CLI failed: {result.stderr}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error running Siril CLI: {e}")
+            return False
+    
+    def _update_master_header(self, master_path, session, file_list, cal_type):
+        """Update the FITS header of the master frame with appropriate metadata."""
+        try:
+            with fits.open(master_path, mode='update') as hdul:
+                header = hdul[0].header
+                
+                # Add master frame metadata
+                header['MASTER'] = (True, 'This is a master calibration frame')
+                header['CALTYPE'] = (cal_type.upper(), 'Type of calibration frame')
+                header['NFRAMES'] = (len(file_list), 'Number of frames combined')
+                header['CREATED'] = (datetime.now().isoformat(), 'Master creation timestamp')
+                header['CREATOR'] = ('AstroFiler', 'Software used to create master')
+                header['SESSION'] = (session.fitsSessionId, 'Source session ID')
+                
+                # Add session metadata
+                if session.fitsSessionTelescope:
+                    header['TELESCOP'] = session.fitsSessionTelescope
+                if session.fitsSessionImager:
+                    header['INSTRUME'] = session.fitsSessionImager
+                if session.fitsSessionDate:
+                    header['DATE-OBS'] = session.fitsSessionDate.isoformat()
+                
+                hdul.flush()
+                
+        except Exception as e:
+            logger.error(f"Error updating master header: {e}")
+    
+    def _register_master_in_database(self, master_path, session, cal_type):
+        """Register the master calibration frame in the database."""
+        try:
+            # Calculate hash
+            file_hash = self.calculateFileHash(master_path)
+            
+            # Create unique ID
+            master_id = str(uuid.uuid4())
+            
+            # Get file stats
+            file_stat = os.stat(master_path)
+            file_date = datetime.fromtimestamp(file_stat.st_mtime).date()
+            
+            # Create database entry
+            fits_file = FitsFileModel.create(
+                fitsFileId=master_id,
+                fitsFileName=master_path,
+                fitsFileDate=file_date,
+                fitsFileCalibrated=1,  # Masters are considered calibrated
+                fitsFileType=cal_type.upper(),
+                fitsFileStacked=1,  # Masters are stacked
+                fitsFileObject=f"Master-{cal_type.title()}",
+                fitsFileHash=file_hash,
+                fitsFileSession=session.fitsSessionId,
+                fitsFileTelescop=session.fitsSessionTelescope,
+                fitsFileInstrument=session.fitsSessionImager,
+                fitsFileXBinning=session.fitsSessionBinningX,
+                fitsFileYBinning=session.fitsSessionBinningY,
+                fitsFileCCDTemp=session.fitsSessionCCDTemp,
+                fitsFileGain=session.fitsSessionGain,
+                fitsFileOffset=session.fitsSessionOffset,
+                fitsFileFilter=session.fitsSessionFilter
+            )
+            
+            logger.info(f"Registered master {cal_type} in database: {master_id}")
+            return master_id
+            
+        except Exception as e:
+            logger.error(f"Error registering master in database: {e}")
+            return None

@@ -52,6 +52,9 @@ class fitsSession(BaseModel):
     fitsBiasSession = pw.TextField(null=True)
     fitsDarkSession = pw.TextField(null=True)
     fitsFlatSession = pw.TextField(null=True)
+    fitsBiasMaster = pw.TextField(null=True)
+    fitsDarkMaster = pw.TextField(null=True)
+    fitsFlatMaster = pw.TextField(null=True)
 
 def setup_database():
     """Initialize database with peewee-migrate for version control and migrations."""
