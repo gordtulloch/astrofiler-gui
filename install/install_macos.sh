@@ -241,8 +241,8 @@ EOF
         # Create executable script
         cat > "$app_name/Contents/MacOS/AstroFiler" << 'EOF'
 #!/bin/bash
-# Get the directory where the app bundle is located
-APP_DIR="$(dirname "$(dirname "$(dirname "$0")")")"
+# Get the directory where the app bundle is located (parent of the .app bundle)
+APP_DIR="$(dirname "$(dirname "$(dirname "$(dirname "$0")")")")"
 cd "$APP_DIR"
 
 # Check for updates from GitHub if this is a git repository
