@@ -2155,6 +2155,14 @@ class ConfigTab(QWidget):
             self.source_path.setText(source_path)
             self.repo_path.setText(repo_path)
             
+            # Validate that source and repository paths are different
+            if source_path and repo_path and os.path.abspath(source_path) == os.path.abspath(repo_path):
+                QMessageBox.warning(self, "Invalid Configuration", 
+                                  "Source and Repository paths cannot be the same.\n\n"
+                                  "The source path is for incoming files, while the repository "
+                                  "path is for organized storage. They must be different directories.")
+                return
+            
             # Save the path settings directly to DEFAULT section
             config['DEFAULT'] = {
                 'source': source_path,
