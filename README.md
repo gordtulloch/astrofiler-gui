@@ -10,7 +10,7 @@
 
 AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, and session analysis. Detailed documentation is in the Gitub Wiki.
 
-**NOTE**: DO NOT USE THIS ALPHA VERSION ON PRODUCTION DATA. For testing I created two folders REPOSITORY.incoming.test and REPOSITORY.test so I could copy data into the incoming folder and run the Load Repo function, which copies data to the Repository.  You can then easily see the result. Load Repo does a lot of work so it runs at about 100gb/hr of FITS data. Alternatively you can specify an existing repository and Sync Data, which is much faster and makes no changes to the data. 
+**Current Status**: Release V1.0
 
 ## ✨ Features
 
