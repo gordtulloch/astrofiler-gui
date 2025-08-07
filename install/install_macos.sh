@@ -239,19 +239,19 @@ case "$create_app" in
 EOF
 
         # Create executable script
-        cat > "$app_name/Contents/MacOS/AstroFiler" << 'EOF'
+        cat > "$app_name/Contents/MacOS/AstroFiler" << EOF
 #!/bin/bash
-# Get the directory where the app bundle is located (parent of the .app bundle)
-APP_DIR="$(dirname "$(dirname "$(dirname "$(dirname "$0")")")")"
-cd "$APP_DIR"
+# Navigate to the original installation directory
+APP_DIR="$(pwd)"
+cd "\$APP_DIR"
 
 # Check for updates from GitHub if this is a git repository
 if [ -d ".git" ]; then
     echo "Checking for updates from GitHub..."
     if command -v git >/dev/null 2>&1; then
         git fetch origin main >/dev/null 2>&1
-        UPDATE_COUNT=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
-        if [ "$UPDATE_COUNT" -gt 0 ] 2>/dev/null; then
+        UPDATE_COUNT=\$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
+        if [ "\$UPDATE_COUNT" -gt 0 ] 2>/dev/null; then
             echo "Updates available! Pulling latest changes..."
             if git pull origin main; then
                 echo "Successfully updated to latest version."
@@ -278,7 +278,7 @@ source .venv/bin/activate
 python astrofiler.py
 
 # If there's an error, show it
-if [ $? -ne 0 ]; then
+if [ \$? -ne 0 ]; then
     osascript -e 'tell application "System Events" to display dialog "AstroFiler exited with an error. Check the terminal for details." with title "AstroFiler Error" buttons {"OK"} default button "OK"'
 fi
 EOF
