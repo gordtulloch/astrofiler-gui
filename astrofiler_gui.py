@@ -590,6 +590,7 @@ class ImagesTab(QWidget):
                 # Get the FITS file record from the database
                 fits_file = FitsFileModel.get_by_id(file_id)
                 if fits_file and fits_file.fitsFileName:
+                    logger.info(f"Launching external viewer for file: {fits_file.fitsFileName}")
                     self.launch_external_viewer(fits_file.fitsFileName)
                 else:
                     QMessageBox.warning(self, "File Not Found", "The FITS file path is not available.")
@@ -656,11 +657,7 @@ class SessionsTab(QWidget):
         self.regenerate_button = QPushButton("Regenerate")
         self.regenerate_button.setToolTip("Clear all sessions and regenerate: Update Lights → Update Calibrations → Link Sessions")
         
-        self.create_masters_button = QPushButton("Create Masters")
-        self.create_masters_button.setToolTip("Create master calibration frames from bias, dark, and flat sessions using Siril CLI")
-        
         controls_layout.addWidget(self.regenerate_button)
-        controls_layout.addWidget(self.create_masters_button)
         controls_layout.addStretch()
         
         # Sessions list
@@ -682,7 +679,6 @@ class SessionsTab(QWidget):
         
         # Connect signals
         self.regenerate_button.clicked.connect(self.regenerate_sessions)
-        self.create_masters_button.clicked.connect(self.create_masters)
     
     def show_context_menu(self, position):
         """Show context menu for session items"""
@@ -1502,96 +1498,6 @@ class SessionsTab(QWidget):
             logger.error(f"Error during session regeneration: {e}")
             QMessageBox.warning(self, "Error", f"Failed to regenerate sessions: {e}")
 
-    def create_masters(self):
-        """Create master calibration frames from bias, dark, and flat sessions using Siril CLI."""
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt
-        
-        # Confirm operation
-        reply = QMessageBox.question(
-            self, 
-            "Create Master Calibration Frames", 
-            "This will create master bias, dark, and flat frames from calibration sessions\n"
-            "that don't already have masters using Siril CLI.\n\n"
-            "The process may take some time depending on the number of calibration files.\n"
-            "Are you sure you want to continue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply != QMessageBox.Yes:
-            return
-        
-        progress_dialog = None
-        was_cancelled = False
-        
-        try:
-            # Create progress dialog
-            progress_dialog = QProgressDialog("Initializing master creation...", "Cancel", 0, 100, self)
-            progress_dialog.setWindowTitle("Creating Master Calibration Frames")
-            progress_dialog.setWindowModality(Qt.WindowModal)
-            progress_dialog.setMinimumDuration(0)
-            progress_dialog.show()
-            
-            # Progress callback function
-            def update_progress(current, total, message):
-                nonlocal was_cancelled
-                if was_cancelled or (progress_dialog and progress_dialog.wasCanceled()):
-                    was_cancelled = True
-                    return False
-                
-                if progress_dialog:
-                    progress_value = int((current / total) * 100) if total > 0 else 0
-                    progress_dialog.setValue(progress_value)
-                    progress_dialog.setLabelText(f"{message} ({current}/{total})")
-                    QApplication.processEvents()
-                
-                return not was_cancelled
-            
-            # Import and run the master creation function
-            from astrofiler_file import fitsProcessing
-            fits_processor = fitsProcessing()
-            
-            # Call the master creation function
-            results = fits_processor.createMasterCalibrationFrames(progress_callback=update_progress)
-            
-            # Close progress dialog
-            if progress_dialog:
-                progress_dialog.close()
-            
-            # Check if operation was cancelled
-            if was_cancelled:
-                QMessageBox.information(self, "Cancelled", "Master calibration frame creation was cancelled by user.")
-                logger.info("Master calibration frame creation was cancelled by user")
-            else:
-                # Show success message
-                if results:
-                    bias_count = results.get('bias_masters', 0)
-                    dark_count = results.get('dark_masters', 0)
-                    flat_count = results.get('flat_masters', 0)
-                    
-                    result_message = (
-                        f"Master calibration frame creation completed!\n\n"
-                        f"• Bias masters created: {bias_count}\n"
-                        f"• Dark masters created: {dark_count}\n"
-                        f"• Flat masters created: {flat_count}\n"
-                        f"• Total masters created: {bias_count + dark_count + flat_count}"
-                    )
-                    
-                    QMessageBox.information(self, "Success", result_message)
-                    logger.info(f"Master creation completed: {results}")
-                    
-                    # Refresh the sessions display
-                    self.load_sessions_data()
-                else:
-                    QMessageBox.information(self, "Complete", "No new master calibration frames were needed.")
-                
-        except Exception as e:
-            if progress_dialog:
-                progress_dialog.close()
-            logger.error(f"Error creating master calibration frames: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to create master calibration frames: {e}")
-
 class MergeTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -2167,9 +2073,15 @@ class ConfigTab(QWidget):
         self.refresh_on_startup = QCheckBox()
         self.refresh_on_startup.setChecked(True)  # Default to true
         
+        # Save modified headers (default unchecked)
+        self.save_modified_headers = QCheckBox()
+        self.save_modified_headers.setChecked(False)  # Default to false for safety
+        self.save_modified_headers.setToolTip("When enabled, AstroFiler will save any header modifications back to the FITS files")
+        
         general_layout.addRow("Source Path:", source_path_layout)
         general_layout.addRow("Repository Path:", repo_path_layout)
         general_layout.addRow("Refresh on Startup:", self.refresh_on_startup)
+        general_layout.addRow("Save Modified Headers:", self.save_modified_headers)
         
         # Display settings group
         display_group = QGroupBox("Display Settings")
@@ -2249,11 +2161,20 @@ class ConfigTab(QWidget):
             self.source_path.setText(source_path)
             self.repo_path.setText(repo_path)
             
+            # Validate that source and repository paths are different
+            if source_path and repo_path and os.path.abspath(source_path) == os.path.abspath(repo_path):
+                QMessageBox.warning(self, "Invalid Configuration", 
+                                  "Source and Repository paths cannot be the same.\n\n"
+                                  "The source path is for incoming files, while the repository "
+                                  "path is for organized storage. They must be different directories.")
+                return
+            
             # Save the path settings directly to DEFAULT section
             config['DEFAULT'] = {
                 'source': source_path,
                 'repo': repo_path,
                 'refresh_on_startup': str(self.refresh_on_startup.isChecked()),
+                'save_modified_headers': str(self.save_modified_headers.isChecked()),
                 'theme': self.theme.currentText(),
                 'font_size': str(self.font_size.value()),
                 'grid_size': str(self.grid_size.value()),
@@ -2289,6 +2210,10 @@ class ConfigTab(QWidget):
                 refresh_value = config.getboolean('DEFAULT', 'refresh_on_startup')
                 self.refresh_on_startup.setChecked(refresh_value)
             
+            if config.has_option('DEFAULT', 'save_modified_headers'):
+                save_headers_value = config.getboolean('DEFAULT', 'save_modified_headers')
+                self.save_modified_headers.setChecked(save_headers_value)
+            
             if config.has_option('DEFAULT', 'theme'):
                 theme_value = config.get('DEFAULT', 'theme')
                 index = self.theme.findText(theme_value)
@@ -2319,6 +2244,7 @@ class ConfigTab(QWidget):
         self.source_path.setText("")
         self.repo_path.setText("")
         self.refresh_on_startup.setChecked(True)
+        self.save_modified_headers.setChecked(False)
         self.theme.setCurrentIndex(0)
         self.font_size.setValue(10)
         self.grid_size.setValue(64)
