@@ -20,7 +20,7 @@ from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 
 # Global version variable
-VERSION = "0.9.0 alpha"
+VERSION = "1.0.0"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
