@@ -221,9 +221,9 @@ case "$create_app" in
     <key>CFBundleDisplayName</key>
     <string>AstroFiler</string>
     <key>CFBundleVersion</key>
-    <string>0.9.0</string>
+    <string>1.0.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.9.0</string>
+    <string>1.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>
