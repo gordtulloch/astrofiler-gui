@@ -14,13 +14,14 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
-                               QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy)
-from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices
+                               QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy,
+                               QDialog, QDialogButtonBox, QGridLayout)
+from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices, QIcon
 from astrofiler_file import fitsProcessing
-from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
+from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Mapping as MappingModel
 
 # Global version variable
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
@@ -81,6 +82,7 @@ class ImagesTab(QWidget):
         self.load_repo_button = QPushButton("Load Repo")
         self.sync_repo_button = QPushButton("Sync Repo")
         self.clear_button = QPushButton("Clear Repo")
+        self.mapping_button = QPushButton("Mapping")
         self.refresh_button = QPushButton("Refresh")
         
         # Add sort control
@@ -96,6 +98,7 @@ class ImagesTab(QWidget):
         controls_layout.addWidget(self.load_repo_button)
         controls_layout.addWidget(self.sync_repo_button)
         controls_layout.addWidget(self.clear_button)
+        controls_layout.addWidget(self.mapping_button)
         controls_layout.addWidget(self.refresh_button)
         controls_layout.addStretch()
         controls_layout.addWidget(sort_label)
@@ -122,6 +125,7 @@ class ImagesTab(QWidget):
         self.load_repo_button.clicked.connect(self.load_repo)
         self.sync_repo_button.clicked.connect(self.sync_repo)
         self.clear_button.clicked.connect(self.clear_files)
+        self.mapping_button.clicked.connect(self.open_mappings_dialog)
         self.refresh_button.clicked.connect(self.load_fits_data)
         self.sort_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when sort changes
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
@@ -640,6 +644,15 @@ class ImagesTab(QWidget):
         else:
             QMessageBox.warning(self, "Configuration Error", 
                               "Unable to access FITS viewer configuration.")
+    
+    def open_mappings_dialog(self):
+        """Open the mappings dialog"""
+        try:
+            dialog = MappingsDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening mappings dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Error opening mappings dialog: {e}")
 
 
 class SessionsTab(QWidget):
@@ -1498,6 +1511,470 @@ class SessionsTab(QWidget):
             logger.error(f"Error during session regeneration: {e}")
             QMessageBox.warning(self, "Error", f"Failed to regenerate sessions: {e}")
 
+class MappingsDialog(QDialog):
+    """Dialog for managing FITS header mappings"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Mappings")
+        self.setModal(True)
+        self.resize(800, 600)
+        
+        # Store mapping rows for dynamic management
+        self.mapping_rows = []
+        
+        self.init_ui()
+        self.load_existing_mappings()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Add button at the top
+        add_button = QPushButton("Add Mapping")
+        add_button.clicked.connect(lambda: self.add_mapping_row())
+        layout.addWidget(add_button)
+        
+        # Scroll area for mappings
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_widget = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        self.scroll_layout.setAlignment(Qt.AlignTop)  # Top-justify the mapping rows
+        self.scroll_layout.setSpacing(5)  # Add consistent spacing between rows
+        self.scroll_area.setWidget(self.scroll_widget)
+        layout.addWidget(self.scroll_area)
+        
+        # Bottom checkboxes and buttons
+        bottom_layout = QVBoxLayout()
+        
+        # Checkboxes
+        checkbox_layout = QHBoxLayout()
+        self.apply_current_checkbox = QCheckBox("Apply to Database")
+        
+        # Get save_modified_headers setting from ini file
+        import configparser
+        config = configparser.ConfigParser()
+        try:
+            config.read('astrofiler.ini')
+            save_headers_default = config.getboolean('DEFAULT', 'save_modified_headers', fallback=True)
+        except:
+            save_headers_default = True
+        
+        self.update_files_checkbox = QCheckBox("Update Files on Disk")
+        self.update_files_checkbox.setChecked(save_headers_default)
+        
+        checkbox_layout.addWidget(self.apply_current_checkbox)
+        checkbox_layout.addWidget(self.update_files_checkbox)
+        bottom_layout.addLayout(checkbox_layout)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept_mappings)
+        button_box.rejected.connect(self.reject)
+        bottom_layout.addWidget(button_box)
+        
+        layout.addLayout(bottom_layout)
+    
+    def get_current_values_for_card(self, card):
+        """Get all current values in the database for a given card"""
+        try:
+            values = set()
+            
+            # Map card names to database fields
+            field_mapping = {
+                'TELESCOP': 'fitsFileTelescop',
+                'INSTRUME': 'fitsFileInstrument', 
+                'OBSERVER': None,  # Not currently in database
+                'NOTES': None      # Not currently in database
+            }
+            
+            field_name = field_mapping.get(card)
+            if field_name:
+                # Query the database for distinct values
+                query = FitsFileModel.select(getattr(FitsFileModel, field_name)).distinct()
+                for record in query:
+                    value = getattr(record, field_name)
+                    if value is not None:
+                        values.add(str(value))
+            
+            # Always add blank option
+            values.add("")
+            
+            return sorted(list(values))
+        except Exception as e:
+            logger.error(f"Error getting current values for {card}: {e}")
+            return [""]
+    
+    def add_mapping_row(self, card="TELESCOP", current="", replace="", is_default=False):
+        """Add a new mapping row to the dialog"""
+        row_widget = QWidget()
+        row_layout = QGridLayout(row_widget)
+        
+        # Card dropdown
+        card_combo = QComboBox()
+        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES"])
+        card_combo.setCurrentText(card)
+        card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
+        
+        # Current dropdown
+        current_combo = QComboBox()
+        current_combo.setEditable(True)
+        
+        # Replace text field
+        replace_edit = QLineEdit()
+        replace_edit.setText(replace)
+        
+        # Default checkbox
+        default_checkbox = QCheckBox()
+        default_checkbox.setChecked(is_default)
+        
+        # Delete button (trash icon)
+        delete_button = QPushButton("🗑")
+        delete_button.setMaximumWidth(30)
+        delete_button.setToolTip("Delete this mapping")
+        delete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ff4444;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-size: 14px;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #ff6666;
+                border: 1px solid #ff4444;
+            }
+            QPushButton:pressed {
+                background-color: #1d1d1d;
+                color: #ff2222;
+            }
+        """)
+        delete_button.clicked.connect(lambda: self.delete_mapping_row(row_widget))
+        
+        # Add to layout
+        row_layout.addWidget(QLabel("Card:"), 0, 0)
+        row_layout.addWidget(card_combo, 0, 1)
+        row_layout.addWidget(QLabel("Current:"), 0, 2)
+        row_layout.addWidget(current_combo, 0, 3)
+        row_layout.addWidget(QLabel("Replace:"), 0, 4)
+        row_layout.addWidget(replace_edit, 0, 5)
+        row_layout.addWidget(QLabel("Default:"), 0, 6)
+        row_layout.addWidget(default_checkbox, 0, 7)
+        row_layout.addWidget(delete_button, 0, 8)
+        
+        # Store references
+        row_widget.card_combo = card_combo
+        row_widget.current_combo = current_combo
+        row_widget.replace_edit = replace_edit
+        row_widget.default_checkbox = default_checkbox
+        
+        # Update current values for initial card
+        self.update_current_values(row_widget)
+        current_combo.setCurrentText(current)
+        
+        # Add to scroll layout
+        self.scroll_layout.addWidget(row_widget)
+        self.mapping_rows.append(row_widget)
+    
+    def update_current_values(self, row_widget):
+        """Update the current values dropdown when card changes"""
+        card = row_widget.card_combo.currentText()
+        current_values = self.get_current_values_for_card(card)
+        
+        # Remember current selection
+        current_text = row_widget.current_combo.currentText()
+        
+        # Update combo box
+        row_widget.current_combo.clear()
+        row_widget.current_combo.addItems(current_values)
+        
+        # Restore selection if it still exists
+        if current_text in current_values:
+            row_widget.current_combo.setCurrentText(current_text)
+    
+    def delete_mapping_row(self, row_widget):
+        """Delete a mapping row"""
+        if row_widget in self.mapping_rows:
+            self.mapping_rows.remove(row_widget)
+            self.scroll_layout.removeWidget(row_widget)
+            row_widget.deleteLater()
+    
+    def load_existing_mappings(self):
+        """Load existing mappings from the database"""
+        try:
+            mappings = MappingModel.select()
+            for mapping in mappings:
+                self.add_mapping_row(
+                    card=mapping.card,
+                    current=mapping.current or "",
+                    replace=mapping.replace or "",
+                    is_default=mapping.is_default
+                )
+        except Exception as e:
+            logger.error(f"Error loading existing mappings: {e}")
+    
+    def accept_mappings(self):
+        """Save mappings and apply if requested"""
+        try:
+            # Clear existing mappings
+            MappingModel.delete().execute()
+            
+            # Save new mappings
+            mappings_to_apply = []
+            for row_widget in self.mapping_rows:
+                card = row_widget.card_combo.currentText()
+                current = row_widget.current_combo.currentText()
+                replace = row_widget.replace_edit.text()
+                is_default = row_widget.default_checkbox.isChecked()
+                
+                MappingModel.create(
+                    card=card,
+                    current=current if current else None,
+                    replace=replace if replace else None,
+                    is_default=is_default
+                )
+                
+                # Store mapping for application
+                mappings_to_apply.append({
+                    'card': card,
+                    'current': current,
+                    'replace': replace,
+                    'is_default': is_default
+                })
+            
+            # Clear the mapping cache so file processing picks up new mappings
+            try:
+                from astrofiler_file import clearMappingCache
+                clearMappingCache()
+            except ImportError:
+                pass  # Function might not be available in older versions
+            
+            # Always apply database updates
+            self.apply_database_mappings(mappings_to_apply)
+            
+            # Apply file/folder changes if requested
+            if self.apply_current_checkbox.isChecked():
+                self.apply_file_folder_mappings(mappings_to_apply)
+            
+            self.accept()
+            
+        except Exception as e:
+            logger.error(f"Error saving mappings: {e}")
+            QMessageBox.critical(self, "Error", f"Error saving mappings: {e}")
+    
+    def apply_database_mappings(self, mappings):
+        """Apply mappings to database records"""
+        try:
+            update_files = self.update_files_checkbox.isChecked()
+            total_updates = 0
+            
+            # Create progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress = QProgressDialog("Updating database records...", "Cancel", 0, len(mappings), self)
+            progress.setWindowTitle("Applying Mappings")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            for i, mapping in enumerate(mappings):
+                if progress.wasCanceled():
+                    break
+                    
+                progress.setValue(i)
+                progress.setLabelText(f"Processing {mapping['card']} mapping: '{mapping['current']}' → '{mapping['replace']}'")
+                QApplication.processEvents()
+                
+                if mapping['card'] in ['TELESCOP', 'INSTRUME']:
+                    field_name = 'fitsFileTelescop' if mapping['card'] == 'TELESCOP' else 'fitsFileInstrument'
+                    
+                    # Find files that match the current value
+                    if mapping['current']:
+                        # Specific value mapping
+                        query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == mapping['current'])
+                    else:
+                        # Default mapping for null/empty values
+                        query = FitsFileModel.select().where(
+                            (getattr(FitsFileModel, field_name).is_null()) |
+                            (getattr(FitsFileModel, field_name) == '')
+                        )
+                    
+                    # Update matching files
+                    for fits_file in query:
+                        if mapping['replace']:
+                            setattr(fits_file, field_name, mapping['replace'])
+                            fits_file.save()
+                            total_updates += 1
+                            
+                            # Update FITS header if requested
+                            if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                                try:
+                                    from astropy.io import fits
+                                    with fits.open(fits_file.fitsFileName, mode='update') as hdul:
+                                        hdul[0].header[mapping['card']] = mapping['replace']
+                                        hdul[0].header.comments[mapping['card']] = 'Updated via Astrofiler mapping'
+                                        hdul.flush()
+                                except Exception as e:
+                                    logger.error(f"Error updating FITS header for {fits_file.fitsFileName}: {e}")
+            
+            progress.setValue(len(mappings))
+            progress.close()
+            
+            if total_updates > 0:
+                QMessageBox.information(self, "Database Updated", 
+                                      f"Successfully updated {total_updates} database records.")
+            
+        except Exception as e:
+            logger.error(f"Error applying database mappings: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying database mappings: {e}")
+    
+    def apply_file_folder_mappings(self, mappings):
+        """Apply mappings to filenames and folder names on disk"""
+        try:
+            # Get repository folder from config
+            import configparser
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            repo_folder = config.get('DEFAULT', 'repo', fallback='.')
+            if not repo_folder.endswith('/') and not repo_folder.endswith('\\'):
+                repo_folder += os.sep
+            
+            # Create progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress = QProgressDialog("Scanning files and folders...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Renaming Files and Folders")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            renamed_files = 0
+            renamed_folders = 0
+            errors = []
+            
+            # Process each mapping
+            for mapping_idx, mapping in enumerate(mappings):
+                if progress.wasCanceled():
+                    break
+                
+                if not mapping['current'] or not mapping['replace']:
+                    continue
+                
+                current_text = mapping['current']
+                replace_text = mapping['replace']
+                
+                progress.setLabelText(f"Processing mapping {mapping_idx + 1}/{len(mappings)}: '{current_text}' → '{replace_text}'")
+                QApplication.processEvents()
+                
+                # Walk through the repository directory
+                try:
+                    for root, dirs, files in os.walk(repo_folder):
+                        # Update progress
+                        progress.setValue(int((mapping_idx / len(mappings)) * 100))
+                        QApplication.processEvents()
+                        
+                        if progress.wasCanceled():
+                            break
+                        
+                        # Rename files containing the current text
+                        for filename in files:
+                            if current_text in filename:
+                                old_path = os.path.join(root, filename)
+                                new_filename = filename.replace(current_text, replace_text)
+                                new_path = os.path.join(root, new_filename)
+                                
+                                try:
+                                    if not os.path.exists(new_path):
+                                        os.rename(old_path, new_path)
+                                        renamed_files += 1
+                                        
+                                        # Update database record if it exists
+                                        try:
+                                            fits_file = FitsFileModel.get(FitsFileModel.fitsFileName == old_path)
+                                            fits_file.fitsFileName = new_path
+                                            fits_file.save()
+                                        except FitsFileModel.DoesNotExist:
+                                            pass  # File not in database
+                                        
+                                        logger.info(f"Renamed file: {old_path} → {new_path}")
+                                    else:
+                                        error_msg = f"Cannot rename {old_path} - target exists: {new_path}"
+                                        errors.append(error_msg)
+                                        logger.warning(error_msg)
+                                except Exception as e:
+                                    error_msg = f"Error renaming file {old_path}: {str(e)}"
+                                    errors.append(error_msg)
+                                    logger.error(error_msg)
+                        
+                        # Rename directories containing the current text
+                        # Process in reverse order to handle nested directories correctly
+                        for dirname in reversed(dirs):
+                            if current_text in dirname:
+                                old_dir_path = os.path.join(root, dirname)
+                                new_dirname = dirname.replace(current_text, replace_text)
+                                new_dir_path = os.path.join(root, new_dirname)
+                                
+                                try:
+                                    if not os.path.exists(new_dir_path):
+                                        os.rename(old_dir_path, new_dir_path)
+                                        renamed_folders += 1
+                                        
+                                        # Update database records with paths in this directory
+                                        old_prefix = old_dir_path + os.sep
+                                        new_prefix = new_dir_path + os.sep
+                                        
+                                        fits_files = FitsFileModel.select().where(
+                                            FitsFileModel.fitsFileName.startswith(old_prefix)
+                                        )
+                                        for fits_file in fits_files:
+                                            fits_file.fitsFileName = fits_file.fitsFileName.replace(old_prefix, new_prefix)
+                                            fits_file.save()
+                                        
+                                        logger.info(f"Renamed folder: {old_dir_path} → {new_dir_path}")
+                                    else:
+                                        error_msg = f"Cannot rename {old_dir_path} - target exists: {new_dir_path}"
+                                        errors.append(error_msg)
+                                        logger.warning(error_msg)
+                                except Exception as e:
+                                    error_msg = f"Error renaming folder {old_dir_path}: {str(e)}"
+                                    errors.append(error_msg)
+                                    logger.error(error_msg)
+                
+                except Exception as e:
+                    error_msg = f"Error processing mapping '{current_text}' → '{replace_text}': {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Show results
+            result_message = f"File and folder renaming completed:\n\n"
+            result_message += f"• Files renamed: {renamed_files}\n"
+            result_message += f"• Folders renamed: {renamed_folders}\n"
+            
+            if errors:
+                result_message += f"\n{len(errors)} errors encountered:\n"
+                result_message += "\n".join(errors[:10])  # Show first 10 errors
+                if len(errors) > 10:
+                    result_message += f"\n... and {len(errors) - 10} more errors (see log for details)"
+                
+                QMessageBox.warning(self, "Renaming Completed with Errors", result_message)
+            else:
+                QMessageBox.information(self, "Renaming Successful", result_message)
+            
+        except Exception as e:
+            logger.error(f"Error applying file/folder mappings: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying file/folder mappings: {e}")
+
+    def apply_mappings(self):
+        """Legacy method - redirects to new implementation"""
+        # This method is kept for compatibility but shouldn't be called anymore
+        # since the new accept_mappings method handles everything
+        pass
+
 class MergeTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -2038,6 +2515,15 @@ class MergeTab(QWidget):
             logger.exception("Full exception details for critical merge error:")
             QMessageBox.critical(self, "Merge Error", f"A critical error occurred during merge: {str(e)}\n\nCheck the log file for detailed error information.")
             self.results_text.setPlainText(f"CRITICAL ERROR: {error_msg}\n\nPlease check the log file for detailed error information.")
+    
+    def open_mappings_dialog(self):
+        """Open the mappings dialog"""
+        try:
+            dialog = MappingsDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening mappings dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Error opening mappings dialog: {e}")
 
 
 class ConfigTab(QWidget):

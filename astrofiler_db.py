@@ -56,6 +56,13 @@ class fitsSession(BaseModel):
     fitsDarkMaster = pw.TextField(null=True)
     fitsFlatMaster = pw.TextField(null=True)
 
+class Mapping(BaseModel):
+    id = pw.AutoField()
+    card = pw.CharField(max_length=20)  # TELESCOP, INSTRUME, OBSERVER, NOTES
+    current = pw.CharField(max_length=255, null=True)  # Current value (can be blank)
+    replace = pw.CharField(max_length=255, null=True)  # Replacement value (can be blank)
+    is_default = pw.BooleanField(default=False)  # Default checkbox
+
 def setup_database():
     """Initialize database with peewee-migrate for version control and migrations."""
     try:
@@ -69,7 +76,7 @@ def setup_database():
         router.run()
         
         # Create tables if they don't exist (initial setup)
-        db.create_tables([fitsFile, fitsSession], safe=True)
+        db.create_tables([fitsFile, fitsSession, Mapping], safe=True)
         
         db.close()
         logger.info("Database setup complete with peewee-migrate. Tables created/updated.")
