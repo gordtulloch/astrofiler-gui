@@ -294,6 +294,7 @@ class fitsProcessing:
 
         # Ignore everything not a *fit* file
         if "fit" not in file_extension.lower():
+        if "fit" not in file_extension.lower():
             logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
             return False
         
@@ -351,7 +352,7 @@ class fitsProcessing:
             if "LIGHT" in hdr["IMAGETYP"].upper():
                 # Adjust the WCS for the image
                 if "CD1_1" not in hdr:
-                    if "CDELT1" in hdr and "CDELT2" in hdr and "CROTA2" in hdr:
+                    if "CDELT1" in hdr and "CDELT2" in hdr and "CROTA2" in hdr and "CDELT2" in hdr and "CROTA2" in hdr:
                         fitsCDELT1=float(hdr["CDELT1"])
                         fitsCDELT2=float(hdr["CDELT2"])
                         fitsCROTA2=float(hdr["CROTA2"])
@@ -364,6 +365,9 @@ class fitsProcessing:
                         hdr.append(('CD2_1', str(fitsCD2_1), 'Rotation Matrix'), end=True)
                         hdr.append(('CD2_2', str(fitsCD2_2), 'Rotation Matrix'), end=True)
                         header_modified = True
+                    else:
+                        logger.warning("No CDELT1, CDELT2 or CROTA2 card in header. Unable to update WCS in "+str(os.path.join(root, file)))             
+                        hdul.flush()  # changes are written back to original.fits
                     else:
                         logger.warning("No CDELT1, CDELT2 or CROTA2 card in header. Unable to update WCS in "+str(os.path.join(root, file)))             
                 
@@ -451,7 +455,7 @@ class fitsProcessing:
             currentFilePath = os.path.join(root, file)
             fileHash = self.calculateFileHash(currentFilePath)
             logger.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName.replace(" ", "_"))
-            newFitsFileId=self.submitFileToDB(newPath+newName.replace(" ", "_"),hdr,fileHash)
+            newFitsFileId=self.submitFileToDB(newPath+newName,hdr,fileHash)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
                     logger.info("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
