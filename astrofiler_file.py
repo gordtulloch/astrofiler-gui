@@ -244,6 +244,93 @@ def dwarfFixHeader(hdr, root, file):
     except Exception as e:
         logger.error(f"Error in dwarfFixHeader for {file}: {e}")
         return False
+
+def mapFitsHeader(hdr, file_path):
+    """
+    Apply mappings from the Mapping table to FITS header fields.
+    Uses static caching to avoid repeated database queries.
+    
+    Args:
+        hdr: FITS header object to modify
+        file_path: Full path to the FITS file (for logging)
+    
+    Returns:
+        bool: True if any header changes were made, False otherwise
+    """
+    try:
+        from astrofiler_db import Mapping
+        
+        # Static cache for mappings to avoid repeated database queries
+        if not hasattr(mapFitsHeader, '_cached_mappings'):
+            mapFitsHeader._cached_mappings = None
+            mapFitsHeader._cache_loaded = False
+        
+        # Load mappings from database if not cached
+        if not mapFitsHeader._cache_loaded:
+            try:
+                mappings = list(Mapping.select())
+                mapFitsHeader._cached_mappings = mappings
+                mapFitsHeader._cache_loaded = True
+                logger.info(f"Loaded {len(mappings)} mappings into cache")
+            except Exception as e:
+                logger.error(f"Error loading mappings from database: {e}")
+                return False
+        
+        # Use cached mappings
+        mappings = mapFitsHeader._cached_mappings
+        
+        if not mappings:
+            return False  # No mappings defined
+        
+        header_modified = False
+        
+        for mapping in mappings:
+            card = mapping.card
+            current = mapping.current
+            replace = mapping.replace
+            is_default = mapping.is_default
+            
+            # Skip mappings without a replacement value
+            if not replace:
+                continue
+            
+            # Check if this card exists in the header
+            if card in hdr:
+                header_value = str(hdr[card]).strip()
+                
+                if current:
+                    # Specific value mapping - replace if current value matches
+                    if header_value == current:
+                        hdr[card] = replace
+                        header_modified = True
+                        logger.info(f"Applied mapping for {card}: '{current}' → '{replace}' in {file_path}")
+                elif is_default and (not header_value or header_value.upper() in ['', 'UNKNOWN', 'NONE']):
+                    # Default mapping - apply to blank/empty/unknown values
+                    hdr[card] = replace
+                    header_modified = True
+                    logger.info(f"Applied default mapping for {card}: '{header_value}' → '{replace}' in {file_path}")
+            
+            elif is_default:
+                # Card doesn't exist and this is a default mapping - add the card
+                hdr[card] = replace
+                header_modified = True
+                logger.info(f"Added missing card {card} with default value '{replace}' in {file_path}")
+        
+        return header_modified
+        
+    except Exception as e:
+        logger.error(f"Error applying mappings to {file_path}: {e}")
+        return False
+
+def clearMappingCache():
+    """
+    Clear the static mapping cache to force reload from database.
+    Call this after mappings are modified in the database.
+    """
+    if hasattr(mapFitsHeader, '_cache_loaded'):
+        mapFitsHeader._cache_loaded = False
+        mapFitsHeader._cached_mappings = None
+        logger.info("Mapping cache cleared")
     
 class fitsProcessing:
     """
@@ -294,7 +381,6 @@ class fitsProcessing:
 
         # Ignore everything not a *fit* file
         if "fit" not in file_extension.lower():
-        if "fit" not in file_extension.lower():
             logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
             return False
         
@@ -317,6 +403,11 @@ class fitsProcessing:
                 logger.warning("Error fixing DWARF header. File not processed is "+str(os.path.join(root, file)))
                 return False
             hdr = modified_hdr
+            header_modified = True
+        
+        # Apply FITS header mappings from the Mapping table
+        mapping_modified = mapFitsHeader(hdr, os.path.join(root, file))
+        if mapping_modified:
             header_modified = True
         
         if "IMAGETYP" in hdr:
@@ -365,9 +456,6 @@ class fitsProcessing:
                         hdr.append(('CD2_1', str(fitsCD2_1), 'Rotation Matrix'), end=True)
                         hdr.append(('CD2_2', str(fitsCD2_2), 'Rotation Matrix'), end=True)
                         header_modified = True
-                    else:
-                        logger.warning("No CDELT1, CDELT2 or CROTA2 card in header. Unable to update WCS in "+str(os.path.join(root, file)))             
-                        hdul.flush()  # changes are written back to original.fits
                     else:
                         logger.warning("No CDELT1, CDELT2 or CROTA2 card in header. Unable to update WCS in "+str(os.path.join(root, file)))             
                 

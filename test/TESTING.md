@@ -4,11 +4,12 @@ This document describes the test suite for the AstroFiler application and provid
 
 ## Overview
 
-The AstroFiler test suite consists of three main test categories:
+The AstroFiler test suite consists of four main test categories:
 
 1. **Basic Functionality Tests** (`test_basic.py`) - Database operations and core functionality
 2. **File Processing Tests** (`test_file_processing.py`) - FITS file processing and registration
 3. **GUI Component Tests** (`test_gui.py`) - User interface components and interactions
+4. **Mapping Functionality Tests** (`test_mapping.py`) - Header mapping features and database operations
 
 ## Test Structure
 
@@ -17,7 +18,8 @@ test/
 ├── TESTING.md              # This documentation file
 ├── test_basic.py           # Database and core functionality tests
 ├── test_file_processing.py # FITS file processing tests
-└── test_gui.py             # GUI component tests
+├── test_gui.py             # GUI component tests
+└── test_mapping.py         # Header mapping functionality tests
 ```
 
 ## Running Tests
@@ -149,6 +151,34 @@ Tests user interface components:
 - Proper Qt application lifecycle management
 - Resource cleanup to prevent memory leaks
 - Timeout protection to prevent hanging tests
+
+### 4. Mapping Functionality Tests (`test_mapping.py`)
+
+Tests the header mapping functionality:
+
+- **`test_mapping_model_creation`** - Tests creating new mapping records
+- **`test_mapping_model_retrieval`** - Tests retrieving mapping records from database
+- **`test_mapping_model_update`** - Tests updating existing mapping records
+- **`test_mapping_model_deletion`** - Tests deleting mapping records
+- **`test_mapping_null_values`** - Tests handling of null/empty values in mappings
+- **`test_mapping_query_by_card`** - Tests querying mappings by header card type
+- **`test_mapping_bulk_operations`** - Tests bulk operations on mapping records
+- **`test_mapping_with_fits_files`** - Tests mapping application to FITS file records
+- **`test_mappings_dialog_import`** - Tests importing the MappingsDialog class
+- **`test_qt_dependencies_available`** - Tests availability of required Qt components
+- **`test_mappings_dialog_creation`** - Tests creating MappingsDialog instances
+
+**Dependencies**:
+- Peewee ORM for database operations
+- PySide6 Qt framework for dialog testing
+- Temporary database isolation for each test
+
+**Features**:
+- Complete database isolation using temporary SQLite databases
+- Comprehensive CRUD operations testing
+- Integration testing with FITS file records
+- GUI component import and creation testing
+- Automatic CI environment detection for GUI tests
 
 ## Environment Setup
 
