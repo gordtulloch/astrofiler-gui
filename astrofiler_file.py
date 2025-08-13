@@ -293,13 +293,13 @@ class fitsProcessing:
         save_modified = config.getboolean('DEFAULT', 'save_modified_headers', fallback=False)
 
         # Ignore everything not a *fit* file
-        if "fit" not in file_extension:
+        if "fit" not in file_extension.lower():
             logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
             return False
         
         # Open the FITS file for reading and close immediately after reading header
         try:
-            hdul = fits.open(os.path.join(root, file), mode='read')
+            hdul = fits.open(os.path.join(root, file), mode='readonly')
             hdr = hdul[0].header
             hdul.close()
         except Exception as e:
@@ -496,7 +496,7 @@ class fitsProcessing:
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                if "fit" in file_extension:
+                if "fit" in file_extension.lower():
                     total_files += 1
         
         logger.info(f"Found {total_files} FITS files to process")
@@ -519,7 +519,7 @@ class fitsProcessing:
             logger.debug(f"Processing directory: {root} with {len(files)} files")
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                if "fit" in file_extension:
+                if "fit" in file_extension.lower():
                     currCount += 1
                     logger.info(f"Found FITS file #{currCount}: {file}")
                     
