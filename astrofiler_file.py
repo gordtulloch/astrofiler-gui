@@ -65,7 +65,7 @@ class fitsProcessing:
         file_name, file_extension = os.path.splitext(os.path.join(root,file))
         print("Processing file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
         # Ignore everything not a *fit* file
-        if "fit" not in file_extension:
+        if "fit" not in file_extension.lower():
             logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
             return False
 
@@ -247,7 +247,7 @@ class fitsProcessing:
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                if "fit" in file_extension:
+                if "fit" in file_extension.lower():
                     total_files += 1
         
         logger.info(f"Found {total_files} FITS files to process")
@@ -270,7 +270,7 @@ class fitsProcessing:
             logger.debug(f"Processing directory: {root} with {len(files)} files")
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                if "fit" in file_extension:
+                if "fit" in file_extension.lower():
                     currCount += 1
                     logger.info(f"Found FITS file #{currCount}: {file}")
                     
