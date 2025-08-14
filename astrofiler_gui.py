@@ -835,37 +835,13 @@ class SessionsTab(QWidget):
             # Close progress dialog
             progress.setValue(100)
             
-            # Create a simple Siril script
-            script_path = os.path.join(session_dir, "process.ssf")
-            with open(script_path, "w") as f:
-                f.write(f"# Siril processing script for {object_name} {session_date}\n")
-                f.write("requires 1.0.0\n\n")
-                f.write("# Convert to .fit files\n")
-                f.write("cd lights\n")
-                f.write("convert fits\n")
-                f.write("cd ../darks\n")
-                f.write("convert fits\n")
-                f.write("cd ../flats\n")
-                f.write("convert fits\n")
-                f.write("cd ../bias\n")
-                f.write("convert fits\n")
-                f.write("cd ..\n\n")
-                f.write("# Stack calibration frames\n")
-                f.write("stack darks rej 3 3 -nonorm\n")
-                f.write("stack bias rej 3 3 -nonorm\n")
-                f.write("stack flats rej 3 3 -norm=mul\n\n")
-                f.write("# Calibrate light frames\n")
-                f.write("calibrate lights bias=bias_stacked flat=flat_stacked dark=dark_stacked\n\n")
-                f.write("# Register light frames\n")
-                f.write("register pp_lights\n\n")
-                f.write("# Stack registered light frames\n")
-                f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
+            # PLACEHOLDER - Create a Siril script
             
             # Display success message
             QMessageBox.information(
                 self, 
                 "Success", 
-                f"Created {created_links} symbolic links and Siril script in {session_dir}"
+                f"Created {created_links} symbolic links in {session_dir}"
             )
             
             # Open the directory
