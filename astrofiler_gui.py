@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Import necessary PySide6 modules
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal
 from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, 
                                QHBoxLayout, QWidget, QTabWidget, QListWidget, 
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
 from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices, QIcon
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Mapping as MappingModel
+from astrofiler_smart import smart_telescope_manager
 
 # Global version variable
 VERSION = "1.1.0"
@@ -81,6 +82,7 @@ class ImagesTab(QWidget):
         controls_layout = QHBoxLayout()
         self.load_repo_button = QPushButton("Load Repo")
         self.sync_repo_button = QPushButton("Sync Repo")
+        self.download_repo_button = QPushButton("Download Repo")
         self.clear_button = QPushButton("Clear Repo")
         self.mapping_button = QPushButton("Mapping")
         self.refresh_button = QPushButton("Refresh")
@@ -97,6 +99,7 @@ class ImagesTab(QWidget):
         
         controls_layout.addWidget(self.load_repo_button)
         controls_layout.addWidget(self.sync_repo_button)
+        controls_layout.addWidget(self.download_repo_button)
         controls_layout.addWidget(self.clear_button)
         controls_layout.addWidget(self.mapping_button)
         controls_layout.addWidget(self.refresh_button)
@@ -124,6 +127,7 @@ class ImagesTab(QWidget):
         # Connect signals
         self.load_repo_button.clicked.connect(self.load_repo)
         self.sync_repo_button.clicked.connect(self.sync_repo)
+        self.download_repo_button.clicked.connect(self.show_download_dialog)
         self.clear_button.clicked.connect(self.clear_files)
         self.mapping_button.clicked.connect(self.open_mappings_dialog)
         self.refresh_button.clicked.connect(self.load_fits_data)
@@ -645,6 +649,15 @@ class ImagesTab(QWidget):
             QMessageBox.warning(self, "Configuration Error", 
                               "Unable to access FITS viewer configuration.")
     
+    def show_download_dialog(self):
+        """Show the download dialog for smart telescopes."""
+        try:
+            dialog = SmartTelescopeDownloadDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening download dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Error opening download dialog: {e}")
+    
     def open_mappings_dialog(self):
         """Open the mappings dialog"""
         try:
@@ -653,6 +666,524 @@ class ImagesTab(QWidget):
         except Exception as e:
             logger.error(f"Error opening mappings dialog: {e}")
             QMessageBox.critical(self, "Error", f"Error opening mappings dialog: {e}")
+
+
+
+class TelescopeDownloadWorker(QThread):
+    """Worker thread for downloading files from smart telescopes."""
+    
+    # Signals for thread-safe communication
+    progress_updated = Signal(str)
+    progress_percent_updated = Signal(int)  # New signal for progress percentage
+    download_completed = Signal(str)
+    error_occurred = Signal(str)
+    
+    def __init__(self, telescope_type, hostname, network, delete_files=False):
+        super().__init__()
+        self.telescope_type = telescope_type
+        self.hostname = hostname
+        self.network = network
+        self.delete_files = delete_files
+        self._stop_requested = False
+    
+    def _modify_fits_headers(self, fits_path, folder_name):
+        """Modify FITS headers based on folder name."""
+        try:
+            from astropy.io import fits
+            
+            with fits.open(fits_path, mode='update') as hdul:
+                header = hdul[0].header
+                
+                # Extract OBJECT from folder name (strip _sub or _mosaic_sub suffix)
+                object_name = folder_name
+                if folder_name.endswith('_mosaic_sub'):
+                    object_name = folder_name[:-11]  # Remove '_mosaic_sub'
+                elif folder_name.endswith('_sub'):
+                    object_name = folder_name[:-4]   # Remove '_sub'
+                
+                # Set OBJECT header
+                header['OBJECT'] = object_name
+                
+                # Set MOSAIC header for mosaic folders
+                if folder_name.endswith('_mosaic_sub'):
+                    header['MOSAIC'] = True
+                else:
+                    header['MOSAIC'] = False
+                
+                hdul.flush()
+                
+        except Exception as e:
+            self.progress_updated.emit(f"Warning: Could not modify headers for {os.path.basename(fits_path)}: {str(e)}")
+    
+    def stop(self):
+        """Request the worker to stop."""
+        logger.debug("Worker thread stop requested")
+        self._stop_requested = True
+    
+    def run(self):
+        """Perform the actual download process."""
+        import tempfile
+        
+        try:
+            # Step 1: Find the telescope (10% of progress)
+            if self._stop_requested:
+                return
+            
+            self.progress_updated.emit("Scanning network for SEESTAR telescope...")
+            self.progress_percent_updated.emit(5)
+            
+            ip, error = smart_telescope_manager.find_telescope(
+                self.telescope_type, 
+                network_range=self.network if self.network else None,
+                hostname=self.hostname if self.hostname else None
+            )
+            
+            if self._stop_requested:
+                return
+            
+            if not ip:
+                self.error_occurred.emit(f"Failed to find telescope: {error}")
+                return
+            
+            self.progress_updated.emit(f"Connected to SEESTAR at {ip}")
+            self.progress_percent_updated.emit(10)
+            
+            # Step 2: Connect and get FITS files (20% of progress)
+            if self._stop_requested:
+                return
+            
+            self.progress_updated.emit("Scanning SEESTAR for FITS files...")
+            self.progress_percent_updated.emit(15)
+            
+            fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
+            
+            if self._stop_requested:
+                return
+            
+            if error:
+                self.error_occurred.emit(f"Failed to get FITS files: {error}")
+                return
+            
+            if not fits_files:
+                self.download_completed.emit("No FITS files found on telescope.")
+                return
+            
+            self.progress_updated.emit(f"Found {len(fits_files)} FITS files to download")
+            self.progress_percent_updated.emit(20)
+            
+            # Step 3: Create temp directory
+            if self._stop_requested:
+                return
+            
+            temp_dir = tempfile.mkdtemp(prefix="astrofiler_download_")
+            
+            # Step 4: Download and process each file (20-100% of progress)
+            successful_downloads = 0
+            failed_downloads = 0
+            processed_files = 0
+            
+            fits_processor = fitsProcessing()
+            
+            for i, file_info in enumerate(fits_files):
+                if self._stop_requested:
+                    logger.debug("Stop requested - breaking out of download loop")
+                    break
+                
+                file_name = file_info['name']
+                file_size = smart_telescope_manager.format_file_size(file_info['size'])
+                
+                # Calculate progress: 20% base + 80% for files (each file gets equal share)
+                base_progress = 20
+                file_progress_range = 80
+                current_file_start = base_progress + (i * file_progress_range // len(fits_files))
+                next_file_start = base_progress + ((i + 1) * file_progress_range // len(fits_files))
+                
+                self.progress_updated.emit(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")
+                self.progress_percent_updated.emit(current_file_start)
+                
+                # Download file to temp directory
+                local_path = os.path.join(temp_dir, file_name)
+                
+                def download_progress_callback(progress):
+                    if self._stop_requested:
+                        return False  # Signal to stop the download
+                    # Update progress within this file's range
+                    file_percent = current_file_start + int((progress / 100) * (next_file_start - current_file_start) * 0.8)
+                    self.progress_percent_updated.emit(file_percent)
+                    self.progress_updated.emit(f"Downloading {file_name}: {progress:.1f}%")
+                    return True  # Continue downloading
+                
+                success, error = smart_telescope_manager.download_file(
+                    self.telescope_type, ip, file_info, local_path,
+                    progress_callback=download_progress_callback
+                )
+                
+                if self._stop_requested:
+                    break
+                
+                if not success:
+                    if "cancelled by user" in str(error).lower():
+                        # Download was cancelled, break out of loop
+                        self.progress_updated.emit("Download cancelled by user")
+                        break
+                    else:
+                        self.progress_updated.emit(f"Failed to download {file_name}: {error}")
+                        failed_downloads += 1
+                        continue
+                
+                successful_downloads += 1
+                
+                # Check for cancellation immediately after download
+                if self._stop_requested:
+                    self.progress_updated.emit("Download cancelled")
+                    break
+                
+                # Processing phase (remaining 20% of this file's progress range)
+                processing_progress = current_file_start + int((next_file_start - current_file_start) * 0.8)
+                self.progress_updated.emit(f"Processing {file_name}...")
+                self.progress_percent_updated.emit(processing_progress)
+                
+                # Process the file with registerFitsImage
+                try:
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        break
+                    
+                    # Modify FITS headers before processing
+                    self._modify_fits_headers(local_path, file_info.get('folder_name', ''))
+                    
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        break
+                    
+                    # Process file (this might take time, but we can't easily interrupt it)
+                    self.progress_updated.emit(f"Adding {file_name} to repository...")
+                    result = fits_processor.registerFitsImage(
+                        os.path.dirname(local_path), 
+                        file_name, 
+                        moveFiles=True
+                    )
+                    
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        break
+                    
+                    if result:
+                        processed_files += 1
+                        self.progress_updated.emit(f"Successfully processed {file_name}")
+                        
+                        # Delete file from host if requested
+                        if self.delete_files:
+                            if self._stop_requested:
+                                self.progress_updated.emit("Download cancelled")
+                                break
+                            
+                            self.progress_updated.emit(f"Deleting {file_name} from telescope...")
+                            delete_success, delete_error = smart_telescope_manager.delete_file(
+                                self.telescope_type, ip, file_info
+                            )
+                            
+                            if delete_success:
+                                self.progress_updated.emit(f"Successfully deleted {file_name} from telescope")
+                            else:
+                                self.progress_updated.emit(f"Warning: Failed to delete {file_name} from telescope: {delete_error}")
+                    else:
+                        self.progress_updated.emit(f"Failed to process {file_name} (file may be invalid)")
+                        
+                except Exception as e:
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        break
+                    self.progress_updated.emit(f"Error processing {file_name}: {str(e)}")
+                
+                # Update progress to next file start
+                self.progress_percent_updated.emit(next_file_start)
+                
+                # Clean up downloaded file (since moveFiles=True should have moved it)
+                try:
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                except:
+                    pass
+            
+            # Final completion
+            if self._stop_requested:
+                self.progress_updated.emit("Download cancelled")
+                return
+            
+            self.progress_updated.emit("Download complete!")
+            self.progress_percent_updated.emit(100)
+            
+            # Step 5: Clean up temp directory
+            try:
+                os.rmdir(temp_dir)
+            except:
+                pass
+            
+            # Step 6: Show final status
+            if not self._stop_requested:
+                message = (f"Download complete!\n\n"
+                          f"Files found: {len(fits_files)}\n"
+                          f"Successfully downloaded: {successful_downloads}\n"
+                          f"Failed downloads: {failed_downloads}\n"
+                          f"Successfully processed: {processed_files}\n\n"
+                          f"Files have been moved to your repository and registered in the database.")
+                
+                self.download_completed.emit(message)
+            
+        except Exception as e:
+            if not self._stop_requested:
+                self.error_occurred.emit(f"Unexpected error during download: {str(e)}")
+
+
+class SmartTelescopeDownloadDialog(QDialog):
+    """Dialog for downloading files from smart telescopes."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Download Repository")
+        self.setModal(True)
+        self.resize(400, 300)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Telescope selection
+        telescope_group = QGroupBox("Smart Telescope")
+        telescope_layout = QFormLayout(telescope_group)
+        
+        self.telescope_list = QListWidget()
+        self.telescope_list.addItem("SeeStar")
+        self.telescope_list.setCurrentRow(0)  # Select first item by default
+        self.telescope_list.setMaximumHeight(80)
+        
+        telescope_layout.addRow("Telescope Type:", self.telescope_list)
+        
+        # Connection settings
+        connection_group = QGroupBox("Connection Settings")
+        connection_layout = QFormLayout(connection_group)
+        
+        self.hostname_edit = QLineEdit("SEESTAR")
+        self.hostname_edit.setToolTip("Hostname or IP address of the telescope")
+        
+        self.network_edit = QLineEdit()
+        # Set default network
+        default_network = smart_telescope_manager.get_local_network()
+        self.network_edit.setText(default_network)
+        self.network_edit.setToolTip("Network range to scan (e.g., 10.0.0.0/24)")
+        
+        connection_layout.addRow("Hostname:", self.hostname_edit)
+        connection_layout.addRow("Network:", self.network_edit)
+        
+        # Delete files option
+        self.delete_files_checkbox = QCheckBox("Delete files on host after download")
+        self.delete_files_checkbox.setChecked(False)  # Default to False
+        self.delete_files_checkbox.setToolTip("WARNING: This will permanently delete files from the telescope after successful download")
+        connection_layout.addRow("", self.delete_files_checkbox)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.download_button = QPushButton("Download")
+        self.cancel_button = QPushButton("Cancel")
+        
+        button_layout.addStretch()
+        button_layout.addWidget(self.download_button)
+        button_layout.addWidget(self.cancel_button)
+        
+        # Add to main layout
+        layout.addWidget(telescope_group)
+        layout.addWidget(connection_group)
+        layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        # Connect signals
+        self.telescope_list.currentTextChanged.connect(self.on_telescope_changed)
+        self.download_button.clicked.connect(self.start_download)
+        self.cancel_button.clicked.connect(self.reject)
+        
+        # Update initial state
+        self.on_telescope_changed()
+    
+    def closeEvent(self, event):
+        """Handle dialog close event to ensure worker thread is stopped."""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            # Stop the worker thread before closing
+            self.worker.stop()
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                self.worker.terminate()
+                self.worker.wait(1000)
+        
+        # Close progress dialog if it exists
+        self.close_progress_dialog()
+        
+        # Accept the close event
+        event.accept()
+    
+    def reject(self):
+        """Handle dialog rejection (ESC key, X button, etc.)."""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            # Stop the worker thread before rejecting
+            self.worker.stop()
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                self.worker.terminate()
+                self.worker.wait(1000)
+        
+        # Close progress dialog if it exists
+        self.close_progress_dialog()
+        
+        # Call parent reject
+        super().reject()
+    
+    def on_telescope_changed(self):
+        """Handle telescope selection change."""
+        current_telescope = self.telescope_list.currentItem()
+        if current_telescope:
+            telescope_type = current_telescope.text()
+            if telescope_type == "SeeStar":
+                self.hostname_edit.setText("SEESTAR")
+    
+    def start_download(self):
+        """Start the download process."""
+        current_telescope = self.telescope_list.currentItem()
+        if not current_telescope:
+            QMessageBox.warning(self, "Warning", "Please select a telescope type.")
+            return
+        
+        telescope_type = current_telescope.text()
+        hostname = self.hostname_edit.text().strip()
+        network = self.network_edit.text().strip()
+        delete_files = self.delete_files_checkbox.isChecked()
+        
+        if not network:
+            QMessageBox.warning(self, "Warning", "Please enter a network range.")
+            return
+        
+        # Confirmation dialog for file deletion
+        if delete_files:
+            reply = QMessageBox.question(
+                self, 
+                "Confirm File Deletion",
+                "WARNING: You have selected to delete files from the telescope after download.\n\n"
+                "This will PERMANENTLY DELETE the original files from the telescope's storage "
+                "after they are successfully downloaded and processed.\n\n"
+                "Are you sure you want to proceed?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+        
+        # Don't hide the main dialog yet - keep it alive for signal handling
+        # self.hide()  # Comment this out for now
+        
+        # Create and show progress dialog with proper parent
+        self.progress_dialog = QProgressDialog("Connecting to SEESTAR...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Downloading from Smart Telescope")
+        self.progress_dialog.setWindowModality(Qt.ApplicationModal)  # Changed to ApplicationModal
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setAutoClose(False)  # Prevent auto-close
+        self.progress_dialog.setAutoReset(False)  # Prevent auto-reset
+        
+        # Center the progress dialog
+        if self.parent():
+            parent_center = self.parent().geometry().center()
+            dialog_size = self.progress_dialog.sizeHint()
+            self.progress_dialog.move(
+                parent_center.x() - dialog_size.width() // 2,
+                parent_center.y() - dialog_size.height() // 2
+            )
+        
+        self.progress_dialog.show()
+        
+        # Create and start worker thread with delete_files parameter
+        self.worker = TelescopeDownloadWorker(telescope_type, hostname, network, delete_files)
+        
+        # Connect signals
+        self.worker.progress_updated.connect(self.on_progress_updated)
+        self.worker.progress_percent_updated.connect(self.on_progress_percent_updated)
+        self.worker.download_completed.connect(self.on_download_completed)
+        self.worker.error_occurred.connect(self.on_error_occurred)
+        self.worker.finished.connect(self.on_worker_finished)
+        
+        # Connect cancel button
+        self.progress_dialog.canceled.connect(self.on_cancel_download)
+        
+        # Start the worker
+        self.worker.start()
+    
+    def on_progress_updated(self, message):
+        """Update progress dialog with new message."""
+        logger.debug(f"Progress update: {message}")
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.setLabelText(message)
+            # Force update
+            self.progress_dialog.repaint()
+    
+    def on_progress_percent_updated(self, percent):
+        """Update progress dialog with percentage."""
+        logger.debug(f"Progress percent: {percent}%")
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.setValue(percent)
+            # Force update
+            self.progress_dialog.repaint()
+    
+    def on_download_completed(self, message):
+        """Handle successful download completion."""
+        logger.info("Download completed successfully")
+        self.close_progress_dialog()
+        self.accept()  # Close the main dialog now
+        QMessageBox.information(self.parent(), "Download Complete", message)
+    
+    def on_error_occurred(self, error_message):
+        """Handle download error."""
+        logger.error(f"Download error occurred: {error_message}")
+        self.close_progress_dialog()
+        self.show()  # Show the main dialog again for retry
+        QMessageBox.critical(self, "Download Error", error_message)
+    
+    def on_worker_finished(self):
+        """Handle worker thread completion."""
+        logger.debug("Worker thread finished")
+        if hasattr(self, 'progress_dialog') and self.progress_dialog is not None:
+            self.close_progress_dialog()
+    
+    def on_cancel_download(self):
+        """Handle download cancellation."""
+        logger.debug("Cancel button clicked!")
+        
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            logger.debug("Stopping worker thread...")
+            self.progress_dialog.setLabelText("Cancelling download...")
+            self.progress_dialog.setValue(0)
+            
+            # Request graceful stop
+            self.worker.stop()
+            
+            # Give worker time to stop gracefully
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                logger.debug("Force terminating worker thread")
+                self.progress_dialog.setLabelText("Forcing cancellation...")
+                self.worker.terminate()  # Force termination if needed
+                self.worker.wait(2000)   # Wait up to 2 more seconds
+            
+            # Ensure worker is fully stopped before proceeding
+            if self.worker.isRunning():
+                logger.debug("Final termination of worker thread")
+                self.worker.terminate()
+                self.worker.wait()
+        
+        logger.debug("Closing progress dialog...")
+        self.close_progress_dialog()
+        self.show()  # Show the main dialog again
+    
+    def close_progress_dialog(self):
+        """Close the progress dialog safely."""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog is not None:
+            self.progress_dialog.close()
+            self.progress_dialog = None
 
 
 class SessionsTab(QWidget):

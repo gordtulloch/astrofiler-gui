@@ -5,6 +5,18 @@ This document tracks major changes and new features in AstroFiler.
 ## Version 1.1.0
 
 ### New Features
+- **Smart Telescope Integration**: Cross-platform SMB/CIFS support for SEESTAR and other smart telescopes
+  - **Network Discovery**: Automatic scanning for telescopes on local network
+  - **FITS File Download**: Direct download of FITS files from telescope storage with progress tracking
+  - **Header Modification**: Automatic OBJECT and MOSAIC header updates based on folder structure
+  - **Filtered Folder Scanning**: Only scans folders ending with "_sub" for targeted data retrieval
+  - **Progress Dialog**: Real-time download progress with file-by-file status updates
+  - **Cancellation Support**: Graceful download cancellation with proper cleanup
+  - **Delete Files on Host**: Optional deletion of files from telescope after successful download and processing
+    - **Safety Confirmation**: Double confirmation dialog before enabling deletion
+    - **Post-Processing Deletion**: Files only deleted after successful download and database registration
+    - **Error Handling**: Comprehensive error reporting for deletion failures
+    - **Selective Deletion**: Only successfully processed files are deleted from the host
 - **Master Calibration Frame Creation**: New "Create Masters" button in Sessions tab
 - **Siril CLI Integration**: Automated master bias, dark, and flat frame creation using Siril CLI
 - **Enhanced Session Tracking**: Added `fitsBiasMaster`, `fitsDarkMaster`, and `fitsFlatMaster` fields to track master calibration frames
@@ -35,6 +47,22 @@ This document tracks major changes and new features in AstroFiler.
   - Seamless integration with existing file processing workflow
 
 ### Technical Changes
+- **Smart Telescope Module**: New `astrofiler_smart.py` module with comprehensive SMB/CIFS support
+  - `SmartTelescopeManager` class for telescope communication and file operations
+  - `ProgressFileWrapper` for cancellation-aware file downloads with progress tracking
+  - Cross-platform network scanning using socket connections on port 445
+  - Guest credential authentication for SEESTAR telescopes
+  - Robust error handling and connection management
+- **GUI Threading**: Enhanced Qt threading implementation for smart telescope operations
+  - `TelescopeDownloadWorker` QThread for non-blocking downloads
+  - `SmartTelescopeDownloadDialog` with real-time progress updates
+  - Proper signal-slot communication for thread safety
+  - Graceful cancellation handling with worker thread termination
+- **File Deletion System**: Secure file deletion with multiple safety checks
+  - SMB `deleteFiles()` operation for remote file removal
+  - Confirmation dialogs with clear warnings about permanent deletion
+  - Only delete files after successful local processing and database registration
+  - Comprehensive error logging for deletion failures
 - Added migration system with `migrate.py` script and `migrations/` directory
 - Enhanced database models with master calibration frame fields
 - Siril CLI integration for master creation and image stacking
@@ -52,8 +80,10 @@ This document tracks major changes and new features in AstroFiler.
     - Proper error handling and logging for all mapping operations
 
 ### Documentation
+- Added `SMART_TELESCOPE_GUIDE.md` with comprehensive smart telescope usage guide
 - Added `MASTER_CREATION.md` with comprehensive usage guide
 - Added `MIGRATIONS.md` with database migration documentation
+- Updated `README.md` with smart telescope features and technical requirements
 - Updated `CHANGE_LOG.md` with new features and requirements
 
 ## Version 1.0.0
