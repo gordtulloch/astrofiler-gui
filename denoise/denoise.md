@@ -1,5 +1,6 @@
+# Denoising Images
 
-🗂️ Folder Structure
+## Folder Structure
 Organize your dataset as follows:
 
 project_folder/
@@ -9,7 +10,7 @@ project_folder/
 └── light/
 Each subfolder should contain raw or preprocessed images in a format supported by Siril (e.g., .fits, .tiff, .cr2, etc.).
 
-🛠️ Step 1: Calibrate and Align Images with Siril
+## Step 1: Calibrate and Align Images with Siril
 1. Place the preprocess.ssf in your working directory.
 2. Launch Siril and set the working directory to project_folder.
 3. Run the script: siril -s preprocess.ssf
@@ -23,23 +24,27 @@ Registers (aligns) calibrated frames
 Stacks the registered frames using median combine
 Saves the final result as final_result.fit
 
-🧪 Step 2: Train the Denoising Model
+##Step 2: Train the Denoising Model
 1. Place multiple noisy FITS images of the same target in a folder (e.g., stacked_images/).
 2. Run the training script:
 
 This script:
-
+```
+python train_denoising_model.py stacked_images/ denoising_model.h5 --epochs 20 --batch_size 8
+```
 Loads and normalizes all FITS images
 Averages them to create a pseudo-clean target
 Trains a U-Net model using noisy images as input and the average as target
 Saves the trained model to denoising_model.h5
 
-🧼 Step 3: Denoise a FITS Image
+## Step 3: Denoise a FITS Image
 1. Place the noisy FITS image you want to denoise in a known location.
 2. Run the denoising script:
 
 This script:
-
+```
+python denoise_fits_image.py denoising_model.h5 input_image.fits output_image.fits
+```
 Loads and normalizes the input image
 Applies the trained model
 Rescales and saves the denoised image as output_image.fits
