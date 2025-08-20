@@ -2,12 +2,13 @@
 
 ## Folder Structure
 Organize your dataset as follows:
-
+```
 project_folder/
 ├── bias/
 ├── dark/
 ├── flat/
 └── light/
+```
 Each subfolder should contain raw or preprocessed images in a format supported by Siril (e.g., .fits, .tiff, .cr2, etc.).
 
 ## Step 1: Calibrate and Align Images with Siril
