@@ -43,6 +43,7 @@ python -m pip install pysiril
 ---
 
 ## Input Directory Layout
+If you have prepared seperate panels for your mosaic, you can organize them as follows for this script:
 
 ```
 /path/to/dataset_root/
@@ -58,6 +59,9 @@ python -m pip install pysiril
   flats/      # optional (global fallback)
   biases/     # optional (global fallback)
 ```
+
+If you have no sorted your panels (or your telescope like the Seestar images panels on a round-robin basis) you can use the script pregroup.py to sort the panels into seperate frames for processing based on their astronometric centres.
+
 - If a panel has its own calibration frames, they are used; otherwise the script falls back to the **global** sets at the root (if present).
 
 ---
