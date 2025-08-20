@@ -1,0 +1,35 @@
+
+# Custom Siril Script for OSC/DSLR Data Calibration and Alignment
+# Assumes the following folder structure:
+# - bias/
+# - dark/
+# - flat/
+# - light/
+
+requires 1.2.0
+
+# Set working directory
+cd .
+
+# Convert raw images to FITS
+convert bias bias_
+convert dark dark_
+convert flat flat_
+convert light light_
+
+# Create master calibration frames
+stack bias_ bias_stacked rej 3
+stack dark_ dark_stacked rej 3
+stack flat_ flat_stacked rej 3
+
+# Preprocess light frames
+preprocess light_ pp_light_ -bias=bias_stacked -dark=dark_stacked -flat=flat_stacked
+
+# Register (align) calibrated light frames
+register pp_light_ r_light_
+
+# Optional: Stack registered frames
+stack r_light_ final_stacked median
+
+# Save final image
+save final_stacked final_result.fit
