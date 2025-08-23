@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Import necessary PySide6 modules
-from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal
+from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal, QTimer
 from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, 
                                QHBoxLayout, QWidget, QTabWidget, QListWidget, 
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
@@ -267,6 +267,30 @@ class ImagesTab(QWidget):
         
         if reply != QMessageBox.Ok:
             return  # User cancelled, exit the function
+        
+        # Clear repository first before syncing
+        try:
+            # Clear the tree widget
+            self.file_tree.clear()
+            
+            # Delete all fitsSession records from the database
+            deleted_sessions = FitsSessionModel.delete().execute()
+            
+            # Delete all fitsFile records from the database
+            deleted_files = FitsFileModel.delete().execute()
+            
+            # Invalidate stats cache since all data was cleared
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                parent_widget = parent_widget.parent()
+            if parent_widget:
+                parent_widget.invalidate_stats_cache()
+            
+            logger.info(f"Cleared repository before sync: {deleted_sessions} sessions, {deleted_files} files")
+        except Exception as e:
+            logger.error(f"Error clearing repository before sync: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to clear repository before sync: {e}")
+            return
         
         progress_dialog = None
         was_cancelled = False
@@ -2151,13 +2175,34 @@ class MappingsDialog(QDialog):
         current_combo = QComboBox()
         current_combo.setEditable(True)
         
-        # Replace text field
-        replace_edit = QLineEdit()
-        replace_edit.setText(replace)
+        # Replace dropdown (changed from text field to combo box)
+        replace_combo = QComboBox()
+        replace_combo.setEditable(True)
         
-        # Default checkbox
-        default_checkbox = QCheckBox()
-        default_checkbox.setChecked(is_default)
+        # Apply button (check icon)
+        apply_button = QPushButton("✓")
+        apply_button.setMaximumWidth(30)
+        apply_button.setToolTip("Apply this mapping immediately")
+        apply_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #44ff44;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-size: 14px;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #66ff66;
+                border: 1px solid #44ff44;
+            }
+            QPushButton:pressed {
+                background-color: #1d1d1d;
+                color: #22ff22;
+            }
+        """)
+        apply_button.clicked.connect(lambda: self.apply_single_mapping(row_widget))
         
         # Delete button (trash icon)
         delete_button = QPushButton("🗑")
@@ -2190,40 +2235,46 @@ class MappingsDialog(QDialog):
         row_layout.addWidget(QLabel("Current:"), 0, 2)
         row_layout.addWidget(current_combo, 0, 3)
         row_layout.addWidget(QLabel("Replace:"), 0, 4)
-        row_layout.addWidget(replace_edit, 0, 5)
-        row_layout.addWidget(QLabel("Default:"), 0, 6)
-        row_layout.addWidget(default_checkbox, 0, 7)
-        row_layout.addWidget(delete_button, 0, 8)
+        row_layout.addWidget(replace_combo, 0, 5)
+        row_layout.addWidget(apply_button, 0, 6)
+        row_layout.addWidget(delete_button, 0, 7)
         
         # Store references
         row_widget.card_combo = card_combo
         row_widget.current_combo = current_combo
-        row_widget.replace_edit = replace_edit
-        row_widget.default_checkbox = default_checkbox
+        row_widget.replace_combo = replace_combo
+        # Remove default_checkbox reference since it no longer exists
         
-        # Update current values for initial card
+        # Update current and replace values for initial card
         self.update_current_values(row_widget)
         current_combo.setCurrentText(current)
+        replace_combo.setCurrentText(replace)
         
         # Add to scroll layout
         self.scroll_layout.addWidget(row_widget)
         self.mapping_rows.append(row_widget)
     
     def update_current_values(self, row_widget):
-        """Update the current values dropdown when card changes"""
+        """Update the current and replace values dropdowns when card changes"""
         card = row_widget.card_combo.currentText()
         current_values = self.get_current_values_for_card(card)
         
-        # Remember current selection
+        # Remember current selections
         current_text = row_widget.current_combo.currentText()
+        replace_text = row_widget.replace_combo.currentText()
         
-        # Update combo box
+        # Update both combo boxes with the same values
         row_widget.current_combo.clear()
         row_widget.current_combo.addItems(current_values)
         
-        # Restore selection if it still exists
+        row_widget.replace_combo.clear()
+        row_widget.replace_combo.addItems(current_values)
+        
+        # Restore selections if they still exist
         if current_text in current_values:
             row_widget.current_combo.setCurrentText(current_text)
+        if replace_text in current_values:
+            row_widget.replace_combo.setCurrentText(replace_text)
     
     def delete_mapping_row(self, row_widget):
         """Delete a mapping row"""
@@ -2231,6 +2282,175 @@ class MappingsDialog(QDialog):
             self.mapping_rows.remove(row_widget)
             self.scroll_layout.removeWidget(row_widget)
             row_widget.deleteLater()
+    
+    def apply_single_mapping(self, row_widget):
+        """Apply a single mapping immediately"""
+        try:
+            card = row_widget.card_combo.currentText()
+            current = row_widget.current_combo.currentText()
+            replace = row_widget.replace_combo.currentText()
+            
+            # Validate inputs
+            if not card:
+                QMessageBox.warning(self, "Invalid Mapping", "Please select a card type.")
+                return
+            
+            if not replace:
+                QMessageBox.warning(self, "Invalid Mapping", "Please enter a replacement value.")
+                return
+            
+            # Confirm the action
+            if current:
+                message = f"Apply mapping for {card}:\n'{current}' → '{replace}'\n\nThis will update the database immediately."
+            else:
+                message = f"Apply mapping for {card}:\n'(empty/null)' → '{replace}'\n\nThis will update the database immediately."
+            
+            reply = QMessageBox.question(
+                self, 
+                "Confirm Apply Mapping", 
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Create progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Applying Mapping")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+            
+            try:
+                # Step 1: Save mapping to database (25%)
+                progress.setLabelText("Saving mapping to database...")
+                progress.setValue(25)
+                QApplication.processEvents()
+                
+                if progress.wasCanceled():
+                    return
+                
+                try:
+                    existing_mapping = MappingModel.get(
+                        (MappingModel.card == card) & 
+                        (MappingModel.current == (current if current else None))
+                    )
+                    # Update existing mapping
+                    existing_mapping.replace = replace if replace else None
+                    existing_mapping.save()
+                except MappingModel.DoesNotExist:
+                    # Create new mapping
+                    MappingModel.create(
+                        card=card,
+                        current=current if current else None,
+                        replace=replace if replace else None,
+                        is_default=False
+                    )
+                
+                # Step 2: Apply to database records (50%)
+                progress.setLabelText(f"Applying {card} mapping to database records...")
+                progress.setValue(50)
+                QApplication.processEvents()
+                
+                if progress.wasCanceled():
+                    return
+                
+                # Create a single mapping to apply
+                mapping_to_apply = {
+                    'card': card,
+                    'current': current,
+                    'replace': replace,
+                    'is_default': False
+                }
+                
+                # Apply the mapping to database records
+                update_files = self.update_files_checkbox.isChecked()
+                total_updates = 0
+                
+                if mapping_to_apply['card'] in ['TELESCOP', 'INSTRUME']:
+                    field_name = 'fitsFileTelescop' if mapping_to_apply['card'] == 'TELESCOP' else 'fitsFileInstrument'
+                    
+                    # Find files that match the current value
+                    if mapping_to_apply['current']:
+                        # Specific value mapping
+                        query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == mapping_to_apply['current'])
+                    else:
+                        # Default mapping for null/empty values
+                        query = FitsFileModel.select().where(
+                            (getattr(FitsFileModel, field_name).is_null()) |
+                            (getattr(FitsFileModel, field_name) == '')
+                        )
+                    
+                    # Step 3: Update database records (75%)
+                    progress.setLabelText(f"Updating {query.count()} database records...")
+                    progress.setValue(75)
+                    QApplication.processEvents()
+                    
+                    if progress.wasCanceled():
+                        return
+                    
+                    # Update matching files
+                    for fits_file in query:
+                        if mapping_to_apply['replace']:
+                            setattr(fits_file, field_name, mapping_to_apply['replace'])
+                            fits_file.save()
+                            total_updates += 1
+                            
+                            # Update FITS header if requested
+                            if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                                try:
+                                    from astropy.io import fits
+                                    with fits.open(fits_file.fitsFileName, mode='update') as hdul:
+                                        hdul[0].header[mapping_to_apply['card']] = mapping_to_apply['replace']
+                                        hdul[0].header.comments[mapping_to_apply['card']] = 'Updated via Astrofiler mapping'
+                                        hdul.flush()
+                                except Exception as e:
+                                    logger.error(f"Error updating FITS header for {fits_file.fitsFileName}: {e}")
+                
+                # Step 4: Clear cache and update UI (100%)
+                progress.setLabelText("Finalizing changes...")
+                progress.setValue(100)
+                QApplication.processEvents()
+                
+                # Clear the mapping cache so file processing picks up new mappings
+                try:
+                    from astrofiler_file import clearMappingCache
+                    clearMappingCache()
+                except ImportError:
+                    pass  # Function might not be available in older versions
+                
+                # Update the current values dropdowns to reflect changes
+                self.update_current_values(row_widget)
+                
+                progress.close()
+                
+                # Show success message
+                if total_updates > 0:
+                    QMessageBox.information(
+                        self, 
+                        "Mapping Applied", 
+                        f"Successfully applied mapping and updated {total_updates} database records."
+                    )
+                else:
+                    QMessageBox.information(
+                        self, 
+                        "Mapping Applied", 
+                        "Mapping saved successfully. No matching records found to update."
+                    )
+                
+            except Exception as e:
+                if 'progress' in locals():
+                    progress.close()
+                raise e
+            
+        except Exception as e:
+            logger.error(f"Error applying single mapping: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying mapping: {e}")
     
     def load_existing_mappings(self):
         """Load existing mappings from the database"""
@@ -2257,8 +2477,9 @@ class MappingsDialog(QDialog):
             for row_widget in self.mapping_rows:
                 card = row_widget.card_combo.currentText()
                 current = row_widget.current_combo.currentText()
-                replace = row_widget.replace_edit.text()
-                is_default = row_widget.default_checkbox.isChecked()
+                replace = row_widget.replace_combo.currentText()
+                # Set is_default to False since we removed the checkbox
+                is_default = False
                 
                 MappingModel.create(
                     card=card,
@@ -3412,6 +3633,37 @@ class AboutTab(QWidget):
             logger.error(f"Error loading background image: {e}")
             self.set_default_background()
     
+    def load_background_image(self):
+        """Load the background image from local images/background.jpg file"""
+        try:
+            # Try to load the image from the images directory
+            pixmap = QPixmap("images/background.jpg")
+            
+            if not pixmap.isNull():
+                # Get the size of the container
+                container_size = self.container.size()
+                if container_size.width() <= 0:
+                    # Use minimum size if widget not yet properly sized
+                    container_size = self.container.minimumSize()
+                
+                # Scale the image to fit the container while maintaining aspect ratio
+                scaled_pixmap = pixmap.scaled(
+                    container_size, 
+                    Qt.KeepAspectRatioByExpanding, 
+                    Qt.SmoothTransformation
+                )
+                
+                self.background_label.setPixmap(scaled_pixmap)
+                self.background_label.setScaledContents(True)
+                logger.debug("Successfully loaded images/background.jpg as background")
+            else:
+                # If image loading fails, use the default background
+                logger.warning("Failed to load images/background.jpg, using default background")
+                self.set_default_background()
+        except Exception as e:
+            logger.error(f"Error loading background image: {e}")
+            self.set_default_background()
+    
     def set_default_background(self):
         """Set a default starry background if image download fails"""
         self.background_label.setStyleSheet("""
@@ -3527,7 +3779,7 @@ class DuplicatesTab(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
-        self.refresh_duplicates()
+        # Do not run duplicate detection on startup - user can manually refresh
     
     def init_ui(self):
         """Initialize the duplicates tab UI"""
@@ -3552,7 +3804,7 @@ class DuplicatesTab(QWidget):
         
         # Duplicates tree widget
         self.duplicates_tree = QTreeWidget()
-        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type"])
+        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type", "Full Path"])
         self.duplicates_tree.setAlternatingRowColors(True)
         self.duplicates_tree.setSortingEnabled(True)
         layout.addWidget(self.duplicates_tree)
@@ -3595,9 +3847,15 @@ class DuplicatesTab(QWidget):
     def refresh_duplicates(self):
         """Refresh the list of duplicate files"""
         from astrofiler_db import fitsFile
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        import time
         
         self.duplicates_tree.clear()
         duplicate_groups = []
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             # Query for files with duplicate hashes
@@ -3616,9 +3874,34 @@ class DuplicatesTab(QWidget):
             duplicate_hashes = cursor.fetchall()
             conn.close()
             
+            # Only show progress dialog if we have duplicates to process
+            if duplicate_hashes:
+                # Create progress dialog
+                progress_dialog = QProgressDialog("Scanning for duplicate files...", "Cancel", 0, len(duplicate_hashes), self)
+                progress_dialog.setWindowTitle("Finding Duplicates")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)  # Show immediately
+                progress_dialog.setValue(0)  # Set initial value
+                progress_dialog.show()
+                QApplication.processEvents()  # Process events to show dialog
+                
+                # Small delay to ensure dialog is visible
+                time.sleep(0.1)
+            
             total_duplicates = 0
             
-            for hash_value, count in duplicate_hashes:
+            for i, (hash_value, count) in enumerate(duplicate_hashes):
+                # Check if user cancelled
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    break
+                
+                # Update progress
+                if progress_dialog:
+                    progress_dialog.setValue(i)
+                    progress_dialog.setLabelText(f"Processing duplicate group {i+1} of {len(duplicate_hashes)}...")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
                 # Get all files with this hash
                 files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value)
                 
@@ -3632,8 +3915,8 @@ class DuplicatesTab(QWidget):
                     # Style the group item
                     font = group_item.font(0)
                     font.setBold(True)
-                    for i in range(6):
-                        group_item.setFont(i, font)
+                    for col in range(7):  # Updated to 7 columns
+                        group_item.setFont(col, font)
                     
                     # Add individual files as children
                     for fits_file in files_with_hash:
@@ -3644,6 +3927,7 @@ class DuplicatesTab(QWidget):
                         file_item.setText(3, fits_file.fitsFileFilter or "Unknown")
                         file_item.setText(4, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "Unknown")
                         file_item.setText(5, fits_file.fitsFileType or "Unknown")
+                        file_item.setText(6, fits_file.fitsFileName or "Unknown")  # Full path
                         
                         # Store the file object for deletion
                         file_item.setData(0, Qt.UserRole, fits_file)
@@ -3651,8 +3935,15 @@ class DuplicatesTab(QWidget):
                     duplicate_groups.append((hash_value, count))
                     total_duplicates += count - 1  # count - 1 because we keep one copy
             
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
             # Update info label and button state
-            if duplicate_groups:
+            if was_cancelled:
+                self.info_label.setText("Duplicate scan was cancelled.")
+                self.delete_button.setEnabled(False)
+            elif duplicate_groups:
                 self.info_label.setText(f"Found {len(duplicate_groups)} duplicate groups with {total_duplicates} files that can be removed.")
                 self.delete_button.setEnabled(True)
             else:
@@ -3661,12 +3952,17 @@ class DuplicatesTab(QWidget):
                 
         except Exception as e:
             logging.error(f"Error refreshing duplicates: {str(e)}")
+            if progress_dialog:
+                progress_dialog.close()
             self.info_label.setText(f"Error loading duplicates: {str(e)}")
             self.delete_button.setEnabled(False)
     
     def delete_duplicates(self):
         """Delete duplicate files, keeping only one copy of each"""
         from astrofiler_db import fitsFile
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
         
         # Confirm deletion
         reply = QMessageBox.question(
@@ -3684,6 +3980,8 @@ class DuplicatesTab(QWidget):
         
         deleted_count = 0
         error_count = 0
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             # Get all duplicate groups
@@ -3702,7 +4000,29 @@ class DuplicatesTab(QWidget):
             duplicate_hashes = [row[0] for row in cursor.fetchall()]
             conn.close()
             
-            for hash_value in duplicate_hashes:
+            # Only show progress dialog if we have duplicates to delete
+            if duplicate_hashes:
+                # Create progress dialog
+                progress_dialog = QProgressDialog("Deleting duplicate files...", "Cancel", 0, len(duplicate_hashes), self)
+                progress_dialog.setWindowTitle("Deleting Duplicates")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)  # Show immediately
+                progress_dialog.setValue(0)  # Set initial value
+                progress_dialog.show()
+                QApplication.processEvents()  # Process events to show dialog
+            
+            for i, hash_value in enumerate(duplicate_hashes):
+                # Check if user cancelled
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    break
+                
+                # Update progress
+                if progress_dialog:
+                    progress_dialog.setValue(i)
+                    progress_dialog.setLabelText(f"Deleting duplicate group {i+1} of {len(duplicate_hashes)}...")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
                 # Get all files with this hash, ordered by date (keep the earliest)
                 files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value).order_by(fitsFile.fitsFileDate)
                 files_list = list(files_with_hash)
@@ -3726,8 +4046,18 @@ class DuplicatesTab(QWidget):
                             logging.error(f"Error deleting file {fits_file.fitsFileName}: {str(e)}")
                             error_count += 1
             
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
             # Show results
-            if error_count == 0:
+            if was_cancelled:
+                QMessageBox.information(
+                    self, 
+                    "Deletion Cancelled", 
+                    f"Deletion was cancelled. {deleted_count} files were deleted before cancellation."
+                )
+            elif error_count == 0:
                 QMessageBox.information(
                     self, 
                     "Deletion Complete", 
@@ -3746,6 +4076,8 @@ class DuplicatesTab(QWidget):
             
         except Exception as e:
             logging.error(f"Error during duplicate deletion: {str(e)}")
+            if progress_dialog:
+                progress_dialog.close()
             QMessageBox.critical(
                 self, 
                 "Deletion Error", 
@@ -4374,6 +4706,9 @@ class AstroFilerGUI(QWidget):
         self.setWindowTitle("AstroFiler - Astronomy File Management Tool")
         self.resize(1000, 700)
         
+        # Center the window on the screen
+        self.center_on_screen()
+        
         # Main layout
         layout = QVBoxLayout(self)
         
@@ -4402,11 +4737,19 @@ class AstroFilerGUI(QWidget):
         self.tab_widget.setCurrentWidget(self.stats_tab)
         
         layout.addWidget(self.tab_widget)
-    
+
     def invalidate_stats_cache(self):
         """Helper method to invalidate stats cache from any tab"""
         if hasattr(self, 'stats_tab'):
             self.stats_tab.invalidate_stats_cache()
+    
+    def center_on_screen(self):
+        """Center the main window on the screen"""
+        screen = QApplication.primaryScreen().geometry()
+        window_geometry = self.frameGeometry()
+        center_point = screen.center()
+        window_geometry.moveCenter(center_point)
+        self.move(window_geometry.topLeft())
     
     def apply_initial_theme(self):
         """Apply dark theme as default"""
