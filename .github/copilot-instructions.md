@@ -22,9 +22,11 @@
 
 6. **Testing limitations**: Do not run functional tests or execute the application to verify changes unless explicitly requested by the user. Only perform syntax checking (e.g., `python -m py_compile`) to verify code correctness.
 
-7. **Change log maintenance**: For every significant change to the application, add to the end of the file only add bare minimum content - feature name and brief description. Do not add extra sections or verbose content.
+7. **Change log maintenance**: For every significant change to the application, update CHANGE_LOG.md by adding new features to the current version section. Add only bare minimum content - feature name and brief description. Do not add extra sections or verbose content.
 
-8. **Response style**: Keep responses concise and focused. Avoid lengthy summaries or detailed explanations unless specifically requested by the user.
+8. **Update change log for all significant changes**: When implementing new features, bug fixes, or UI improvements, always update the change log as part of the standard workflow.
+
+9. **Response style**: Keep responses concise and focused. Avoid lengthy summaries or detailed explanations unless specifically requested by the user.
 
 ### Rationale:
 - Ensures consistent dependency versions across development environments

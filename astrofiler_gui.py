@@ -97,6 +97,16 @@ class ImagesTab(QWidget):
         self.sort_combo.setMinimumWidth(80)
         self.sort_combo.setStyleSheet("QComboBox { padding: 3px; }")
         
+        # Add frame type filter control
+        filter_label = QLabel("Show:")
+        filter_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        self.frame_filter_combo = QComboBox()
+        self.frame_filter_combo.addItems(["Light Frames Only", "All Frames", "Calibration Frames Only"])
+        self.frame_filter_combo.setCurrentText("Light Frames Only")  # Set default to Light Frames Only
+        self.frame_filter_combo.setToolTip("Choose which frame types to display:\n• Light Frames Only: Show only light/science frames\n• All Frames: Show light and calibration frames\n• Calibration Frames Only: Show only dark, flat, and bias frames")
+        self.frame_filter_combo.setMinimumWidth(120)
+        self.frame_filter_combo.setStyleSheet("QComboBox { padding: 3px; }")
+        
         controls_layout.addWidget(self.load_repo_button)
         controls_layout.addWidget(self.sync_repo_button)
         controls_layout.addWidget(self.download_repo_button)
@@ -104,6 +114,8 @@ class ImagesTab(QWidget):
         controls_layout.addWidget(self.mapping_button)
         controls_layout.addWidget(self.refresh_button)
         controls_layout.addStretch()
+        controls_layout.addWidget(filter_label)
+        controls_layout.addWidget(self.frame_filter_combo)
         controls_layout.addWidget(sort_label)
         controls_layout.addWidget(self.sort_combo)
           # File list
@@ -132,6 +144,7 @@ class ImagesTab(QWidget):
         self.mapping_button.clicked.connect(self.open_mappings_dialog)
         self.refresh_button.clicked.connect(self.load_fits_data)
         self.sort_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when sort changes
+        self.frame_filter_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when filter changes
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
     
     def load_repo(self):
@@ -361,7 +374,7 @@ class ImagesTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
 
     def load_fits_data(self):
-        """Load FITS file data from the database and populate the tree widget based on selected sort criteria."""
+        """Load FITS file data from the database and populate the tree widget based on selected sort criteria and frame filter."""
         try:
             self.file_tree.clear()
 
@@ -372,27 +385,63 @@ class ImagesTab(QWidget):
             else:
                 sort_by = "Object"  # Default when UI isn't ready yet
             
-            if sort_by == "Object":
-                self._load_fits_data_by_object()
-            else:  # Date
-                self._load_fits_data_by_date()
+            # Get the current frame filter (default to Light Frames Only if UI not yet initialized)
+            frame_filter = getattr(self, 'frame_filter_combo', None)
+            if frame_filter is not None:
+                frame_filter = self.frame_filter_combo.currentText()
+            else:
+                frame_filter = "Light Frames Only"  # Default when UI isn't ready yet
             
-            logger.debug(f"FITS data loaded and organized by {sort_by}")
+            if sort_by == "Object":
+                self._load_fits_data_by_object(frame_filter)
+            else:  # Date
+                self._load_fits_data_by_date(frame_filter)
+            
+            logger.debug(f"FITS data loaded and organized by {sort_by} with filter: {frame_filter}")
                 
         except Exception as e:
             logger.error(f"Error loading FITS data: {e}")
             if "no such table" not in str(e).lower():
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
 
-    def _load_fits_data_by_object(self):
+    def _get_fits_files_query(self, frame_filter):
+        """Get the appropriate database query based on the frame filter selection."""
+        if frame_filter == "Light Frames Only":
+            # Only show files where fitsFileType contains "Light"
+            return FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light"))
+        elif frame_filter == "Calibration Frames Only":
+            # Show dark, flat, bias frames (anything that's not light)
+            return FitsFileModel.select().where(
+                (FitsFileModel.fitsFileType.contains("Dark")) |
+                (FitsFileModel.fitsFileType.contains("Flat")) |
+                (FitsFileModel.fitsFileType.contains("Bias"))
+            )
+        else:  # "All Frames"
+            # Show all files regardless of type
+            return FitsFileModel.select()
+
+    def _load_fits_data_by_object(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by object name, then by date."""
-        # Query all FITS files from the database where fitsFileType contains "Light"
-        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
+        # Get the appropriate query based on frame filter
+        fits_files = self._get_fits_files_query(frame_filter).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
 
         # Group files by object name and date
         objects_dict = {}
         for fits_file in fits_files:
             object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "Dark" in frame_type:
+                    object_name = "Dark Frames"
+                elif "Flat" in frame_type:
+                    object_name = "Flat Frames"
+                elif "Bias" in frame_type:
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
             date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
 
             if object_name not in objects_dict:
@@ -460,15 +509,28 @@ class ImagesTab(QWidget):
         else:
             logger.info("No FITS files found in database")
 
-    def _load_fits_data_by_date(self):
+    def _load_fits_data_by_date(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by date, then by object."""
-        # Query all FITS files from the database where fitsFileType contains "Light"
-        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject)
+        # Get the appropriate query based on frame filter
+        fits_files = self._get_fits_files_query(frame_filter).order_by(FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject)
 
         # Group files by date and object
         dates_dict = {}
         for fits_file in fits_files:
             object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "Dark" in frame_type:
+                    object_name = "Dark Frames"
+                elif "Flat" in frame_type:
+                    object_name = "Flat Frames"
+                elif "Bias" in frame_type:
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
             date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
 
             if date_str not in dates_dict:
