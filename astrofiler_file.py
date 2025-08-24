@@ -304,17 +304,12 @@ def mapFitsHeader(hdr, file_path):
                         hdr[card] = replace
                         header_modified = True
                         logger.info(f"Applied mapping for {card}: '{current}' → '{replace}' in {file_path}")
-                elif is_default and (not header_value or header_value.upper() in ['', 'UNKNOWN', 'NONE']):
+                elif not header_value or header_value.upper() in ['', 'UNKNOWN', 'NONE']:
                     # Default mapping - apply to blank/empty/unknown values
                     hdr[card] = replace
                     header_modified = True
                     logger.info(f"Applied default mapping for {card}: '{header_value}' → '{replace}' in {file_path}")
-            
-            elif is_default:
-                # Card doesn't exist and this is a default mapping - add the card
-                hdr[card] = replace
-                header_modified = True
-                logger.info(f"Added missing card {card} with default value '{replace}' in {file_path}")
+
         
         return header_modified
         
@@ -425,7 +420,15 @@ class fitsProcessing:
                 telescope=hdr["TELESCOP"]
             else:
                 telescope="Unknown"
-                    
+            
+            # Fix calibration frames where OBJECT is set to an object rather than the frametype
+            if "DARK" in hdr["IMAGETYP"].upper():
+                hdr["OBJECT"] = "Dark"
+            elif "FLAT" in hdr["IMAGETYP"].upper():
+                hdr["OBJECT"] = "Flat"
+            elif "BIAS" in hdr["IMAGETYP"].upper():
+                hdr["OBJECT"] = "Bias"
+
             # Create an os-friendly date
             try:
                 if "DATE-OBS" not in hdr:
@@ -560,7 +563,8 @@ class fitsProcessing:
                 else:
                     logger.warning("File already exists in repo, no changes - "+newPath+newName)
             else:
-                logger.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
+                if not moveFiles:
+                    logger.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
         else:
             logger.warning("File not added to repo - no IMAGETYP card - "+str(os.path.join(root, file)))
         

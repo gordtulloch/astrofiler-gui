@@ -6,6 +6,7 @@ from datetime import datetime
 
 import logging
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # Import necessary PySide6 modules
 from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal, QTimer
@@ -433,11 +434,11 @@ class ImagesTab(QWidget):
             # For calibration frames, use frame type as object if no object is set
             if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
                 frame_type = fits_file.fitsFileType or "Unknown"
-                if "Dark" in frame_type:
+                if "DARK" in frame_type.upper():
                     object_name = "Dark Frames"
-                elif "Flat" in frame_type:
+                elif "FLAT" in frame_type.upper():
                     object_name = "Flat Frames"
-                elif "Bias" in frame_type:
+                elif "BIAS" in frame_type.upper():
                     object_name = "Bias Frames"
                 else:
                     object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
@@ -522,11 +523,11 @@ class ImagesTab(QWidget):
             # For calibration frames, use frame type as object if no object is set
             if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
                 frame_type = fits_file.fitsFileType or "Unknown"
-                if "Dark" in frame_type:
+                if "DARK" in frame_type.upper():
                     object_name = "Dark Frames"
-                elif "Flat" in frame_type:
+                elif "FLAT" in frame_type.upper():
                     object_name = "Flat Frames"
-                elif "Bias" in frame_type:
+                elif "BIAS" in frame_type.upper():
                     object_name = "Bias Frames"
                 else:
                     object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
@@ -816,6 +817,7 @@ class TelescopeDownloadWorker(QThread):
                 return
             
             self.progress_updated.emit("Scanning network for SEESTAR telescope...")
+            logger.info("Scanning network for SEESTAR telescope...")
             self.progress_percent_updated.emit(5)
             
             ip, error = smart_telescope_manager.find_telescope(
@@ -829,9 +831,11 @@ class TelescopeDownloadWorker(QThread):
             
             if not ip:
                 self.error_occurred.emit(f"Failed to find telescope: {error}")
+                logger.error(f"Failed to find telescope: {error}")
                 return
             
             self.progress_updated.emit(f"Connected to SEESTAR at {ip}")
+            logger.info(f"Connected to SEESTAR at {ip}")
             self.progress_percent_updated.emit(10)
             
             # Step 2: Connect and get FITS files (20% of progress)
@@ -839,6 +843,7 @@ class TelescopeDownloadWorker(QThread):
                 return
             
             self.progress_updated.emit("Scanning SEESTAR for FITS files...")
+            logger.info("Scanning SEESTAR for FITS files...")
             self.progress_percent_updated.emit(15)
             
             fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
@@ -848,16 +853,20 @@ class TelescopeDownloadWorker(QThread):
             
             if error:
                 self.error_occurred.emit(f"Failed to get FITS files: {error}")
+                logger.error(f"Failed to get FITS files: {error}")
                 return
             
             if not fits_files:
                 self.download_completed.emit("No FITS files found on telescope.")
+                logger.info("No FITS files found on telescope.")
                 return
             
             self.progress_updated.emit(f"Found {len(fits_files)} FITS files to download")
+            logger.info(f"Found {len(fits_files)} FITS files to download")
             self.progress_percent_updated.emit(20)
             
             # Step 3: Create temp directory
+            logger.info("Creating temporary directory for downloads")
             if self._stop_requested:
                 return
             
@@ -885,6 +894,7 @@ class TelescopeDownloadWorker(QThread):
                 next_file_start = base_progress + ((i + 1) * file_progress_range // len(fits_files))
                 
                 self.progress_updated.emit(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")
+                logger.info(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")  
                 self.progress_percent_updated.emit(current_file_start)
                 
                 # Download file to temp directory
@@ -897,6 +907,7 @@ class TelescopeDownloadWorker(QThread):
                     file_percent = current_file_start + int((progress / 100) * (next_file_start - current_file_start) * 0.8)
                     self.progress_percent_updated.emit(file_percent)
                     self.progress_updated.emit(f"Downloading {file_name}: {progress:.1f}%")
+                    logger.info(f"Downloading {file_name}: {progress:.1f}%")
                     return True  # Continue downloading
                 
                 success, error = smart_telescope_manager.download_file(
@@ -911,9 +922,11 @@ class TelescopeDownloadWorker(QThread):
                     if "cancelled by user" in str(error).lower():
                         # Download was cancelled, break out of loop
                         self.progress_updated.emit("Download cancelled by user")
+                        logger.info("Download cancelled by user")
                         break
                     else:
                         self.progress_updated.emit(f"Failed to download {file_name}: {error}")
+                        logger.error(f"Failed to download {file_name}: {error}")
                         failed_downloads += 1
                         continue
                 
@@ -922,17 +935,20 @@ class TelescopeDownloadWorker(QThread):
                 # Check for cancellation immediately after download
                 if self._stop_requested:
                     self.progress_updated.emit("Download cancelled")
+                    logger.info("Download cancelled")
                     break
                 
                 # Processing phase (remaining 20% of this file's progress range)
                 processing_progress = current_file_start + int((next_file_start - current_file_start) * 0.8)
                 self.progress_updated.emit(f"Processing {file_name}...")
+                logger.info(f"Processing {file_name}...")
                 self.progress_percent_updated.emit(processing_progress)
                 
                 # Process the file with registerFitsImage
                 try:
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     
                     # Modify FITS headers before processing
@@ -940,10 +956,12 @@ class TelescopeDownloadWorker(QThread):
                     
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     
                     # Process file (this might take time, but we can't easily interrupt it)
                     self.progress_updated.emit(f"Adding {file_name} to repository...")
+                    logger.info(f"Adding {file_name} to repository...")
                     result = fits_processor.registerFitsImage(
                         os.path.dirname(local_path), 
                         file_name, 
@@ -952,36 +970,45 @@ class TelescopeDownloadWorker(QThread):
                     
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     
                     if result:
                         processed_files += 1
                         self.progress_updated.emit(f"Successfully processed {file_name}")
-                        
+                        logger.info(f"Successfully processed {file_name}")
+
                         # Delete file from host if requested
                         if self.delete_files:
                             if self._stop_requested:
                                 self.progress_updated.emit("Download cancelled")
+                                logger.info("Download cancelled")
                                 break
                             
                             self.progress_updated.emit(f"Deleting {file_name} from telescope...")
+                            logger.info(f"Deleting {file_name} from telescope...")
                             delete_success, delete_error = smart_telescope_manager.delete_file(
                                 self.telescope_type, ip, file_info
                             )
                             
                             if delete_success:
                                 self.progress_updated.emit(f"Successfully deleted {file_name} from telescope")
+                                logger.info(f"Successfully deleted {file_name} from telescope")
                             else:
                                 self.progress_updated.emit(f"Warning: Failed to delete {file_name} from telescope: {delete_error}")
+                                logger.error(f"Failed to delete {file_name} from telescope: {delete_error}")
                     else:
                         self.progress_updated.emit(f"Failed to process {file_name} (file may be invalid)")
-                        
+                        logger.error(f"Failed to process {file_name} (file may be invalid)")
+
                 except Exception as e:
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     self.progress_updated.emit(f"Error processing {file_name}: {str(e)}")
-                
+                    logger.error(f"Error processing {file_name}: {str(e)}")
+
                 # Update progress to next file start
                 self.progress_percent_updated.emit(next_file_start)
                 
@@ -995,9 +1022,11 @@ class TelescopeDownloadWorker(QThread):
             # Final completion
             if self._stop_requested:
                 self.progress_updated.emit("Download cancelled")
+                logger.info("Download cancelled")
                 return
             
             self.progress_updated.emit("Download complete!")
+            logger.info("Download complete!")
             self.progress_percent_updated.emit(100)
             
             # Step 5: Clean up temp directory
@@ -1014,12 +1043,14 @@ class TelescopeDownloadWorker(QThread):
                           f"Failed downloads: {failed_downloads}\n"
                           f"Successfully processed: {processed_files}\n\n"
                           f"Files have been moved to your repository and registered in the database.")
-                
+                logger.info(message)
+
                 self.download_completed.emit(message)
             
         except Exception as e:
             if not self._stop_requested:
                 self.error_occurred.emit(f"Unexpected error during download: {str(e)}")
+                logger.error(f"Unexpected error during download: {str(e)}")
 
 
 class SmartTelescopeDownloadDialog(QDialog):
@@ -1050,7 +1081,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         connection_group = QGroupBox("Connection Settings")
         connection_layout = QFormLayout(connection_group)
         
-        self.hostname_edit = QLineEdit("SEESTAR")
+        self.hostname_edit = QLineEdit("SEESTAR.local")
         self.hostname_edit.setToolTip("Hostname or IP address of the telescope")
         
         self.network_edit = QLineEdit()
@@ -1127,7 +1158,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         if current_telescope:
             telescope_type = current_telescope.text()
             if telescope_type == "SeeStar":
-                self.hostname_edit.setText("SEESTAR")
+                self.hostname_edit.setText("SEESTAR.local")
     
     def start_download(self):
         """Start the download process."""
@@ -1157,8 +1188,8 @@ class SmartTelescopeDownloadDialog(QDialog):
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
-            
-            if reply != QMessageBox.Yes:
+            if reply == QMessageBox.No:
+                logger.info("File deletion cancelled by user.")
                 return
         
         # Don't hide the main dialog yet - keep it alive for signal handling
@@ -2161,28 +2192,8 @@ class MappingsDialog(QDialog):
         self.scroll_area.setWidget(self.scroll_widget)
         layout.addWidget(self.scroll_area)
         
-        # Bottom checkboxes and buttons
+        # Bottom buttons
         bottom_layout = QVBoxLayout()
-        
-        # Checkboxes
-        checkbox_layout = QHBoxLayout()
-        self.apply_current_checkbox = QCheckBox("Apply to Database")
-        
-        # Get save_modified_headers setting from ini file
-        import configparser
-        config = configparser.ConfigParser()
-        try:
-            config.read('astrofiler.ini')
-            save_headers_default = config.getboolean('DEFAULT', 'save_modified_headers', fallback=True)
-        except:
-            save_headers_default = True
-        
-        self.update_files_checkbox = QCheckBox("Update Files on Disk")
-        self.update_files_checkbox.setChecked(save_headers_default)
-        
-        checkbox_layout.addWidget(self.apply_current_checkbox)
-        checkbox_layout.addWidget(self.update_files_checkbox)
-        bottom_layout.addLayout(checkbox_layout)
         
         # Dialog buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -2202,7 +2213,8 @@ class MappingsDialog(QDialog):
                 'TELESCOP': 'fitsFileTelescop',
                 'INSTRUME': 'fitsFileInstrument', 
                 'OBSERVER': None,  # Not currently in database
-                'NOTES': None      # Not currently in database
+                'NOTES': None,      # Not currently in database
+                'FILTER': 'fitsFileFilter',
             }
             
             field_name = field_mapping.get(card)
@@ -2229,7 +2241,7 @@ class MappingsDialog(QDialog):
         
         # Card dropdown
         card_combo = QComboBox()
-        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES"])
+        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES","FILTER"])
         card_combo.setCurrentText(card)
         card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
         
@@ -2473,7 +2485,15 @@ class MappingsDialog(QDialog):
                                         hdul.flush()
                                 except Exception as e:
                                     logger.error(f"Error updating FITS header for {fits_file.fitsFileName}: {e}")
-                
+
+                    # If user has requested that files be updated we also have to update folder name
+                    if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                        try:
+                            new_folder_name = mapping_to_apply['replace']
+                            os.rename(os.path.dirname(fits_file.fitsFileName), new_folder_name)
+                        except Exception as e:
+                            logger.error(f"Error updating folder name for {fits_file.fitsFileName}: {e}")
+
                 # Step 4: Clear cache and update UI (100%)
                 progress.setLabelText("Finalizing changes...")
                 progress.setValue(100)
@@ -2529,13 +2549,12 @@ class MappingsDialog(QDialog):
             logger.error(f"Error loading existing mappings: {e}")
     
     def accept_mappings(self):
-        """Save mappings and apply if requested"""
+        """Save mappings to database without applying them"""
         try:
             # Clear existing mappings
             MappingModel.delete().execute()
             
             # Save new mappings
-            mappings_to_apply = []
             for row_widget in self.mapping_rows:
                 card = row_widget.card_combo.currentText()
                 current = row_widget.current_combo.currentText()
@@ -2549,14 +2568,6 @@ class MappingsDialog(QDialog):
                     replace=replace if replace else None,
                     is_default=is_default
                 )
-                
-                # Store mapping for application
-                mappings_to_apply.append({
-                    'card': card,
-                    'current': current,
-                    'replace': replace,
-                    'is_default': is_default
-                })
             
             # Clear the mapping cache so file processing picks up new mappings
             try:
@@ -2564,13 +2575,6 @@ class MappingsDialog(QDialog):
                 clearMappingCache()
             except ImportError:
                 pass  # Function might not be available in older versions
-            
-            # Always apply database updates
-            self.apply_database_mappings(mappings_to_apply)
-            
-            # Apply file/folder changes if requested
-            if self.apply_current_checkbox.isChecked():
-                self.apply_file_folder_mappings(mappings_to_apply)
             
             self.accept()
             
