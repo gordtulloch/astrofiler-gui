@@ -13,10 +13,10 @@ logging.basicConfig(
     filemode='a'
 )
 
-# Reduce verbosity of SMB libraries
-logging.getLogger('SMB').setLevel(logging.WARNING)
-logging.getLogger('SMB.SMBConnection').setLevel(logging.WARNING)
-logging.getLogger('SMB.SMBProtocol').setLevel(logging.WARNING)
+# Reduce verbosity of some logging
+#logging.getLogger('SMB').setLevel(logging.WARNING)
+#logging.getLogger('SMB.SMBConnection').setLevel(logging.WARNING)
+#logging.getLogger('SMB.SMBProtocol').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
