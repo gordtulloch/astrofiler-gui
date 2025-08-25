@@ -506,10 +506,10 @@ class fitsProcessing:
             try:
                 # Check if we need to save header modifications
                 if header_modified and save_modified:
-                    hdu1l = fits.open(os.path.join(root, file), mode='update')
-                    hdul.flush()  # Save header changes to file
+                    hdul_update = fits.open(os.path.join(root, file), mode='update')
+                    hdul_update.flush()  # Save header changes to file
                     logger.info(f"Saved header modifications for {file}")
-                    hdul.close()
+                    hdul_update.close()
             except Exception as e:
                 logger.warning(f"Non-compliant header warning in {os.path.basename(__file__)} while processing file {os.path.join(root, file)}")
 

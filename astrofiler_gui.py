@@ -6,7 +6,6 @@ from datetime import datetime
 
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 # Import necessary PySide6 modules
 from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal, QTimer
@@ -16,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
                                QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy,
-                               QDialog, QDialogButtonBox, QGridLayout)
+                               QDialog, QDialogButtonBox, QGridLayout, QAbstractItemView)
 from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices, QIcon
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Mapping as MappingModel
@@ -1325,6 +1324,9 @@ class SessionsTab(QWidget):
         self.sessions_tree = QTreeWidget()
         self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager"])
         
+        # Enable multi-selection
+        self.sessions_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        
         # Set column widths for better display
         self.sessions_tree.setColumnWidth(0, 200)  # Object Name
         self.sessions_tree.setColumnWidth(1, 150)  # Date
@@ -1347,26 +1349,43 @@ class SessionsTab(QWidget):
         if not item:
             return
             
-        # Determine if this is a session item (child of an object)
-        parent = item.parent()
-        if not parent:
-            return  # This is a parent item (object name), not a session
+        # Get all selected items
+        selected_items = self.sessions_tree.selectedItems()
+        if not selected_items:
+            return
+            
+        # Check if all selected items are sessions (not parent objects) and are light sessions
+        valid_sessions = []
+        for selected_item in selected_items:
+            parent = selected_item.parent()
+            if not parent:
+                continue  # This is a parent item (object name), not a session
+                
+            # Check if this is a light session (not calibration)
+            object_name = parent.text(0)
+            if object_name not in ['Bias', 'Dark', 'Flat']:
+                valid_sessions.append(selected_item)
+        
+        if not valid_sessions:
+            return  # No valid light sessions selected
             
         # Create context menu
         context_menu = QMenu(self)
-        checkout_action = context_menu.addAction("Check out")
-        # don't really need delete action but maybe later
-        #delete_action = context_menu.addAction("Delete Session")
+        if len(valid_sessions) == 1:
+            checkout_action = context_menu.addAction("Check out")
+        else:
+            checkout_action = context_menu.addAction(f"Check out ({len(valid_sessions)} sessions)")
 
         # Show the menu and get the selected action
         action = context_menu.exec_(self.sessions_tree.viewport().mapToGlobal(position))
         
         if action == checkout_action:
-            logging.info(f"Checking out session: {item.text(0)} on {item.text(1)}")
-            self.checkout_session(item)
-        #elif action == delete_action:
-        #    logging.info(f"Deleting session: {item.text(0)} on {item.text(1)}")
-        #    self.delete_session(item)
+            if len(valid_sessions) == 1:
+                logging.info(f"Checking out session: {valid_sessions[0].parent().text(0)} on {valid_sessions[0].text(1)}")
+                self.checkout_session(valid_sessions[0])
+            else:
+                logging.info(f"Checking out {len(valid_sessions)} sessions")
+                self.checkout_multiple_sessions(valid_sessions)
 
     def checkout_session(self, item):
         """Create symbolic links for session files in a Siril-friendly format"""
@@ -1497,7 +1516,7 @@ class SessionsTab(QWidget):
             progress.setValue(100)
             
             # Create a simple Siril script
-            script_path = os.path.join(session_dir, "process.ssf")
+            """script_path = os.path.join(session_dir, "process.ssf")
             with open(script_path, "w") as f:
                 f.write(f"# Siril processing script for {object_name} {session_date}\n")
                 f.write("requires 1.0.0\n\n")
@@ -1520,13 +1539,13 @@ class SessionsTab(QWidget):
                 f.write("# Register light frames\n")
                 f.write("register pp_lights\n\n")
                 f.write("# Stack registered light frames\n")
-                f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
+                f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")"""
             
             # Display success message
             QMessageBox.information(
                 self, 
                 "Success", 
-                f"Created {created_links} symbolic links and Siril script in {session_dir}"
+                f"Created {created_links} symbolic links in {session_dir}"
             )
             
             # Open the directory
@@ -1535,6 +1554,172 @@ class SessionsTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create symbolic links: {str(e)}")
             logging.error(f"Error in checkout_session: {str(e)}")
+
+    def checkout_multiple_sessions(self, session_items):
+        """Create symbolic links for multiple sessions in a common directory structure"""
+        try:
+            # Ask user for destination directory
+            dest_dir = QFileDialog.getExistingDirectory(
+                self, 
+                "Select Destination Directory for Multiple Sessions",
+                os.path.expanduser("~"),
+                QFileDialog.ShowDirsOnly
+            )
+            
+            if not dest_dir:
+                return  # User cancelled
+            
+            # Create main checkout directory
+            checkout_dir = os.path.join(dest_dir, f"Sessions_Checkout_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            os.makedirs(checkout_dir, exist_ok=True)
+            
+            # Calculate total work for progress tracking
+            total_sessions = len(session_items)
+            current_session = 0
+            
+            # Progress dialog for overall operation
+            overall_progress = QProgressDialog("Processing sessions...", "Cancel", 0, total_sessions, self)
+            overall_progress.setWindowModality(Qt.WindowModal)
+            overall_progress.setWindowTitle("Checking Out Multiple Sessions")
+            
+            successful_sessions = 0
+            failed_sessions = []
+            
+            for session_item in session_items:
+                if overall_progress.wasCanceled():
+                    break
+                    
+                try:
+                    # Get session information
+                    session_date = session_item.text(1)
+                    object_name = session_item.parent().text(0)
+                    
+                    overall_progress.setLabelText(f"Processing {object_name} - {session_date}...")
+                    overall_progress.setValue(current_session)
+                    
+                    # Get the session from database
+                    session = FitsSessionModel.select().where(
+                        (FitsSessionModel.fitsSessionObjectName == object_name) & 
+                        (FitsSessionModel.fitsSessionDate == session_date)
+                    ).first()
+                    
+                    if not session:
+                        failed_sessions.append(f"{object_name} - {session_date}: Not found in database")
+                        continue
+                    
+                    # Create session-specific directory
+                    session_dir = os.path.join(checkout_dir, f"{object_name}_{session_date.replace(':', '-')}")
+                    light_dir = os.path.join(session_dir, "lights")
+                    dark_dir = os.path.join(session_dir, "darks")
+                    flat_dir = os.path.join(session_dir, "flats")
+                    bias_dir = os.path.join(session_dir, "bias")
+                    process_dir = os.path.join(session_dir, "process")
+                    
+                    # Create directories
+                    os.makedirs(light_dir, exist_ok=True)
+                    os.makedirs(dark_dir, exist_ok=True)
+                    os.makedirs(flat_dir, exist_ok=True)
+                    os.makedirs(bias_dir, exist_ok=True)
+                    os.makedirs(process_dir, exist_ok=True)
+                    
+                    # Get files
+                    light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
+                    dark_files = []
+                    bias_files = []
+                    flat_files = []
+                    
+                    # Get calibration files
+                    if session.fitsBiasSession:
+                        bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
+                    if session.fitsDarkSession:
+                        dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
+                    if session.fitsFlatSession:
+                        flat_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsFlatSession)
+                    
+                    # Create symbolic links
+                    all_files = list(light_files) + list(dark_files) + list(bias_files) + list(flat_files)
+                    session_links = 0
+                    
+                    for file in all_files:
+                        # Determine destination directory based on file type
+                        if "LIGHT" in file.fitsFileType.upper():
+                            dest_folder = light_dir
+                        elif "DARK" in file.fitsFileType.upper():
+                            dest_folder = dark_dir
+                        elif "FLAT" in file.fitsFileType.upper():
+                            dest_folder = flat_dir
+                        elif "BIAS" in file.fitsFileType.upper():
+                            dest_folder = bias_dir
+                        else:
+                            continue
+                        
+                        filename = os.path.basename(file.fitsFileName)
+                        dest_path = os.path.join(dest_folder, filename)
+                        
+                        try:
+                            if not os.path.exists(dest_path):
+                                if sys.platform == "win32":
+                                    import subprocess
+                                    subprocess.run(["mklink", dest_path, file.fitsFileName], shell=True)
+                                else:
+                                    os.symlink(file.fitsFileName, dest_path)
+                                session_links += 1
+                        except Exception as e:
+                            logging.error(f"Error creating link for {file.fitsFileName}: {e}")
+                    
+                    # Create Siril script
+                    script_path = os.path.join(session_dir, "process.ssf")
+                    with open(script_path, "w") as f:
+                        f.write(f"# Siril processing script for {object_name} {session_date}\n")
+                        f.write("requires 1.0.0\n\n")
+                        f.write("# Convert to .fit files\n")
+                        f.write("cd lights\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../darks\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../flats\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../bias\n")
+                        f.write("convert fits\n")
+                        f.write("cd ..\n\n")
+                        f.write("# Stack calibration frames\n")
+                        f.write("stack darks rej 3 3 -nonorm\n")
+                        f.write("stack bias rej 3 3 -nonorm\n")
+                        f.write("stack flats rej 3 3 -norm=mul\n\n")
+                        f.write("# Calibrate light frames\n")
+                        f.write("calibrate lights bias=bias_stacked flat=flat_stacked dark=dark_stacked\n\n")
+                        f.write("# Register light frames\n")
+                        f.write("register pp_lights\n\n")
+                        f.write("# Stack registered light frames\n")
+                        f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
+                    
+                    successful_sessions += 1
+                    logging.info(f"Successfully processed session {object_name} - {session_date} with {session_links} links")
+                    
+                except Exception as e:
+                    failed_sessions.append(f"{object_name} - {session_date}: {str(e)}")
+                    logging.error(f"Error processing session {object_name} - {session_date}: {e}")
+                
+                current_session += 1
+            
+            overall_progress.setValue(total_sessions)
+            
+            # Show results
+            message = f"Successfully processed {successful_sessions} out of {total_sessions} sessions."
+            if failed_sessions:
+                message += f"\n\nFailed sessions:\n" + "\n".join(failed_sessions)
+            
+            if successful_sessions > 0:
+                message += f"\n\nFiles created in: {checkout_dir}"
+                QMessageBox.information(self, "Multiple Sessions Checkout Complete", message)
+                # Open the directory
+                QDesktopServices.openUrl(QUrl.fromLocalFile(checkout_dir))
+            else:
+                QMessageBox.warning(self, "Multiple Sessions Checkout Failed", message)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to checkout multiple sessions: {str(e)}")
+            logging.error(f"Error in checkout_multiple_sessions: {str(e)}")
 
     def update_sessions(self):
         """Update light sessions by running createLightSessions method with progress dialog."""
@@ -2060,7 +2245,7 @@ class SessionsTab(QWidget):
                         step_progress = int((current / total) * 25) if total > 0 else 0
                         overall_progress = 50 + step_progress
                         progress_dialog.setValue(overall_progress)
-                        progress_dialog.setLabelText(f"Step 3/4: Creating calibration sessions {current}/{total}: {filename}")
+                        progress_dialog.setLabelText(f"Step 3/4: Creating calibration sessions {current}/{total}: {os.path.basename(filename)}")
                         QApplication.processEvents()
                     
                     return not was_cancelled
