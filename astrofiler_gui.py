@@ -816,8 +816,8 @@ class TelescopeDownloadWorker(QThread):
             if self._stop_requested:
                 return
             
-            self.progress_updated.emit("Scanning network for SEESTAR telescope...")
-            logger.info("Scanning network for SEESTAR telescope...")
+            self.progress_updated.emit("Scanning network for SeeStar telescope (mDNS only)...")
+            logger.info("Scanning network for SeeStar telescope (mDNS only)...")
             self.progress_percent_updated.emit(5)
             
             ip, error = smart_telescope_manager.find_telescope(
@@ -834,16 +834,16 @@ class TelescopeDownloadWorker(QThread):
                 logger.error(f"Failed to find telescope: {error}")
                 return
             
-            self.progress_updated.emit(f"Connected to SEESTAR at {ip}")
-            logger.info(f"Connected to SEESTAR at {ip}")
+            self.progress_updated.emit(f"Connected to SeeStar at {ip}")
+            logger.info(f"Connected to SeeStar at {ip}")
             self.progress_percent_updated.emit(10)
             
             # Step 2: Connect and get FITS files (20% of progress)
             if self._stop_requested:
                 return
             
-            self.progress_updated.emit("Scanning SEESTAR for FITS files...")
-            logger.info("Scanning SEESTAR for FITS files...")
+            self.progress_updated.emit("Scanning SeeStar for FITS files...")
+            logger.info("Scanning SeeStar for FITS files...")
             self.progress_percent_updated.emit(15)
             
             fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
@@ -1081,7 +1081,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         connection_group = QGroupBox("Connection Settings")
         connection_layout = QFormLayout(connection_group)
         
-        self.hostname_edit = QLineEdit("SEESTAR.local")
+        self.hostname_edit = QLineEdit("seestar.local")
         self.hostname_edit.setToolTip("Hostname or IP address of the telescope")
         
         self.network_edit = QLineEdit()
@@ -1158,7 +1158,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         if current_telescope:
             telescope_type = current_telescope.text()
             if telescope_type == "SeeStar":
-                self.hostname_edit.setText("SEESTAR.local")
+                self.hostname_edit.setText("seestar.local")
     
     def start_download(self):
         """Start the download process."""
@@ -1196,7 +1196,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         # self.hide()  # Comment this out for now
         
         # Create and show progress dialog with proper parent
-        self.progress_dialog = QProgressDialog("Connecting to SEESTAR...", "Cancel", 0, 100, self)
+        self.progress_dialog = QProgressDialog("Connecting to SeeStar...", "Cancel", 0, 100, self)
         self.progress_dialog.setWindowTitle("Downloading from Smart Telescope")
         self.progress_dialog.setWindowModality(Qt.ApplicationModal)  # Changed to ApplicationModal
         self.progress_dialog.setMinimumDuration(0)
