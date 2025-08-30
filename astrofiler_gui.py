@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import configparser
 import datetime
 from datetime import datetime
@@ -964,7 +965,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         connection_group = QGroupBox("Connection Settings")
         connection_layout = QFormLayout(connection_group)
         
-        self.hostname_edit = QLineEdit("SEESTAR")
+        self.hostname_edit = QLineEdit("SEESTAR.local")
         self.hostname_edit.setToolTip("Hostname or IP address of the telescope")
         
         self.network_edit = QLineEdit()
@@ -1041,7 +1042,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         if current_telescope:
             telescope_type = current_telescope.text()
             if telescope_type == "SeeStar":
-                self.hostname_edit.setText("SEESTAR")
+                self.hostname_edit.setText("SEESTAR.local")
     
     def start_download(self):
         """Start the download process."""
@@ -1271,26 +1272,41 @@ class SessionsTab(QWidget):
                 logging.info(f"Found session: {object_name} on {session_date}")
             # Get light files
             light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
-            
+
             # Get calibration files if this is a light session
             dark_files = []
             bias_files = []
             flat_files = []
-            
+
             if object_name not in ['Bias', 'Dark', 'Flat']:
                 # Get linked calibration files
                 if session.fitsBiasSession:
                     bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
                     logging.info(f"Found {bias_files.count()} bias files")
-                    
+
                 if session.fitsDarkSession:
                     dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
                     logging.info(f"Found {dark_files.count()} dark files")
-                    
-                if session.fitsFlatSession:
-                    flat_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsFlatSession)
-                    logging.info(f"Found {flat_files.count()} flat files")
-            
+
+                # Get all unique filters used in light frames
+                filters = set([lf.fitsFileFilter for lf in light_files if lf.fitsFileFilter])
+                logging.info(f"Filters used in light frames: {filters}")
+                from astrofiler_db import fitsSession as FitsSessionModel, fitsFile as FitsFileModel
+                for filter_name in filters:
+                    # Find flat session(s) matching this filter and other session parameters
+                    flat_sessions = FitsSessionModel.select().where(
+                        (FitsSessionModel.fitsSessionObjectName == 'Flat') &
+                        (FitsSessionModel.fitsSessionTelescope == session.fitsSessionTelescope) &
+                        (FitsSessionModel.fitsSessionImager == session.fitsSessionImager) &
+                        (FitsSessionModel.fitsSessionBinningX == session.fitsSessionBinningX) &
+                        (FitsSessionModel.fitsSessionBinningY == session.fitsSessionBinningY) &
+                        (FitsSessionModel.fitsSessionFilter == filter_name)
+                    )
+                    for flat_session in flat_sessions:
+                        these_flats = FitsFileModel.select().where(FitsFileModel.fitsFileSession == flat_session.fitsSessionId)
+                        flat_files.extend(list(these_flats))
+                        logging.info(f"Found {these_flats.count()} flat files for filter {filter_name}")
+
             # Combine all files for progress tracking
             all_files = list(light_files) + list(dark_files) + list(bias_files) + list(flat_files)
             total_files = len(all_files)
@@ -2116,7 +2132,8 @@ class MappingsDialog(QDialog):
                 'TELESCOP': 'fitsFileTelescop',
                 'INSTRUME': 'fitsFileInstrument', 
                 'OBSERVER': None,  # Not currently in database
-                'NOTES': None      # Not currently in database
+                'NOTES': None,     # Not currently in database
+                'FILTER': 'fitsFileFilter'
             }
             
             field_name = field_mapping.get(card)
@@ -2154,11 +2171,7 @@ class MappingsDialog(QDialog):
         # Replace text field
         replace_edit = QLineEdit()
         replace_edit.setText(replace)
-        
-        # Default checkbox
-        default_checkbox = QCheckBox()
-        default_checkbox.setChecked(is_default)
-        
+              
         # Delete button (trash icon)
         delete_button = QPushButton("🗑")
         delete_button.setMaximumWidth(30)
@@ -2191,15 +2204,12 @@ class MappingsDialog(QDialog):
         row_layout.addWidget(current_combo, 0, 3)
         row_layout.addWidget(QLabel("Replace:"), 0, 4)
         row_layout.addWidget(replace_edit, 0, 5)
-        row_layout.addWidget(QLabel("Default:"), 0, 6)
-        row_layout.addWidget(default_checkbox, 0, 7)
         row_layout.addWidget(delete_button, 0, 8)
         
         # Store references
         row_widget.card_combo = card_combo
         row_widget.current_combo = current_combo
         row_widget.replace_edit = replace_edit
-        row_widget.default_checkbox = default_checkbox
         
         # Update current values for initial card
         self.update_current_values(row_widget)
@@ -2208,6 +2218,329 @@ class MappingsDialog(QDialog):
         # Add to scroll layout
         self.scroll_layout.addWidget(row_widget)
         self.mapping_rows.append(row_widget)
+
+    def add_mapping_row(self, card="TELESCOP", current="", replace=""):
+        """Add a new mapping row to the dialog"""
+        row_widget = QWidget()
+        row_layout = QGridLayout(row_widget)
+
+        # Card dropdown
+        card_combo = QComboBox()
+        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES", "FILTER"])
+        card_combo.setCurrentText(card)
+        card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
+
+        # Current dropdown
+        current_combo = QComboBox()
+        current_combo.setEditable(True)
+
+        # Replace text field
+        replace_edit = QLineEdit()
+        replace_edit.setText(replace)
+
+        # Apply button for this row
+        apply_button = QPushButton("✓")
+        apply_button.setMaximumWidth(30)
+        apply_button.setToolTip("Apply this mapping to database and files")
+        apply_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #44aa44;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-size: 14px;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #66cc66;
+                border: 1px solid #44aa44;
+            }
+            QPushButton:pressed {
+                background-color: #1d1d1d;
+                color: #22aa22;
+            }
+        """)
+        apply_button.clicked.connect(lambda: self.apply_single_mapping(row_widget))
+
+        # Delete button (trash icon)
+        delete_button = QPushButton("🗑")
+        delete_button.setMaximumWidth(30)
+        delete_button.setToolTip("Delete this mapping")
+        delete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ff4444;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-size: 14px;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #ff6666;
+                border: 1px solid #ff4444;
+            }
+            QPushButton:pressed {
+                background-color: #1d1d1d;
+                color: #ff2222;
+            }
+        """)
+        delete_button.clicked.connect(lambda: self.delete_mapping_row(row_widget))
+
+        # Add to layout
+        row_layout.addWidget(QLabel("Card:"), 0, 0)
+        row_layout.addWidget(card_combo, 0, 1)
+        row_layout.addWidget(QLabel("Current:"), 0, 2)
+        row_layout.addWidget(current_combo, 0, 3)
+        row_layout.addWidget(QLabel("Replace:"), 0, 4)
+        row_layout.addWidget(replace_edit, 0, 5)
+        row_layout.addWidget(apply_button, 0, 6)
+        row_layout.addWidget(delete_button, 0, 7)
+
+        # Store references
+        row_widget.card_combo = card_combo
+        row_widget.current_combo = current_combo
+        row_widget.replace_edit = replace_edit
+
+        # Update current values for initial card
+        self.update_current_values(row_widget)
+        current_combo.setCurrentText(current)
+
+        # Add to scroll layout
+        self.scroll_layout.addWidget(row_widget)
+        self.mapping_rows.append(row_widget)
+
+    def apply_single_mapping(self, row_widget):
+        """Apply the mapping in this row to the database and files"""
+        card = row_widget.card_combo.currentText()
+        current = row_widget.current_combo.currentText()
+        replace = row_widget.replace_edit.text()
+
+        # Validate inputs
+        if not current or not replace:
+            QMessageBox.warning(self, "Invalid Mapping", "Both 'Current' and 'Replace' values must be provided.")
+            return
+
+        # Count affected records
+        field_mapping = {
+            'TELESCOP': 'fitsFileTelescop',
+            'INSTRUME': 'fitsFileInstrument',
+            'OBSERVER': None,
+            'NOTES': None,
+            'FILTER': 'fitsFileFilter'
+        }
+        field_name = field_mapping.get(card)
+        
+        affected_count = 0
+        if field_name:
+            from astrofiler_db import fitsFile as FitsFileModel
+            query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == current)
+            affected_count = query.count()
+
+        if affected_count == 0:
+            QMessageBox.information(self, "No Records Found", f"No records found with {card} = '{current}'")
+            return
+
+        # Show confirmation dialog
+        actions = []
+        actions.append(f"Database Updates: {affected_count} records")
+        
+        if self.update_files_checkbox.isChecked():
+            actions.append(f"File Header Updates: {affected_count} files")
+            if card == 'FILTER':
+                actions.append(f"File/Folder Rename Updates: {affected_count} files (filter paths and filenames)")
+
+        confirmation_text = f"Apply mapping: {card} '{current}' → '{replace}'\n\n"
+        confirmation_text += "Actions to be performed:\n"
+        confirmation_text += "\n".join(f"• {action}" for action in actions)
+        if card == 'FILTER' and self.update_files_checkbox.isChecked():
+            confirmation_text += f"\n\nNote: FILTER mapping will rename files and move them to new filter-specific folders."
+        confirmation_text += f"\n\nProceed with these changes?"
+
+        reply = QMessageBox.question(
+            self, 
+            "Confirm Mapping Application",
+            confirmation_text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        # Create progress dialog
+        progress_dialog = QProgressDialog("Applying mapping...", "Cancel", 0, 100, self)
+        progress_dialog.setWindowTitle("Applying Mapping")
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.show()
+
+        try:
+            total_steps = 1  # Database updates
+            if self.update_files_checkbox.isChecked():
+                total_steps += 1  # File header updates
+                if card == 'FILTER':
+                    total_steps += 1  # File/folder rename updates for FILTER
+
+            current_step = 0
+            
+            # Step 1: Database Updates
+            progress_dialog.setLabelText(f"Database Updates: 0/{affected_count}")
+            progress_dialog.setValue(0)
+            QApplication.processEvents()
+
+            if field_name:
+                query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == current)
+                updated_count = 0
+                for i, record in enumerate(query):
+                    if progress_dialog.wasCanceled():
+                        break
+                    
+                    setattr(record, field_name, replace)
+                    record.save()
+                    updated_count += 1
+                    
+                    # Update progress
+                    step_progress = int((i + 1) / affected_count * 100 / total_steps)
+                    overall_progress = int(current_step / total_steps * 100) + step_progress
+                    progress_dialog.setValue(overall_progress)
+                    progress_dialog.setLabelText(f"Database Updates: {updated_count}/{affected_count}")
+                    QApplication.processEvents()
+
+                logger.info(f"Applied mapping: {card} '{current}' → '{replace}' to {updated_count} database records.")
+
+            current_step += 1
+
+            # Step 2: File Header Updates (if enabled)
+            if self.update_files_checkbox.isChecked() and not progress_dialog.wasCanceled():
+                progress_dialog.setLabelText(f"File Header Updates: 0/{affected_count}")
+                QApplication.processEvents()
+
+                # Get the files to update
+                if field_name:
+                    query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == current)
+                    updated_files = 0
+                    
+                    for i, record in enumerate(query):
+                        if progress_dialog.wasCanceled():
+                            break
+                        
+                        try:
+                            # Update the FITS file header
+                            file_path = record.fitsFileName
+                            if os.path.exists(file_path):
+                                # Open FITS file and update header
+                                from astropy.io import fits
+                                with fits.open(file_path, mode='update') as hdul:
+                                    hdr = hdul[0].header
+                                    if card in hdr:
+                                        old_value = hdr[card]
+                                        if str(old_value).strip() == current:
+                                            hdr[card] = replace
+                                            hdul.flush()
+                                            logger.info(f"Updated {card} in {file_path}: '{current}' → '{replace}'")
+                                            updated_files += 1
+                            else:
+                                logger.warning(f"File not found for header update: {file_path}")
+                                
+                        except Exception as e:
+                            logger.error(f"Error updating file header for {record.fitsFileName}: {e}")
+                        
+                        # Update progress
+                        step_progress = int((i + 1) / affected_count * 100 / total_steps)
+                        overall_progress = int(current_step / total_steps * 100) + step_progress
+                        progress_dialog.setValue(overall_progress)
+                        progress_dialog.setLabelText(f"File Header Updates: {i + 1}/{affected_count}")
+                        QApplication.processEvents()
+
+                    logger.info(f"Updated file headers for mapping: {card} '{current}' → '{replace}' on {updated_files} files")
+                else:
+                    logger.info(f"No file header updates needed for {card} field (not stored in database)")
+
+            # Step 3: File and Folder Rename Updates (if FILTER mapping affects filenames/paths)
+            if (self.update_files_checkbox.isChecked() and 
+                not progress_dialog.wasCanceled() and 
+                card == 'FILTER' and field_name):
+                
+                current_step += 1
+                progress_dialog.setLabelText(f"File/Folder Rename Updates: 0/{affected_count}")
+                QApplication.processEvents()
+
+                # Get the files that need renaming
+                query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == replace)  # Files now have the new value
+                renamed_files = 0
+                
+                for i, record in enumerate(query):
+                    if progress_dialog.wasCanceled():
+                        break
+                    
+                    try:
+                        old_path = record.fitsFileName
+                        if os.path.exists(old_path):
+                            # Update filename and folder path for FILTER changes
+                            old_dir = os.path.dirname(old_path)
+                            old_filename = os.path.basename(old_path)
+                            
+                            # Replace old filter in folder path
+                            new_dir = old_dir.replace(f"/{current}/", f"/{replace}/")
+                            
+                            # Replace old filter in filename
+                            new_filename = old_filename.replace(f"-{current}-", f"-{replace}-")
+                            
+                            new_path = os.path.join(new_dir, new_filename)
+                            
+                            # Only rename if path actually changed
+                            if new_path != old_path:
+                                # Create new directory if needed
+                                os.makedirs(new_dir, exist_ok=True)
+                                
+                                # Move file
+                                shutil.move(old_path, new_path)
+                                
+                                # Update database with new path
+                                record.fitsFileName = new_path
+                                record.save()
+                                
+                                logger.info(f"Renamed file: {old_path} → {new_path}")
+                                renamed_files += 1
+                                
+                                # Clean up empty directories
+                                try:
+                                    if os.path.isdir(old_dir) and not os.listdir(old_dir):
+                                        os.rmdir(old_dir)
+                                        logger.info(f"Removed empty directory: {old_dir}")
+                                except OSError:
+                                    pass  # Directory not empty or other issue
+                        else:
+                            logger.warning(f"File not found for rename: {old_path}")
+                            
+                    except Exception as e:
+                        logger.error(f"Error renaming file {record.fitsFileName}: {e}")
+                    
+                    # Update progress
+                    step_progress = int((i + 1) / affected_count * 100 / total_steps)
+                    overall_progress = int(current_step / total_steps * 100) + step_progress
+                    progress_dialog.setValue(overall_progress)
+                    progress_dialog.setLabelText(f"File/Folder Rename Updates: {i + 1}/{affected_count}")
+                    QApplication.processEvents()
+
+                logger.info(f"Renamed {renamed_files} files/folders for FILTER mapping: '{current}' → '{replace}'")
+
+            # Complete
+            if not progress_dialog.wasCanceled():
+                progress_dialog.setValue(100)
+                progress_dialog.setLabelText("Mapping application complete!")
+                QApplication.processEvents()
+                
+                QMessageBox.information(self, "Success", f"Mapping applied successfully!\n\nUpdated {affected_count} records.")
+
+        except Exception as e:
+            logger.error(f"Error applying mapping: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying mapping: {str(e)}")
+        
+        finally:
+            progress_dialog.close()
     
     def update_current_values(self, row_widget):
         """Update the current values dropdown when card changes"""
@@ -2240,8 +2573,7 @@ class MappingsDialog(QDialog):
                 self.add_mapping_row(
                     card=mapping.card,
                     current=mapping.current or "",
-                    replace=mapping.replace or "",
-                    is_default=mapping.is_default
+                    replace=mapping.replace or ""
                 )
         except Exception as e:
             logger.error(f"Error loading existing mappings: {e}")
@@ -2258,21 +2590,18 @@ class MappingsDialog(QDialog):
                 card = row_widget.card_combo.currentText()
                 current = row_widget.current_combo.currentText()
                 replace = row_widget.replace_edit.text()
-                is_default = row_widget.default_checkbox.isChecked()
                 
                 MappingModel.create(
                     card=card,
                     current=current if current else None,
-                    replace=replace if replace else None,
-                    is_default=is_default
+                    replace=replace if replace else None
                 )
                 
                 # Store mapping for application
                 mappings_to_apply.append({
                     'card': card,
                     'current': current,
-                    'replace': replace,
-                    'is_default': is_default
+                    'replace': replace
                 })
             
             # Clear the mapping cache so file processing picks up new mappings

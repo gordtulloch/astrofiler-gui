@@ -288,33 +288,21 @@ def mapFitsHeader(hdr, file_path):
             card = mapping.card
             current = mapping.current
             replace = mapping.replace
-            is_default = mapping.is_default
-            
             # Skip mappings without a replacement value
             if not replace:
                 continue
-            
+
             # Check if this card exists in the header
             if card in hdr:
                 header_value = str(hdr[card]).strip()
-                
+
                 if current:
                     # Specific value mapping - replace if current value matches
                     if header_value == current:
                         hdr[card] = replace
                         header_modified = True
                         logger.info(f"Applied mapping for {card}: '{current}' → '{replace}' in {file_path}")
-                elif is_default and (not header_value or header_value.upper() in ['', 'UNKNOWN', 'NONE']):
-                    # Default mapping - apply to blank/empty/unknown values
-                    hdr[card] = replace
-                    header_modified = True
-                    logger.info(f"Applied default mapping for {card}: '{header_value}' → '{replace}' in {file_path}")
-            
-            elif is_default:
-                # Card doesn't exist and this is a default mapping - add the card
-                hdr[card] = replace
-                header_modified = True
-                logger.info(f"Added missing card {card} with default value '{replace}' in {file_path}")
+            # No default mapping logic
         
         return header_modified
         
@@ -681,53 +669,66 @@ class fitsProcessing:
         # How many unassigned_files are there?
         logger.info("createSessions found "+str(len(unassigned_files))+" unassigned files to session")
 
-        # Loop through each unassigned file and create a session each time the object changes
-        currentObject= ""
+        # Loop through each unassigned file and create a session each time the object, date, or filter changes
+        currentObject = ""
+        currentDate = None
+        currentFilter = None
+        currentSessionId = None
         total_files = len(unassigned_files)
         current_count = 0
-    
+
         for currentFitsFile in unassigned_files:
             current_count += 1
-            
+
             # Call progress callback if provided
             if progress_callback:
                 should_continue = progress_callback(current_count, total_files, str(currentFitsFile.fitsFileName))
                 if not should_continue:
                     logger.info("Session creation cancelled by user")
                     break
-            
-            logger.info("Current Object is "+currentFitsFile.fitsFileObject+" with date "+str(currentFitsFile.fitsFileDate))
+
+            logger.info("Current Object is "+str(currentFitsFile.fitsFileObject)+", date "+str(currentFitsFile.fitsFileDate)+", filter "+str(currentFitsFile.fitsFileFilter))
             logger.info("Processing "+str(currentFitsFile.fitsFileName))
 
-            # If the object name or date has changed, create a new session
-            if str(currentFitsFile.fitsFileObject) != currentObject or self.dateToDateField(currentFitsFile.fitsFileDate) != currentDate:
+            # If the object name, date, or filter has changed, create a new session
+            fits_date = self.dateToDateField(currentFitsFile.fitsFileDate)
+            fits_filter = currentFitsFile.fitsFileFilter
+            if (str(currentFitsFile.fitsFileObject) != currentObject or
+                fits_date != currentDate or
+                fits_filter != currentFilter):
                 # Create a new fitsSession record
                 currentSessionId = uuid.uuid4()
-                currentDate = self.dateToDateField(currentFitsFile.fitsFileDate)
+                currentDate = fits_date
+                currentFilter = fits_filter
 
                 try:
-                    newFitsSession=fitsSessionModel.create(fitsSessionId=currentSessionId,
-                                                    fitsSessionObjectName=currentFitsFile.fitsFileObject,
-                                                    fitsSessionTelescope=currentFitsFile.fitsFileTelescop,
-                                                    fitsSessionImager=currentFitsFile.fitsFileInstrument,
-                                                    fitsSessionDate=self.dateToDateField(currentFitsFile.fitsFileDate),
-                                                    fitsSessionExposure=currentFitsFile.fitsFileExpTime,
-                                                    fitsSessionBinningX=currentFitsFile.fitsFileXBinning,
-                                                    fitsSessionBinningY=currentFitsFile.fitsFileYBinning,
-                                                    fitsSessionCCDTemp=currentFitsFile.fitsFileCCDTemp,
-                                                    fitsSessionGain=currentFitsFile.fitsFileGain,
-                                                    fitsSessionOffset=currentFitsFile.fitsFileOffset,
-                                                    fitsSessionFilter=currentFitsFile.fitsFileFilter,
-                                                    fitsBiasSession=None,fitsDarkSession=None,fitsFlatSession=None)
+                    newFitsSession = fitsSessionModel.create(
+                        fitsSessionId=currentSessionId,
+                        fitsSessionObjectName=currentFitsFile.fitsFileObject,
+                        fitsSessionTelescope=currentFitsFile.fitsFileTelescop,
+                        fitsSessionImager=currentFitsFile.fitsFileInstrument,
+                        fitsSessionDate=fits_date,
+                        fitsSessionExposure=currentFitsFile.fitsFileExpTime,
+                        fitsSessionBinningX=currentFitsFile.fitsFileXBinning,
+                        fitsSessionBinningY=currentFitsFile.fitsFileYBinning,
+                        fitsSessionCCDTemp=currentFitsFile.fitsFileCCDTemp,
+                        fitsSessionGain=currentFitsFile.fitsFileGain,
+                        fitsSessionOffset=currentFitsFile.fitsFileOffset,
+                        fitsSessionFilter=fits_filter,
+                        fitsBiasSession=None,
+                        fitsDarkSession=None,
+                        fitsFlatSession=None
+                    )
                     sessionsCreated.append(currentSessionId)
                     logger.info("New session created for "+str(newFitsSession.fitsSessionId))
                 except IntegrityError as e:
                     # Handle the integrity error
                     logger.error("IntegrityError: "+str(e))
-                    continue     
+                    continue
                 currentObject = str(currentFitsFile.fitsFileObject)
+
             # Assign the current session to the fits file
-            currentFitsFile.fitsFileSession=currentSessionId
+            currentFitsFile.fitsFileSession = currentSessionId
             currentFitsFile.save()
             logger.info("Assigned "+str(currentFitsFile.fitsFileName)+" to session "+str(currentSessionId))
             sessionsCreated.append(currentSessionId)
@@ -1017,46 +1018,27 @@ class fitsProcessing:
                 
                 # Find most recent dark session with matching telescope/imager/binning/exposure/gain/offset/ccd_temp (within 5 degrees)
                 if not light_session.fitsDarkSession:
-                    # For CCD temperature matching, we need to use a custom query with temperature tolerance
-                    dark_sessions = (fitsSessionModel
-                                   .select()
-                                   .where(fitsSessionModel.fitsSessionObjectName == 'Dark',
-                                         fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
-                                         fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
-                                         fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
-                                         fitsSessionModel.fitsSessionBinningX == light_x_binning,
-                                         fitsSessionModel.fitsSessionBinningY == light_y_binning,
-                                         fitsSessionModel.fitsSessionExposure == light_exp_time,
-                                         fitsSessionModel.fitsSessionGain == light_gain,
-                                         fitsSessionModel.fitsSessionOffset == light_offset)
-                                   .order_by(fitsSessionModel.fitsSessionDate.desc()))
-                    
-                    # Filter by CCD temperature tolerance (within 5 degrees)
-                    dark_session = None
-                    if light_ccd_temp is not None:
-                        try:
-                            light_temp_float = float(light_ccd_temp)
-                            for candidate in dark_sessions:
-                                if candidate.fitsSessionCCDTemp is not None:
-                                    try:
-                                        dark_temp_float = float(candidate.fitsSessionCCDTemp)
-                                        if abs(light_temp_float - dark_temp_float) <= 5.0:
-                                            dark_session = candidate
-                                            break
-                                    except (ValueError, TypeError):
-                                        continue
-                        except (ValueError, TypeError):
-                            # If light temp can't be parsed, fall back to first match without temp check
-                            dark_session = dark_sessions.first()
-                    else:
-                        # If no light temp, get first match
-                        dark_session = dark_sessions.first()
-                    
+                    # Select most recent dark session matching parameters (excluding CCD temperature)
+                    dark_session = (fitsSessionModel
+                        .select()
+                        .where(
+                            fitsSessionModel.fitsSessionObjectName == 'Dark',
+                            fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
+                            fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
+                            fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
+                            fitsSessionModel.fitsSessionBinningX == light_x_binning,
+                            fitsSessionModel.fitsSessionBinningY == light_y_binning,
+                            fitsSessionModel.fitsSessionExposure == light_exp_time,
+                            fitsSessionModel.fitsSessionGain == light_gain,
+                            fitsSessionModel.fitsSessionOffset == light_offset
+                        )
+                        .order_by(fitsSessionModel.fitsSessionDate.desc())
+                        .first()
+                    )
                     if dark_session:
                         light_session.fitsDarkSession = str(dark_session.fitsSessionId)
                         session_updated = True
-                        temp_info = f", temp: {light_ccd_temp}°C" if light_ccd_temp else ""
-                        logger.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId} (exp: {light_exp_time}s, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset}{temp_info})")
+                        logger.info(f"Linked dark session {dark_session.fitsSessionId} to light session {light_session.fitsSessionId} (exp: {light_exp_time}s, binning: {light_x_binning}x{light_y_binning}, gain: {light_gain}, offset: {light_offset})")
                     else:
                         logger.debug(f"No matching dark session found for light session {light_session.fitsSessionId} (exp: {light_exp_time}s)")
                 
