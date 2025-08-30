@@ -413,7 +413,15 @@ class fitsProcessing:
                 telescope=hdr["TELESCOP"]
             else:
                 telescope="Unknown"
-                    
+            
+            # Fix calibration frames where OBJECT is set to an object rather than the frametype
+            if "DARK" in hdr["IMAGETYP"].upper():
+                hdr["OBJECT"] = "Dark"
+            elif "FLAT" in hdr["IMAGETYP"].upper():
+                hdr["OBJECT"] = "Flat"
+            elif "BIAS" in hdr["IMAGETYP"].upper():
+                hdr["OBJECT"] = "Bias"
+
             # Create an os-friendly date
             try:
                 if "DATE-OBS" not in hdr:
@@ -491,10 +499,10 @@ class fitsProcessing:
             try:
                 # Check if we need to save header modifications
                 if header_modified and save_modified:
-                    hdu1l = fits.open(os.path.join(root, file), mode='update')
-                    hdul.flush()  # Save header changes to file
+                    hdul_update = fits.open(os.path.join(root, file), mode='update')
+                    hdul_update.flush()  # Save header changes to file
                     logger.info(f"Saved header modifications for {file}")
-                    hdul.close()
+                    hdul_update.close()
             except Exception as e:
                 logger.warning(f"Non-compliant header warning in {os.path.basename(__file__)} while processing file {os.path.join(root, file)}")
 
@@ -548,7 +556,8 @@ class fitsProcessing:
                 else:
                     logger.warning("File already exists in repo, no changes - "+newPath+newName)
             else:
-                logger.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
+                if not moveFiles:
+                    logger.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
         else:
             logger.warning("File not added to repo - no IMAGETYP card - "+str(os.path.join(root, file)))
         

@@ -9,14 +9,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Import necessary PySide6 modules
-from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal
+from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal, QTimer
 from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, 
                                QHBoxLayout, QWidget, QTabWidget, QListWidget, 
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
                                QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy,
-                               QDialog, QDialogButtonBox, QGridLayout)
+                               QDialog, QDialogButtonBox, QGridLayout, QAbstractItemView)
 from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices, QIcon
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Mapping as MappingModel
@@ -98,6 +98,16 @@ class ImagesTab(QWidget):
         self.sort_combo.setMinimumWidth(80)
         self.sort_combo.setStyleSheet("QComboBox { padding: 3px; }")
         
+        # Add frame type filter control
+        filter_label = QLabel("Show:")
+        filter_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        self.frame_filter_combo = QComboBox()
+        self.frame_filter_combo.addItems(["Light Frames Only", "All Frames", "Calibration Frames Only"])
+        self.frame_filter_combo.setCurrentText("Light Frames Only")  # Set default to Light Frames Only
+        self.frame_filter_combo.setToolTip("Choose which frame types to display:\n• Light Frames Only: Show only light/science frames\n• All Frames: Show light and calibration frames\n• Calibration Frames Only: Show only dark, flat, and bias frames")
+        self.frame_filter_combo.setMinimumWidth(120)
+        self.frame_filter_combo.setStyleSheet("QComboBox { padding: 3px; }")
+        
         controls_layout.addWidget(self.load_repo_button)
         controls_layout.addWidget(self.sync_repo_button)
         controls_layout.addWidget(self.download_repo_button)
@@ -105,6 +115,8 @@ class ImagesTab(QWidget):
         controls_layout.addWidget(self.mapping_button)
         controls_layout.addWidget(self.refresh_button)
         controls_layout.addStretch()
+        controls_layout.addWidget(filter_label)
+        controls_layout.addWidget(self.frame_filter_combo)
         controls_layout.addWidget(sort_label)
         controls_layout.addWidget(self.sort_combo)
           # File list
@@ -133,6 +145,7 @@ class ImagesTab(QWidget):
         self.mapping_button.clicked.connect(self.open_mappings_dialog)
         self.refresh_button.clicked.connect(self.load_fits_data)
         self.sort_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when sort changes
+        self.frame_filter_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when filter changes
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
     
     def load_repo(self):
@@ -269,6 +282,30 @@ class ImagesTab(QWidget):
         if reply != QMessageBox.Ok:
             return  # User cancelled, exit the function
         
+        # Clear repository first before syncing
+        try:
+            # Clear the tree widget
+            self.file_tree.clear()
+            
+            # Delete all fitsSession records from the database
+            deleted_sessions = FitsSessionModel.delete().execute()
+            
+            # Delete all fitsFile records from the database
+            deleted_files = FitsFileModel.delete().execute()
+            
+            # Invalidate stats cache since all data was cleared
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                parent_widget = parent_widget.parent()
+            if parent_widget:
+                parent_widget.invalidate_stats_cache()
+            
+            logger.info(f"Cleared repository before sync: {deleted_sessions} sessions, {deleted_files} files")
+        except Exception as e:
+            logger.error(f"Error clearing repository before sync: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to clear repository before sync: {e}")
+            return
+        
         progress_dialog = None
         was_cancelled = False
         
@@ -338,7 +375,7 @@ class ImagesTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
 
     def load_fits_data(self):
-        """Load FITS file data from the database and populate the tree widget based on selected sort criteria."""
+        """Load FITS file data from the database and populate the tree widget based on selected sort criteria and frame filter."""
         try:
             self.file_tree.clear()
 
@@ -349,27 +386,63 @@ class ImagesTab(QWidget):
             else:
                 sort_by = "Object"  # Default when UI isn't ready yet
             
-            if sort_by == "Object":
-                self._load_fits_data_by_object()
-            else:  # Date
-                self._load_fits_data_by_date()
+            # Get the current frame filter (default to Light Frames Only if UI not yet initialized)
+            frame_filter = getattr(self, 'frame_filter_combo', None)
+            if frame_filter is not None:
+                frame_filter = self.frame_filter_combo.currentText()
+            else:
+                frame_filter = "Light Frames Only"  # Default when UI isn't ready yet
             
-            logger.debug(f"FITS data loaded and organized by {sort_by}")
+            if sort_by == "Object":
+                self._load_fits_data_by_object(frame_filter)
+            else:  # Date
+                self._load_fits_data_by_date(frame_filter)
+            
+            logger.debug(f"FITS data loaded and organized by {sort_by} with filter: {frame_filter}")
                 
         except Exception as e:
             logger.error(f"Error loading FITS data: {e}")
             if "no such table" not in str(e).lower():
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
 
-    def _load_fits_data_by_object(self):
+    def _get_fits_files_query(self, frame_filter):
+        """Get the appropriate database query based on the frame filter selection."""
+        if frame_filter == "Light Frames Only":
+            # Only show files where fitsFileType contains "Light"
+            return FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light"))
+        elif frame_filter == "Calibration Frames Only":
+            # Show dark, flat, bias frames (anything that's not light)
+            return FitsFileModel.select().where(
+                (FitsFileModel.fitsFileType.contains("Dark")) |
+                (FitsFileModel.fitsFileType.contains("Flat")) |
+                (FitsFileModel.fitsFileType.contains("Bias"))
+            )
+        else:  # "All Frames"
+            # Show all files regardless of type
+            return FitsFileModel.select()
+
+    def _load_fits_data_by_object(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by object name, then by date."""
-        # Query all FITS files from the database where fitsFileType contains "Light"
-        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
+        # Get the appropriate query based on frame filter
+        fits_files = self._get_fits_files_query(frame_filter).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
 
         # Group files by object name and date
         objects_dict = {}
         for fits_file in fits_files:
             object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
             date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
 
             if object_name not in objects_dict:
@@ -437,15 +510,28 @@ class ImagesTab(QWidget):
         else:
             logger.info("No FITS files found in database")
 
-    def _load_fits_data_by_date(self):
+    def _load_fits_data_by_date(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by date, then by object."""
-        # Query all FITS files from the database where fitsFileType contains "Light"
-        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject)
+        # Get the appropriate query based on frame filter
+        fits_files = self._get_fits_files_query(frame_filter).order_by(FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject)
 
         # Group files by date and object
         dates_dict = {}
         for fits_file in fits_files:
             object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
             date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
 
             if date_str not in dates_dict:
@@ -731,6 +817,7 @@ class TelescopeDownloadWorker(QThread):
                 return
             
             self.progress_updated.emit("Scanning network for SEESTAR telescope...")
+            logger.info("Scanning network for SEESTAR telescope...")
             self.progress_percent_updated.emit(5)
             
             ip, error = smart_telescope_manager.find_telescope(
@@ -744,9 +831,11 @@ class TelescopeDownloadWorker(QThread):
             
             if not ip:
                 self.error_occurred.emit(f"Failed to find telescope: {error}")
+                logger.error(f"Failed to find telescope: {error}")
                 return
             
             self.progress_updated.emit(f"Connected to SEESTAR at {ip}")
+            logger.info(f"Connected to SEESTAR at {ip}")
             self.progress_percent_updated.emit(10)
             
             # Step 2: Connect and get FITS files (20% of progress)
@@ -754,6 +843,7 @@ class TelescopeDownloadWorker(QThread):
                 return
             
             self.progress_updated.emit("Scanning SEESTAR for FITS files...")
+            logger.info("Scanning SEESTAR for FITS files...")
             self.progress_percent_updated.emit(15)
             
             fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
@@ -763,16 +853,20 @@ class TelescopeDownloadWorker(QThread):
             
             if error:
                 self.error_occurred.emit(f"Failed to get FITS files: {error}")
+                logger.error(f"Failed to get FITS files: {error}")
                 return
             
             if not fits_files:
                 self.download_completed.emit("No FITS files found on telescope.")
+                logger.info("No FITS files found on telescope.")
                 return
             
             self.progress_updated.emit(f"Found {len(fits_files)} FITS files to download")
+            logger.info(f"Found {len(fits_files)} FITS files to download")
             self.progress_percent_updated.emit(20)
             
             # Step 3: Create temp directory
+            logger.info("Creating temporary directory for downloads")
             if self._stop_requested:
                 return
             
@@ -800,6 +894,7 @@ class TelescopeDownloadWorker(QThread):
                 next_file_start = base_progress + ((i + 1) * file_progress_range // len(fits_files))
                 
                 self.progress_updated.emit(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")
+                logger.info(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")  
                 self.progress_percent_updated.emit(current_file_start)
                 
                 # Download file to temp directory
@@ -812,6 +907,7 @@ class TelescopeDownloadWorker(QThread):
                     file_percent = current_file_start + int((progress / 100) * (next_file_start - current_file_start) * 0.8)
                     self.progress_percent_updated.emit(file_percent)
                     self.progress_updated.emit(f"Downloading {file_name}: {progress:.1f}%")
+                    logger.info(f"Downloading {file_name}: {progress:.1f}%")
                     return True  # Continue downloading
                 
                 success, error = smart_telescope_manager.download_file(
@@ -826,9 +922,11 @@ class TelescopeDownloadWorker(QThread):
                     if "cancelled by user" in str(error).lower():
                         # Download was cancelled, break out of loop
                         self.progress_updated.emit("Download cancelled by user")
+                        logger.info("Download cancelled by user")
                         break
                     else:
                         self.progress_updated.emit(f"Failed to download {file_name}: {error}")
+                        logger.error(f"Failed to download {file_name}: {error}")
                         failed_downloads += 1
                         continue
                 
@@ -837,17 +935,20 @@ class TelescopeDownloadWorker(QThread):
                 # Check for cancellation immediately after download
                 if self._stop_requested:
                     self.progress_updated.emit("Download cancelled")
+                    logger.info("Download cancelled")
                     break
                 
                 # Processing phase (remaining 20% of this file's progress range)
                 processing_progress = current_file_start + int((next_file_start - current_file_start) * 0.8)
                 self.progress_updated.emit(f"Processing {file_name}...")
+                logger.info(f"Processing {file_name}...")
                 self.progress_percent_updated.emit(processing_progress)
                 
                 # Process the file with registerFitsImage
                 try:
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     
                     # Modify FITS headers before processing
@@ -855,10 +956,12 @@ class TelescopeDownloadWorker(QThread):
                     
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     
                     # Process file (this might take time, but we can't easily interrupt it)
                     self.progress_updated.emit(f"Adding {file_name} to repository...")
+                    logger.info(f"Adding {file_name} to repository...")
                     result = fits_processor.registerFitsImage(
                         os.path.dirname(local_path), 
                         file_name, 
@@ -867,36 +970,45 @@ class TelescopeDownloadWorker(QThread):
                     
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     
                     if result:
                         processed_files += 1
                         self.progress_updated.emit(f"Successfully processed {file_name}")
-                        
+                        logger.info(f"Successfully processed {file_name}")
+
                         # Delete file from host if requested
                         if self.delete_files:
                             if self._stop_requested:
                                 self.progress_updated.emit("Download cancelled")
+                                logger.info("Download cancelled")
                                 break
                             
                             self.progress_updated.emit(f"Deleting {file_name} from telescope...")
+                            logger.info(f"Deleting {file_name} from telescope...")
                             delete_success, delete_error = smart_telescope_manager.delete_file(
                                 self.telescope_type, ip, file_info
                             )
                             
                             if delete_success:
                                 self.progress_updated.emit(f"Successfully deleted {file_name} from telescope")
+                                logger.info(f"Successfully deleted {file_name} from telescope")
                             else:
                                 self.progress_updated.emit(f"Warning: Failed to delete {file_name} from telescope: {delete_error}")
+                                logger.error(f"Failed to delete {file_name} from telescope: {delete_error}")
                     else:
                         self.progress_updated.emit(f"Failed to process {file_name} (file may be invalid)")
-                        
+                        logger.error(f"Failed to process {file_name} (file may be invalid)")
+
                 except Exception as e:
                     if self._stop_requested:
                         self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
                         break
                     self.progress_updated.emit(f"Error processing {file_name}: {str(e)}")
-                
+                    logger.error(f"Error processing {file_name}: {str(e)}")
+
                 # Update progress to next file start
                 self.progress_percent_updated.emit(next_file_start)
                 
@@ -910,9 +1022,11 @@ class TelescopeDownloadWorker(QThread):
             # Final completion
             if self._stop_requested:
                 self.progress_updated.emit("Download cancelled")
+                logger.info("Download cancelled")
                 return
             
             self.progress_updated.emit("Download complete!")
+            logger.info("Download complete!")
             self.progress_percent_updated.emit(100)
             
             # Step 5: Clean up temp directory
@@ -929,12 +1043,14 @@ class TelescopeDownloadWorker(QThread):
                           f"Failed downloads: {failed_downloads}\n"
                           f"Successfully processed: {processed_files}\n\n"
                           f"Files have been moved to your repository and registered in the database.")
-                
+                logger.info(message)
+
                 self.download_completed.emit(message)
             
         except Exception as e:
             if not self._stop_requested:
                 self.error_occurred.emit(f"Unexpected error during download: {str(e)}")
+                logger.error(f"Unexpected error during download: {str(e)}")
 
 
 class SmartTelescopeDownloadDialog(QDialog):
@@ -1072,8 +1188,8 @@ class SmartTelescopeDownloadDialog(QDialog):
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
-            
-            if reply != QMessageBox.Yes:
+            if reply == QMessageBox.No:
+                logger.info("File deletion cancelled by user.")
                 return
         
         # Don't hide the main dialog yet - keep it alive for signal handling
@@ -1209,6 +1325,9 @@ class SessionsTab(QWidget):
         self.sessions_tree = QTreeWidget()
         self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager"])
         
+        # Enable multi-selection
+        self.sessions_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        
         # Set column widths for better display
         self.sessions_tree.setColumnWidth(0, 200)  # Object Name
         self.sessions_tree.setColumnWidth(1, 150)  # Date
@@ -1231,26 +1350,43 @@ class SessionsTab(QWidget):
         if not item:
             return
             
-        # Determine if this is a session item (child of an object)
-        parent = item.parent()
-        if not parent:
-            return  # This is a parent item (object name), not a session
+        # Get all selected items
+        selected_items = self.sessions_tree.selectedItems()
+        if not selected_items:
+            return
+            
+        # Check if all selected items are sessions (not parent objects) and are light sessions
+        valid_sessions = []
+        for selected_item in selected_items:
+            parent = selected_item.parent()
+            if not parent:
+                continue  # This is a parent item (object name), not a session
+                
+            # Check if this is a light session (not calibration)
+            object_name = parent.text(0)
+            if object_name not in ['Bias', 'Dark', 'Flat']:
+                valid_sessions.append(selected_item)
+        
+        if not valid_sessions:
+            return  # No valid light sessions selected
             
         # Create context menu
         context_menu = QMenu(self)
-        checkout_action = context_menu.addAction("Check out")
-        # don't really need delete action but maybe later
-        #delete_action = context_menu.addAction("Delete Session")
+        if len(valid_sessions) == 1:
+            checkout_action = context_menu.addAction("Check out")
+        else:
+            checkout_action = context_menu.addAction(f"Check out ({len(valid_sessions)} sessions)")
 
         # Show the menu and get the selected action
         action = context_menu.exec_(self.sessions_tree.viewport().mapToGlobal(position))
         
         if action == checkout_action:
-            logging.info(f"Checking out session: {item.text(0)} on {item.text(1)}")
-            self.checkout_session(item)
-        #elif action == delete_action:
-        #    logging.info(f"Deleting session: {item.text(0)} on {item.text(1)}")
-        #    self.delete_session(item)
+            if len(valid_sessions) == 1:
+                logging.info(f"Checking out session: {valid_sessions[0].parent().text(0)} on {valid_sessions[0].text(1)}")
+                self.checkout_session(valid_sessions[0])
+            else:
+                logging.info(f"Checking out {len(valid_sessions)} sessions")
+                self.checkout_multiple_sessions(valid_sessions)
 
     def checkout_session(self, item):
         """Create symbolic links for session files in a Siril-friendly format"""
@@ -1396,7 +1532,7 @@ class SessionsTab(QWidget):
             progress.setValue(100)
             
             # Create a simple Siril script
-            script_path = os.path.join(session_dir, "process.ssf")
+            """script_path = os.path.join(session_dir, "process.ssf")
             with open(script_path, "w") as f:
                 f.write(f"# Siril processing script for {object_name} {session_date}\n")
                 f.write("requires 1.0.0\n\n")
@@ -1419,13 +1555,13 @@ class SessionsTab(QWidget):
                 f.write("# Register light frames\n")
                 f.write("register pp_lights\n\n")
                 f.write("# Stack registered light frames\n")
-                f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
+                f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")"""
             
             # Display success message
             QMessageBox.information(
                 self, 
                 "Success", 
-                f"Created {created_links} symbolic links and Siril script in {session_dir}"
+                f"Created {created_links} symbolic links in {session_dir}"
             )
             
             # Open the directory
@@ -1434,6 +1570,172 @@ class SessionsTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create symbolic links: {str(e)}")
             logging.error(f"Error in checkout_session: {str(e)}")
+
+    def checkout_multiple_sessions(self, session_items):
+        """Create symbolic links for multiple sessions in a common directory structure"""
+        try:
+            # Ask user for destination directory
+            dest_dir = QFileDialog.getExistingDirectory(
+                self, 
+                "Select Destination Directory for Multiple Sessions",
+                os.path.expanduser("~"),
+                QFileDialog.ShowDirsOnly
+            )
+            
+            if not dest_dir:
+                return  # User cancelled
+            
+            # Create main checkout directory
+            checkout_dir = os.path.join(dest_dir, f"Sessions_Checkout_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            os.makedirs(checkout_dir, exist_ok=True)
+            
+            # Calculate total work for progress tracking
+            total_sessions = len(session_items)
+            current_session = 0
+            
+            # Progress dialog for overall operation
+            overall_progress = QProgressDialog("Processing sessions...", "Cancel", 0, total_sessions, self)
+            overall_progress.setWindowModality(Qt.WindowModal)
+            overall_progress.setWindowTitle("Checking Out Multiple Sessions")
+            
+            successful_sessions = 0
+            failed_sessions = []
+            
+            for session_item in session_items:
+                if overall_progress.wasCanceled():
+                    break
+                    
+                try:
+                    # Get session information
+                    session_date = session_item.text(1)
+                    object_name = session_item.parent().text(0)
+                    
+                    overall_progress.setLabelText(f"Processing {object_name} - {session_date}...")
+                    overall_progress.setValue(current_session)
+                    
+                    # Get the session from database
+                    session = FitsSessionModel.select().where(
+                        (FitsSessionModel.fitsSessionObjectName == object_name) & 
+                        (FitsSessionModel.fitsSessionDate == session_date)
+                    ).first()
+                    
+                    if not session:
+                        failed_sessions.append(f"{object_name} - {session_date}: Not found in database")
+                        continue
+                    
+                    # Create session-specific directory
+                    session_dir = os.path.join(checkout_dir, f"{object_name}_{session_date.replace(':', '-')}")
+                    light_dir = os.path.join(session_dir, "lights")
+                    dark_dir = os.path.join(session_dir, "darks")
+                    flat_dir = os.path.join(session_dir, "flats")
+                    bias_dir = os.path.join(session_dir, "bias")
+                    process_dir = os.path.join(session_dir, "process")
+                    
+                    # Create directories
+                    os.makedirs(light_dir, exist_ok=True)
+                    os.makedirs(dark_dir, exist_ok=True)
+                    os.makedirs(flat_dir, exist_ok=True)
+                    os.makedirs(bias_dir, exist_ok=True)
+                    os.makedirs(process_dir, exist_ok=True)
+                    
+                    # Get files
+                    light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
+                    dark_files = []
+                    bias_files = []
+                    flat_files = []
+                    
+                    # Get calibration files
+                    if session.fitsBiasSession:
+                        bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
+                    if session.fitsDarkSession:
+                        dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
+                    if session.fitsFlatSession:
+                        flat_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsFlatSession)
+                    
+                    # Create symbolic links
+                    all_files = list(light_files) + list(dark_files) + list(bias_files) + list(flat_files)
+                    session_links = 0
+                    
+                    for file in all_files:
+                        # Determine destination directory based on file type
+                        if "LIGHT" in file.fitsFileType.upper():
+                            dest_folder = light_dir
+                        elif "DARK" in file.fitsFileType.upper():
+                            dest_folder = dark_dir
+                        elif "FLAT" in file.fitsFileType.upper():
+                            dest_folder = flat_dir
+                        elif "BIAS" in file.fitsFileType.upper():
+                            dest_folder = bias_dir
+                        else:
+                            continue
+                        
+                        filename = os.path.basename(file.fitsFileName)
+                        dest_path = os.path.join(dest_folder, filename)
+                        
+                        try:
+                            if not os.path.exists(dest_path):
+                                if sys.platform == "win32":
+                                    import subprocess
+                                    subprocess.run(["mklink", dest_path, file.fitsFileName], shell=True)
+                                else:
+                                    os.symlink(file.fitsFileName, dest_path)
+                                session_links += 1
+                        except Exception as e:
+                            logging.error(f"Error creating link for {file.fitsFileName}: {e}")
+                    
+                    # Create Siril script
+                    script_path = os.path.join(session_dir, "process.ssf")
+                    with open(script_path, "w") as f:
+                        f.write(f"# Siril processing script for {object_name} {session_date}\n")
+                        f.write("requires 1.0.0\n\n")
+                        f.write("# Convert to .fit files\n")
+                        f.write("cd lights\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../darks\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../flats\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../bias\n")
+                        f.write("convert fits\n")
+                        f.write("cd ..\n\n")
+                        f.write("# Stack calibration frames\n")
+                        f.write("stack darks rej 3 3 -nonorm\n")
+                        f.write("stack bias rej 3 3 -nonorm\n")
+                        f.write("stack flats rej 3 3 -norm=mul\n\n")
+                        f.write("# Calibrate light frames\n")
+                        f.write("calibrate lights bias=bias_stacked flat=flat_stacked dark=dark_stacked\n\n")
+                        f.write("# Register light frames\n")
+                        f.write("register pp_lights\n\n")
+                        f.write("# Stack registered light frames\n")
+                        f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
+                    
+                    successful_sessions += 1
+                    logging.info(f"Successfully processed session {object_name} - {session_date} with {session_links} links")
+                    
+                except Exception as e:
+                    failed_sessions.append(f"{object_name} - {session_date}: {str(e)}")
+                    logging.error(f"Error processing session {object_name} - {session_date}: {e}")
+                
+                current_session += 1
+            
+            overall_progress.setValue(total_sessions)
+            
+            # Show results
+            message = f"Successfully processed {successful_sessions} out of {total_sessions} sessions."
+            if failed_sessions:
+                message += f"\n\nFailed sessions:\n" + "\n".join(failed_sessions)
+            
+            if successful_sessions > 0:
+                message += f"\n\nFiles created in: {checkout_dir}"
+                QMessageBox.information(self, "Multiple Sessions Checkout Complete", message)
+                # Open the directory
+                QDesktopServices.openUrl(QUrl.fromLocalFile(checkout_dir))
+            else:
+                QMessageBox.warning(self, "Multiple Sessions Checkout Failed", message)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to checkout multiple sessions: {str(e)}")
+            logging.error(f"Error in checkout_multiple_sessions: {str(e)}")
 
     def update_sessions(self):
         """Update light sessions by running createLightSessions method with progress dialog."""
@@ -1959,7 +2261,7 @@ class SessionsTab(QWidget):
                         step_progress = int((current / total) * 25) if total > 0 else 0
                         overall_progress = 50 + step_progress
                         progress_dialog.setValue(overall_progress)
-                        progress_dialog.setLabelText(f"Step 3/4: Creating calibration sessions {current}/{total}: {filename}")
+                        progress_dialog.setLabelText(f"Step 3/4: Creating calibration sessions {current}/{total}: {os.path.basename(filename)}")
                         QApplication.processEvents()
                     
                     return not was_cancelled
@@ -2091,28 +2393,8 @@ class MappingsDialog(QDialog):
         self.scroll_area.setWidget(self.scroll_widget)
         layout.addWidget(self.scroll_area)
         
-        # Bottom checkboxes and buttons
+        # Bottom buttons
         bottom_layout = QVBoxLayout()
-        
-        # Checkboxes
-        checkbox_layout = QHBoxLayout()
-        self.apply_current_checkbox = QCheckBox("Apply to Database")
-        
-        # Get save_modified_headers setting from ini file
-        import configparser
-        config = configparser.ConfigParser()
-        try:
-            config.read('astrofiler.ini')
-            save_headers_default = config.getboolean('DEFAULT', 'save_modified_headers', fallback=True)
-        except:
-            save_headers_default = True
-        
-        self.update_files_checkbox = QCheckBox("Update Files on Disk")
-        self.update_files_checkbox.setChecked(save_headers_default)
-        
-        checkbox_layout.addWidget(self.apply_current_checkbox)
-        checkbox_layout.addWidget(self.update_files_checkbox)
-        bottom_layout.addLayout(checkbox_layout)
         
         # Dialog buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -2132,8 +2414,8 @@ class MappingsDialog(QDialog):
                 'TELESCOP': 'fitsFileTelescop',
                 'INSTRUME': 'fitsFileInstrument', 
                 'OBSERVER': None,  # Not currently in database
-                'NOTES': None,     # Not currently in database
-                'FILTER': 'fitsFileFilter'
+                'NOTES': None,      # Not currently in database
+                'FILTER': 'fitsFileFilter',
             }
             
             field_name = field_mapping.get(card)
@@ -2160,7 +2442,7 @@ class MappingsDialog(QDialog):
         
         # Card dropdown
         card_combo = QComboBox()
-        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES"])
+        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES","FILTER"])
         card_combo.setCurrentText(card)
         card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
         
@@ -2168,84 +2450,18 @@ class MappingsDialog(QDialog):
         current_combo = QComboBox()
         current_combo.setEditable(True)
         
-        # Replace text field
-        replace_edit = QLineEdit()
-        replace_edit.setText(replace)
-              
-        # Delete button (trash icon)
-        delete_button = QPushButton("🗑")
-        delete_button.setMaximumWidth(30)
-        delete_button.setToolTip("Delete this mapping")
-        delete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ff4444;
-                border: 1px solid #555;
-                border-radius: 3px;
-                font-size: 14px;
-                padding: 2px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                color: #ff6666;
-                border: 1px solid #ff4444;
-            }
-            QPushButton:pressed {
-                background-color: #1d1d1d;
-                color: #ff2222;
-            }
-        """)
-        delete_button.clicked.connect(lambda: self.delete_mapping_row(row_widget))
+        # Replace dropdown (changed from text field to combo box)
+        replace_combo = QComboBox()
+        replace_combo.setEditable(True)
         
-        # Add to layout
-        row_layout.addWidget(QLabel("Card:"), 0, 0)
-        row_layout.addWidget(card_combo, 0, 1)
-        row_layout.addWidget(QLabel("Current:"), 0, 2)
-        row_layout.addWidget(current_combo, 0, 3)
-        row_layout.addWidget(QLabel("Replace:"), 0, 4)
-        row_layout.addWidget(replace_edit, 0, 5)
-        row_layout.addWidget(delete_button, 0, 8)
-        
-        # Store references
-        row_widget.card_combo = card_combo
-        row_widget.current_combo = current_combo
-        row_widget.replace_edit = replace_edit
-        
-        # Update current values for initial card
-        self.update_current_values(row_widget)
-        current_combo.setCurrentText(current)
-        
-        # Add to scroll layout
-        self.scroll_layout.addWidget(row_widget)
-        self.mapping_rows.append(row_widget)
-
-    def add_mapping_row(self, card="TELESCOP", current="", replace=""):
-        """Add a new mapping row to the dialog"""
-        row_widget = QWidget()
-        row_layout = QGridLayout(row_widget)
-
-        # Card dropdown
-        card_combo = QComboBox()
-        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES", "FILTER"])
-        card_combo.setCurrentText(card)
-        card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
-
-        # Current dropdown
-        current_combo = QComboBox()
-        current_combo.setEditable(True)
-
-        # Replace text field
-        replace_edit = QLineEdit()
-        replace_edit.setText(replace)
-
-        # Apply button for this row
+        # Apply button (check icon)
         apply_button = QPushButton("✓")
         apply_button.setMaximumWidth(30)
-        apply_button.setToolTip("Apply this mapping to database and files")
+        apply_button.setToolTip("Apply this mapping immediately")
         apply_button.setStyleSheet("""
             QPushButton {
                 background-color: #2d2d2d;
-                color: #44aa44;
+                color: #44ff44;
                 border: 1px solid #555;
                 border-radius: 3px;
                 font-size: 14px;
@@ -2253,16 +2469,16 @@ class MappingsDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #3d3d3d;
-                color: #66cc66;
-                border: 1px solid #44aa44;
+                color: #66ff66;
+                border: 1px solid #44ff44;
             }
             QPushButton:pressed {
                 background-color: #1d1d1d;
-                color: #22aa22;
+                color: #22ff22;
             }
         """)
         apply_button.clicked.connect(lambda: self.apply_single_mapping(row_widget))
-
+        
         # Delete button (trash icon)
         delete_button = QPushButton("🗑")
         delete_button.setMaximumWidth(30)
@@ -2287,276 +2503,53 @@ class MappingsDialog(QDialog):
             }
         """)
         delete_button.clicked.connect(lambda: self.delete_mapping_row(row_widget))
-
+        
         # Add to layout
         row_layout.addWidget(QLabel("Card:"), 0, 0)
         row_layout.addWidget(card_combo, 0, 1)
         row_layout.addWidget(QLabel("Current:"), 0, 2)
         row_layout.addWidget(current_combo, 0, 3)
         row_layout.addWidget(QLabel("Replace:"), 0, 4)
-        row_layout.addWidget(replace_edit, 0, 5)
+        row_layout.addWidget(replace_combo, 0, 5)
         row_layout.addWidget(apply_button, 0, 6)
         row_layout.addWidget(delete_button, 0, 7)
-
+        
         # Store references
         row_widget.card_combo = card_combo
         row_widget.current_combo = current_combo
-        row_widget.replace_edit = replace_edit
-
-        # Update current values for initial card
+        row_widget.replace_combo = replace_combo
+        # Remove default_checkbox reference since it no longer exists
+        
+        # Update current and replace values for initial card
         self.update_current_values(row_widget)
         current_combo.setCurrentText(current)
-
+        replace_combo.setCurrentText(replace)
+        
         # Add to scroll layout
         self.scroll_layout.addWidget(row_widget)
         self.mapping_rows.append(row_widget)
-
-    def apply_single_mapping(self, row_widget):
-        """Apply the mapping in this row to the database and files"""
-        card = row_widget.card_combo.currentText()
-        current = row_widget.current_combo.currentText()
-        replace = row_widget.replace_edit.text()
-
-        # Validate inputs
-        if not current or not replace:
-            QMessageBox.warning(self, "Invalid Mapping", "Both 'Current' and 'Replace' values must be provided.")
-            return
-
-        # Count affected records
-        field_mapping = {
-            'TELESCOP': 'fitsFileTelescop',
-            'INSTRUME': 'fitsFileInstrument',
-            'OBSERVER': None,
-            'NOTES': None,
-            'FILTER': 'fitsFileFilter'
-        }
-        field_name = field_mapping.get(card)
-        
-        affected_count = 0
-        if field_name:
-            from astrofiler_db import fitsFile as FitsFileModel
-            query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == current)
-            affected_count = query.count()
-
-        if affected_count == 0:
-            QMessageBox.information(self, "No Records Found", f"No records found with {card} = '{current}'")
-            return
-
-        # Show confirmation dialog
-        actions = []
-        actions.append(f"Database Updates: {affected_count} records")
-        
-        if self.update_files_checkbox.isChecked():
-            actions.append(f"File Header Updates: {affected_count} files")
-            if card == 'FILTER':
-                actions.append(f"File/Folder Rename Updates: {affected_count} files (filter paths and filenames)")
-
-        confirmation_text = f"Apply mapping: {card} '{current}' → '{replace}'\n\n"
-        confirmation_text += "Actions to be performed:\n"
-        confirmation_text += "\n".join(f"• {action}" for action in actions)
-        if card == 'FILTER' and self.update_files_checkbox.isChecked():
-            confirmation_text += f"\n\nNote: FILTER mapping will rename files and move them to new filter-specific folders."
-        confirmation_text += f"\n\nProceed with these changes?"
-
-        reply = QMessageBox.question(
-            self, 
-            "Confirm Mapping Application",
-            confirmation_text,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
-            return
-
-        # Create progress dialog
-        progress_dialog = QProgressDialog("Applying mapping...", "Cancel", 0, 100, self)
-        progress_dialog.setWindowTitle("Applying Mapping")
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.show()
-
-        try:
-            total_steps = 1  # Database updates
-            if self.update_files_checkbox.isChecked():
-                total_steps += 1  # File header updates
-                if card == 'FILTER':
-                    total_steps += 1  # File/folder rename updates for FILTER
-
-            current_step = 0
-            
-            # Step 1: Database Updates
-            progress_dialog.setLabelText(f"Database Updates: 0/{affected_count}")
-            progress_dialog.setValue(0)
-            QApplication.processEvents()
-
-            if field_name:
-                query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == current)
-                updated_count = 0
-                for i, record in enumerate(query):
-                    if progress_dialog.wasCanceled():
-                        break
-                    
-                    setattr(record, field_name, replace)
-                    record.save()
-                    updated_count += 1
-                    
-                    # Update progress
-                    step_progress = int((i + 1) / affected_count * 100 / total_steps)
-                    overall_progress = int(current_step / total_steps * 100) + step_progress
-                    progress_dialog.setValue(overall_progress)
-                    progress_dialog.setLabelText(f"Database Updates: {updated_count}/{affected_count}")
-                    QApplication.processEvents()
-
-                logger.info(f"Applied mapping: {card} '{current}' → '{replace}' to {updated_count} database records.")
-
-            current_step += 1
-
-            # Step 2: File Header Updates (if enabled)
-            if self.update_files_checkbox.isChecked() and not progress_dialog.wasCanceled():
-                progress_dialog.setLabelText(f"File Header Updates: 0/{affected_count}")
-                QApplication.processEvents()
-
-                # Get the files to update
-                if field_name:
-                    query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == current)
-                    updated_files = 0
-                    
-                    for i, record in enumerate(query):
-                        if progress_dialog.wasCanceled():
-                            break
-                        
-                        try:
-                            # Update the FITS file header
-                            file_path = record.fitsFileName
-                            if os.path.exists(file_path):
-                                # Open FITS file and update header
-                                from astropy.io import fits
-                                with fits.open(file_path, mode='update') as hdul:
-                                    hdr = hdul[0].header
-                                    if card in hdr:
-                                        old_value = hdr[card]
-                                        if str(old_value).strip() == current:
-                                            hdr[card] = replace
-                                            hdul.flush()
-                                            logger.info(f"Updated {card} in {file_path}: '{current}' → '{replace}'")
-                                            updated_files += 1
-                            else:
-                                logger.warning(f"File not found for header update: {file_path}")
-                                
-                        except Exception as e:
-                            logger.error(f"Error updating file header for {record.fitsFileName}: {e}")
-                        
-                        # Update progress
-                        step_progress = int((i + 1) / affected_count * 100 / total_steps)
-                        overall_progress = int(current_step / total_steps * 100) + step_progress
-                        progress_dialog.setValue(overall_progress)
-                        progress_dialog.setLabelText(f"File Header Updates: {i + 1}/{affected_count}")
-                        QApplication.processEvents()
-
-                    logger.info(f"Updated file headers for mapping: {card} '{current}' → '{replace}' on {updated_files} files")
-                else:
-                    logger.info(f"No file header updates needed for {card} field (not stored in database)")
-
-            # Step 3: File and Folder Rename Updates (if FILTER mapping affects filenames/paths)
-            if (self.update_files_checkbox.isChecked() and 
-                not progress_dialog.wasCanceled() and 
-                card == 'FILTER' and field_name):
-                
-                current_step += 1
-                progress_dialog.setLabelText(f"File/Folder Rename Updates: 0/{affected_count}")
-                QApplication.processEvents()
-
-                # Get the files that need renaming
-                query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == replace)  # Files now have the new value
-                renamed_files = 0
-                
-                for i, record in enumerate(query):
-                    if progress_dialog.wasCanceled():
-                        break
-                    
-                    try:
-                        old_path = record.fitsFileName
-                        if os.path.exists(old_path):
-                            # Update filename and folder path for FILTER changes
-                            old_dir = os.path.dirname(old_path)
-                            old_filename = os.path.basename(old_path)
-                            
-                            # Replace old filter in folder path
-                            new_dir = old_dir.replace(f"/{current}/", f"/{replace}/")
-                            
-                            # Replace old filter in filename
-                            new_filename = old_filename.replace(f"-{current}-", f"-{replace}-")
-                            
-                            new_path = os.path.join(new_dir, new_filename)
-                            
-                            # Only rename if path actually changed
-                            if new_path != old_path:
-                                # Create new directory if needed
-                                os.makedirs(new_dir, exist_ok=True)
-                                
-                                # Move file
-                                shutil.move(old_path, new_path)
-                                
-                                # Update database with new path
-                                record.fitsFileName = new_path
-                                record.save()
-                                
-                                logger.info(f"Renamed file: {old_path} → {new_path}")
-                                renamed_files += 1
-                                
-                                # Clean up empty directories
-                                try:
-                                    if os.path.isdir(old_dir) and not os.listdir(old_dir):
-                                        os.rmdir(old_dir)
-                                        logger.info(f"Removed empty directory: {old_dir}")
-                                except OSError:
-                                    pass  # Directory not empty or other issue
-                        else:
-                            logger.warning(f"File not found for rename: {old_path}")
-                            
-                    except Exception as e:
-                        logger.error(f"Error renaming file {record.fitsFileName}: {e}")
-                    
-                    # Update progress
-                    step_progress = int((i + 1) / affected_count * 100 / total_steps)
-                    overall_progress = int(current_step / total_steps * 100) + step_progress
-                    progress_dialog.setValue(overall_progress)
-                    progress_dialog.setLabelText(f"File/Folder Rename Updates: {i + 1}/{affected_count}")
-                    QApplication.processEvents()
-
-                logger.info(f"Renamed {renamed_files} files/folders for FILTER mapping: '{current}' → '{replace}'")
-
-            # Complete
-            if not progress_dialog.wasCanceled():
-                progress_dialog.setValue(100)
-                progress_dialog.setLabelText("Mapping application complete!")
-                QApplication.processEvents()
-                
-                QMessageBox.information(self, "Success", f"Mapping applied successfully!\n\nUpdated {affected_count} records.")
-
-        except Exception as e:
-            logger.error(f"Error applying mapping: {e}")
-            QMessageBox.critical(self, "Error", f"Error applying mapping: {str(e)}")
-        
-        finally:
-            progress_dialog.close()
     
     def update_current_values(self, row_widget):
-        """Update the current values dropdown when card changes"""
+        """Update the current and replace values dropdowns when card changes"""
         card = row_widget.card_combo.currentText()
         current_values = self.get_current_values_for_card(card)
         
-        # Remember current selection
+        # Remember current selections
         current_text = row_widget.current_combo.currentText()
+        replace_text = row_widget.replace_combo.currentText()
         
-        # Update combo box
+        # Update both combo boxes with the same values
         row_widget.current_combo.clear()
         row_widget.current_combo.addItems(current_values)
         
-        # Restore selection if it still exists
+        row_widget.replace_combo.clear()
+        row_widget.replace_combo.addItems(current_values)
+        
+        # Restore selections if they still exist
         if current_text in current_values:
             row_widget.current_combo.setCurrentText(current_text)
+        if replace_text in current_values:
+            row_widget.replace_combo.setCurrentText(replace_text)
     
     def delete_mapping_row(self, row_widget):
         """Delete a mapping row"""
@@ -2564,6 +2557,183 @@ class MappingsDialog(QDialog):
             self.mapping_rows.remove(row_widget)
             self.scroll_layout.removeWidget(row_widget)
             row_widget.deleteLater()
+    
+    def apply_single_mapping(self, row_widget):
+        """Apply a single mapping immediately"""
+        try:
+            card = row_widget.card_combo.currentText()
+            current = row_widget.current_combo.currentText()
+            replace = row_widget.replace_combo.currentText()
+            
+            # Validate inputs
+            if not card:
+                QMessageBox.warning(self, "Invalid Mapping", "Please select a card type.")
+                return
+            
+            if not replace:
+                QMessageBox.warning(self, "Invalid Mapping", "Please enter a replacement value.")
+                return
+            
+            # Confirm the action
+            if current:
+                message = f"Apply mapping for {card}:\n'{current}' → '{replace}'\n\nThis will update the database immediately."
+            else:
+                message = f"Apply mapping for {card}:\n'(empty/null)' → '{replace}'\n\nThis will update the database immediately."
+            
+            reply = QMessageBox.question(
+                self, 
+                "Confirm Apply Mapping", 
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Create progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Applying Mapping")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+            
+            try:
+                # Step 1: Save mapping to database (25%)
+                progress.setLabelText("Saving mapping to database...")
+                progress.setValue(25)
+                QApplication.processEvents()
+                
+                if progress.wasCanceled():
+                    return
+                
+                try:
+                    existing_mapping = MappingModel.get(
+                        (MappingModel.card == card) & 
+                        (MappingModel.current == (current if current else None))
+                    )
+                    # Update existing mapping
+                    existing_mapping.replace = replace if replace else None
+                    existing_mapping.save()
+                except MappingModel.DoesNotExist:
+                    # Create new mapping
+                    MappingModel.create(
+                        card=card,
+                        current=current if current else None,
+                        replace=replace if replace else None,
+                        is_default=False
+                    )
+                
+                # Step 2: Apply to database records (50%)
+                progress.setLabelText(f"Applying {card} mapping to database records...")
+                progress.setValue(50)
+                QApplication.processEvents()
+                
+                if progress.wasCanceled():
+                    return
+                
+                # Create a single mapping to apply
+                mapping_to_apply = {
+                    'card': card,
+                    'current': current,
+                    'replace': replace,
+                    'is_default': False
+                }
+                
+                # Apply the mapping to database records
+                update_files = self.update_files_checkbox.isChecked()
+                total_updates = 0
+                
+                if mapping_to_apply['card'] in ['TELESCOP', 'INSTRUME']:
+                    field_name = 'fitsFileTelescop' if mapping_to_apply['card'] == 'TELESCOP' else 'fitsFileInstrument'
+                    
+                    # Find files that match the current value
+                    if mapping_to_apply['current']:
+                        # Specific value mapping
+                        query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == mapping_to_apply['current'])
+                    else:
+                        # Default mapping for null/empty values
+                        query = FitsFileModel.select().where(
+                            (getattr(FitsFileModel, field_name).is_null()) |
+                            (getattr(FitsFileModel, field_name) == '')
+                        )
+                    
+                    # Step 3: Update database records (75%)
+                    progress.setLabelText(f"Updating {query.count()} database records...")
+                    progress.setValue(75)
+                    QApplication.processEvents()
+                    
+                    if progress.wasCanceled():
+                        return
+                    
+                    # Update matching files
+                    for fits_file in query:
+                        if mapping_to_apply['replace']:
+                            setattr(fits_file, field_name, mapping_to_apply['replace'])
+                            fits_file.save()
+                            total_updates += 1
+                            
+                            # Update FITS header if requested
+                            if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                                try:
+                                    from astropy.io import fits
+                                    with fits.open(fits_file.fitsFileName, mode='update') as hdul:
+                                        hdul[0].header[mapping_to_apply['card']] = mapping_to_apply['replace']
+                                        hdul[0].header.comments[mapping_to_apply['card']] = 'Updated via Astrofiler mapping'
+                                        hdul.flush()
+                                except Exception as e:
+                                    logger.error(f"Error updating FITS header for {fits_file.fitsFileName}: {e}")
+
+                    # If user has requested that files be updated we also have to update folder name
+                    if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                        try:
+                            new_folder_name = mapping_to_apply['replace']
+                            os.rename(os.path.dirname(fits_file.fitsFileName), new_folder_name)
+                        except Exception as e:
+                            logger.error(f"Error updating folder name for {fits_file.fitsFileName}: {e}")
+
+                # Step 4: Clear cache and update UI (100%)
+                progress.setLabelText("Finalizing changes...")
+                progress.setValue(100)
+                QApplication.processEvents()
+                
+                # Clear the mapping cache so file processing picks up new mappings
+                try:
+                    from astrofiler_file import clearMappingCache
+                    clearMappingCache()
+                except ImportError:
+                    pass  # Function might not be available in older versions
+                
+                # Update the current values dropdowns to reflect changes
+                self.update_current_values(row_widget)
+                
+                progress.close()
+                
+                # Show success message
+                if total_updates > 0:
+                    QMessageBox.information(
+                        self, 
+                        "Mapping Applied", 
+                        f"Successfully applied mapping and updated {total_updates} database records."
+                    )
+                else:
+                    QMessageBox.information(
+                        self, 
+                        "Mapping Applied", 
+                        "Mapping saved successfully. No matching records found to update."
+                    )
+                
+            except Exception as e:
+                if 'progress' in locals():
+                    progress.close()
+                raise e
+            
+        except Exception as e:
+            logger.error(f"Error applying single mapping: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying mapping: {e}")
     
     def load_existing_mappings(self):
         """Load existing mappings from the database"""
@@ -2579,30 +2749,24 @@ class MappingsDialog(QDialog):
             logger.error(f"Error loading existing mappings: {e}")
     
     def accept_mappings(self):
-        """Save mappings and apply if requested"""
+        """Save mappings to database without applying them"""
         try:
             # Clear existing mappings
             MappingModel.delete().execute()
             
             # Save new mappings
-            mappings_to_apply = []
             for row_widget in self.mapping_rows:
                 card = row_widget.card_combo.currentText()
                 current = row_widget.current_combo.currentText()
-                replace = row_widget.replace_edit.text()
+                replace = row_widget.replace_combo.currentText()
+                # Set is_default to False since we removed the checkbox
+                is_default = False
                 
                 MappingModel.create(
                     card=card,
                     current=current if current else None,
                     replace=replace if replace else None
                 )
-                
-                # Store mapping for application
-                mappings_to_apply.append({
-                    'card': card,
-                    'current': current,
-                    'replace': replace
-                })
             
             # Clear the mapping cache so file processing picks up new mappings
             try:
@@ -2610,13 +2774,6 @@ class MappingsDialog(QDialog):
                 clearMappingCache()
             except ImportError:
                 pass  # Function might not be available in older versions
-            
-            # Always apply database updates
-            self.apply_database_mappings(mappings_to_apply)
-            
-            # Apply file/folder changes if requested
-            if self.apply_current_checkbox.isChecked():
-                self.apply_file_folder_mappings(mappings_to_apply)
             
             self.accept()
             
@@ -3741,6 +3898,37 @@ class AboutTab(QWidget):
             logger.error(f"Error loading background image: {e}")
             self.set_default_background()
     
+    def load_background_image(self):
+        """Load the background image from local images/background.jpg file"""
+        try:
+            # Try to load the image from the images directory
+            pixmap = QPixmap("images/background.jpg")
+            
+            if not pixmap.isNull():
+                # Get the size of the container
+                container_size = self.container.size()
+                if container_size.width() <= 0:
+                    # Use minimum size if widget not yet properly sized
+                    container_size = self.container.minimumSize()
+                
+                # Scale the image to fit the container while maintaining aspect ratio
+                scaled_pixmap = pixmap.scaled(
+                    container_size, 
+                    Qt.KeepAspectRatioByExpanding, 
+                    Qt.SmoothTransformation
+                )
+                
+                self.background_label.setPixmap(scaled_pixmap)
+                self.background_label.setScaledContents(True)
+                logger.debug("Successfully loaded images/background.jpg as background")
+            else:
+                # If image loading fails, use the default background
+                logger.warning("Failed to load images/background.jpg, using default background")
+                self.set_default_background()
+        except Exception as e:
+            logger.error(f"Error loading background image: {e}")
+            self.set_default_background()
+    
     def set_default_background(self):
         """Set a default starry background if image download fails"""
         self.background_label.setStyleSheet("""
@@ -3856,7 +4044,7 @@ class DuplicatesTab(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
-        self.refresh_duplicates()
+        # Do not run duplicate detection on startup - user can manually refresh
     
     def init_ui(self):
         """Initialize the duplicates tab UI"""
@@ -3881,7 +4069,7 @@ class DuplicatesTab(QWidget):
         
         # Duplicates tree widget
         self.duplicates_tree = QTreeWidget()
-        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type"])
+        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type", "Full Path"])
         self.duplicates_tree.setAlternatingRowColors(True)
         self.duplicates_tree.setSortingEnabled(True)
         layout.addWidget(self.duplicates_tree)
@@ -3924,9 +4112,15 @@ class DuplicatesTab(QWidget):
     def refresh_duplicates(self):
         """Refresh the list of duplicate files"""
         from astrofiler_db import fitsFile
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        import time
         
         self.duplicates_tree.clear()
         duplicate_groups = []
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             # Query for files with duplicate hashes
@@ -3945,9 +4139,34 @@ class DuplicatesTab(QWidget):
             duplicate_hashes = cursor.fetchall()
             conn.close()
             
+            # Only show progress dialog if we have duplicates to process
+            if duplicate_hashes:
+                # Create progress dialog
+                progress_dialog = QProgressDialog("Scanning for duplicate files...", "Cancel", 0, len(duplicate_hashes), self)
+                progress_dialog.setWindowTitle("Finding Duplicates")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)  # Show immediately
+                progress_dialog.setValue(0)  # Set initial value
+                progress_dialog.show()
+                QApplication.processEvents()  # Process events to show dialog
+                
+                # Small delay to ensure dialog is visible
+                time.sleep(0.1)
+            
             total_duplicates = 0
             
-            for hash_value, count in duplicate_hashes:
+            for i, (hash_value, count) in enumerate(duplicate_hashes):
+                # Check if user cancelled
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    break
+                
+                # Update progress
+                if progress_dialog:
+                    progress_dialog.setValue(i)
+                    progress_dialog.setLabelText(f"Processing duplicate group {i+1} of {len(duplicate_hashes)}...")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
                 # Get all files with this hash
                 files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value)
                 
@@ -3961,8 +4180,8 @@ class DuplicatesTab(QWidget):
                     # Style the group item
                     font = group_item.font(0)
                     font.setBold(True)
-                    for i in range(6):
-                        group_item.setFont(i, font)
+                    for col in range(7):  # Updated to 7 columns
+                        group_item.setFont(col, font)
                     
                     # Add individual files as children
                     for fits_file in files_with_hash:
@@ -3973,6 +4192,7 @@ class DuplicatesTab(QWidget):
                         file_item.setText(3, fits_file.fitsFileFilter or "Unknown")
                         file_item.setText(4, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "Unknown")
                         file_item.setText(5, fits_file.fitsFileType or "Unknown")
+                        file_item.setText(6, fits_file.fitsFileName or "Unknown")  # Full path
                         
                         # Store the file object for deletion
                         file_item.setData(0, Qt.UserRole, fits_file)
@@ -3980,8 +4200,15 @@ class DuplicatesTab(QWidget):
                     duplicate_groups.append((hash_value, count))
                     total_duplicates += count - 1  # count - 1 because we keep one copy
             
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
             # Update info label and button state
-            if duplicate_groups:
+            if was_cancelled:
+                self.info_label.setText("Duplicate scan was cancelled.")
+                self.delete_button.setEnabled(False)
+            elif duplicate_groups:
                 self.info_label.setText(f"Found {len(duplicate_groups)} duplicate groups with {total_duplicates} files that can be removed.")
                 self.delete_button.setEnabled(True)
             else:
@@ -3990,12 +4217,17 @@ class DuplicatesTab(QWidget):
                 
         except Exception as e:
             logging.error(f"Error refreshing duplicates: {str(e)}")
+            if progress_dialog:
+                progress_dialog.close()
             self.info_label.setText(f"Error loading duplicates: {str(e)}")
             self.delete_button.setEnabled(False)
     
     def delete_duplicates(self):
         """Delete duplicate files, keeping only one copy of each"""
         from astrofiler_db import fitsFile
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
         
         # Confirm deletion
         reply = QMessageBox.question(
@@ -4013,6 +4245,8 @@ class DuplicatesTab(QWidget):
         
         deleted_count = 0
         error_count = 0
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             # Get all duplicate groups
@@ -4031,7 +4265,29 @@ class DuplicatesTab(QWidget):
             duplicate_hashes = [row[0] for row in cursor.fetchall()]
             conn.close()
             
-            for hash_value in duplicate_hashes:
+            # Only show progress dialog if we have duplicates to delete
+            if duplicate_hashes:
+                # Create progress dialog
+                progress_dialog = QProgressDialog("Deleting duplicate files...", "Cancel", 0, len(duplicate_hashes), self)
+                progress_dialog.setWindowTitle("Deleting Duplicates")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)  # Show immediately
+                progress_dialog.setValue(0)  # Set initial value
+                progress_dialog.show()
+                QApplication.processEvents()  # Process events to show dialog
+            
+            for i, hash_value in enumerate(duplicate_hashes):
+                # Check if user cancelled
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    break
+                
+                # Update progress
+                if progress_dialog:
+                    progress_dialog.setValue(i)
+                    progress_dialog.setLabelText(f"Deleting duplicate group {i+1} of {len(duplicate_hashes)}...")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
                 # Get all files with this hash, ordered by date (keep the earliest)
                 files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value).order_by(fitsFile.fitsFileDate)
                 files_list = list(files_with_hash)
@@ -4055,8 +4311,18 @@ class DuplicatesTab(QWidget):
                             logging.error(f"Error deleting file {fits_file.fitsFileName}: {str(e)}")
                             error_count += 1
             
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
             # Show results
-            if error_count == 0:
+            if was_cancelled:
+                QMessageBox.information(
+                    self, 
+                    "Deletion Cancelled", 
+                    f"Deletion was cancelled. {deleted_count} files were deleted before cancellation."
+                )
+            elif error_count == 0:
                 QMessageBox.information(
                     self, 
                     "Deletion Complete", 
@@ -4075,6 +4341,8 @@ class DuplicatesTab(QWidget):
             
         except Exception as e:
             logging.error(f"Error during duplicate deletion: {str(e)}")
+            if progress_dialog:
+                progress_dialog.close()
             QMessageBox.critical(
                 self, 
                 "Deletion Error", 
@@ -4703,6 +4971,9 @@ class AstroFilerGUI(QWidget):
         self.setWindowTitle("AstroFiler - Astronomy File Management Tool")
         self.resize(1000, 700)
         
+        # Center the window on the screen
+        self.center_on_screen()
+        
         # Main layout
         layout = QVBoxLayout(self)
         
@@ -4731,11 +5002,19 @@ class AstroFilerGUI(QWidget):
         self.tab_widget.setCurrentWidget(self.stats_tab)
         
         layout.addWidget(self.tab_widget)
-    
+
     def invalidate_stats_cache(self):
         """Helper method to invalidate stats cache from any tab"""
         if hasattr(self, 'stats_tab'):
             self.stats_tab.invalidate_stats_cache()
+    
+    def center_on_screen(self):
+        """Center the main window on the screen"""
+        screen = QApplication.primaryScreen().geometry()
+        window_geometry = self.frameGeometry()
+        center_point = screen.center()
+        window_geometry.moveCenter(center_point)
+        self.move(window_geometry.topLeft())
     
     def apply_initial_theme(self):
         """Apply dark theme as default"""
