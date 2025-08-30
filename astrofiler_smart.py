@@ -32,7 +32,7 @@ class SmartTelescopeManager:
     def __init__(self):
         self.supported_telescopes = {
             'SeeStar': {
-                'default_hostname': 'SEESTAR.local',
+                'default_hostname': 'seestar.local',
                 'default_username': 'guest',
                 'default_password': 'guest',
                 'share_name': 'EMMC Images',
@@ -106,36 +106,47 @@ class SmartTelescopeManager:
             return None, "SMB protocol not available. Install pysmb package."
         
         if hostname:
-            # Try to connect to specific hostname
+            # For SeeStar, only use mDNS resolution for seestar.local hostnames
+            # No reverse DNS lookups as SeeStar patched their firmware to disable them
             try:
                 logger.debug(f"Resolving hostname {hostname}")
                 ip = socket.gethostbyname(hostname)
                 logger.debug(f"Hostname {hostname} resolved to {ip}")
                 
                 if self.check_smb_port(ip):
-                    # First check if the provided hostname matches the telescope type
+                    # For SeeStar, trust the mDNS hostname and skip reverse DNS
+                    if telescope_type == 'SeeStar':
+                        if 'seestar' in hostname.lower() or hostname.upper().startswith('SEESTAR'):
+                            logger.info(f"Found {telescope_type} telescope at {ip} (mDNS hostname: {hostname})")
+                            return ip, None
+                        else:
+                            logger.warning(f"Hostname {hostname} doesn't match expected SeeStar pattern")
+                            return None, f"Hostname {hostname} doesn't match expected SeeStar pattern"
+                    
+                    # For other telescope types, check if the provided hostname matches
                     if self.is_target_device(hostname, telescope_type):
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
-                    
-                    # Fallback to reverse DNS lookup if provided hostname doesn't match
-                    actual_hostname = self.get_hostname(ip)
-                    if actual_hostname and self.is_target_device(actual_hostname, telescope_type):
-                        logger.info(f"Found {telescope_type} telescope at {ip} (resolved hostname: {actual_hostname})")
-                        return ip, None
-                    
-                    # If reverse DNS fails but SMB is accessible and user provided a likely hostname,
-                    # be more permissive for known device patterns
-                    if telescope_type == 'SeeStar' and ('seestar' in hostname.lower() or hostname.upper() == 'SEESTAR'):
-                        logger.info(f"Found {telescope_type} telescope at {ip} (user provided SEESTAR hostname, reverse DNS unavailable)")
-                        return ip, None
+                
                 logger.warning(f"Device {hostname} ({ip}) not found or not accessible")
                 return None, f"Device {hostname} not found or not accessible"
             except Exception as e:
                 logger.error(f"Unable to resolve hostname {hostname}: {e}")
                 return None, f"Unable to resolve hostname {hostname}"
         
-        # Scan network for device
+        # For SeeStar, try the default mDNS hostname first before network scanning
+        if telescope_type == 'SeeStar':
+            default_hostname = self.supported_telescopes['SeeStar']['default_hostname']
+            logger.info(f"Trying default mDNS hostname: {default_hostname}")
+            try:
+                ip = socket.gethostbyname(default_hostname)
+                if self.check_smb_port(ip):
+                    logger.info(f"Found {telescope_type} telescope at {ip} via mDNS ({default_hostname})")
+                    return ip, None
+            except Exception as e:
+                logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
+        
+        # Scan network for device (no reverse DNS lookups for SeeStar)
         if not network_range:
             network_range = self.get_local_network()
             logger.debug(f"Using auto-detected network range: {network_range}")
@@ -171,9 +182,20 @@ class SmartTelescopeManager:
     def _scan_ip_for_telescope(self, ip, telescope_type):
         """Scan a single IP for the target telescope type."""
         if self.check_smb_port(ip):
-            hostname = self.get_hostname(ip)
-            if self.is_target_device(hostname, telescope_type):
+            # For SeeStar, skip reverse DNS lookups due to firmware changes
+            # Only rely on SMB port availability and network position
+            if telescope_type == 'SeeStar':
+                # SeeStar devices typically respond on SMB port 445
+                # Since reverse DNS is disabled, we'll consider any SMB-enabled device
+                # in the expected IP range as a potential SeeStar
+                # User will need to verify via the hostname field in the GUI
+                logger.debug(f"Found SMB service at {ip} - potential {telescope_type} device")
                 return str(ip)
+            else:
+                # For other telescope types, still use reverse DNS if needed
+                hostname = self.get_hostname(ip)
+                if self.is_target_device(hostname, telescope_type):
+                    return str(ip)
         return None
     
     def get_fits_files(self, telescope_type, ip, username=None, password=None):

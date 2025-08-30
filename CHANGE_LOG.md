@@ -3,6 +3,7 @@
 ## Version 1.1.0 - August 23, 2025
 
 ### Changes in new version
+- **Updated SeeStar network connectivity for firmware changes**: Modified SeeStar telescope discovery to use only mDNS resolution (seestar.local) and disabled reverse DNS lookups due to recent firmware patches
 - **Enhanced mapping dialog with database value population**: Mapping of values for selected cards is supported with both current and replace fields in mapping dialog now populate with actual database values
 - **Added progress dialog for duplicate scanning and deletion**: The `refresh_duplicates()` method now displays a progress window showing the scanning progress when detecting duplicate files
 - **Full path column in duplicates tab**: Added "Full Path" column to show complete file paths for duplicate files
