@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
                                QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy,
-                               QDialog, QDialogButtonBox, QGridLayout, QAbstractItemView)
+                               QDialog, QDialogButtonBox, QGridLayout, QAbstractItemView,
+                               QMainWindow, QMenuBar, QStackedWidget, QStatusBar, QToolBar)
 from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices, QIcon
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Mapping as MappingModel
@@ -63,63 +64,78 @@ def detect_system_theme():
 
 class ImagesTab(QWidget):
     """
-    Images tab for viewing and managing FITS files.
+    Images tab for viewing and managing FITS files with pagination and search.
     
     Features:
-    - Hierarchical view of FITS files
+    - Paginated view of FITS files for better performance
+    - Text search functionality on object field
     - Sortable by Object (default) or Date
     - File loading and repository synchronization
     - Context menus and double-click actions
     """
     def __init__(self):
         super().__init__()
-        self.init_ui()        # Load existing data on startup
+        # Pagination variables
+        self.page_size = 24
+        self.current_page = 0
+        self.total_items = 0  # Count of top-level items (objects or dates)
+        self.search_term = ""
+        self.init_ui()
+        # Load first page on startup
         self.load_fits_data()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
         
-        # File controls
+        # Combined search and filter controls in single row
         controls_layout = QHBoxLayout()
-        self.load_repo_button = QPushButton("Load Repo")
-        self.sync_repo_button = QPushButton("Sync Repo")
-        self.download_repo_button = QPushButton("Download Repo")
-        self.clear_button = QPushButton("Clear Repo")
-        self.mapping_button = QPushButton("Mapping")
-        self.refresh_button = QPushButton("Refresh")
+        
+        # Search controls
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search object names...")
+        self.search_input.setMaximumWidth(250)
+        self.search_button = QPushButton("Search")
+        self.search_button.setMaximumSize(80, 28)
+        self.search_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.clear_search_button = QPushButton("Clear")
+        self.clear_search_button.setMaximumSize(60, 28)
+        self.clear_search_button.setStyleSheet("QPushButton { font-size: 10px; }")
         
         # Add sort control
         sort_label = QLabel("Sort by:")
-        sort_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        sort_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
         self.sort_combo = QComboBox()
         self.sort_combo.addItems(["Object", "Date"])
         self.sort_combo.setCurrentText("Object")  # Set default to Object
         self.sort_combo.setToolTip("Choose how to organize the file tree:\n• Object: Group by astronomical object, then by date\n• Date: Group by observation date, then by object")
         self.sort_combo.setMinimumWidth(80)
+        self.sort_combo.setMaximumHeight(28)
         self.sort_combo.setStyleSheet("QComboBox { padding: 3px; }")
         
         # Add frame type filter control
         filter_label = QLabel("Show:")
-        filter_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        filter_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
         self.frame_filter_combo = QComboBox()
         self.frame_filter_combo.addItems(["Light Frames Only", "All Frames", "Calibration Frames Only"])
         self.frame_filter_combo.setCurrentText("Light Frames Only")  # Set default to Light Frames Only
         self.frame_filter_combo.setToolTip("Choose which frame types to display:\n• Light Frames Only: Show only light/science frames\n• All Frames: Show light and calibration frames\n• Calibration Frames Only: Show only dark, flat, and bias frames")
         self.frame_filter_combo.setMinimumWidth(120)
+        self.frame_filter_combo.setMaximumHeight(28)
         self.frame_filter_combo.setStyleSheet("QComboBox { padding: 3px; }")
         
-        controls_layout.addWidget(self.load_repo_button)
-        controls_layout.addWidget(self.sync_repo_button)
-        controls_layout.addWidget(self.download_repo_button)
-        controls_layout.addWidget(self.clear_button)
-        controls_layout.addWidget(self.mapping_button)
-        controls_layout.addWidget(self.refresh_button)
-        controls_layout.addStretch()
-        controls_layout.addWidget(filter_label)
-        controls_layout.addWidget(self.frame_filter_combo)
+        controls_layout.addWidget(search_label)
+        controls_layout.addWidget(self.search_input)
+        controls_layout.addWidget(self.search_button)
+        controls_layout.addWidget(self.clear_search_button)
         controls_layout.addWidget(sort_label)
         controls_layout.addWidget(self.sort_combo)
-          # File list
+        controls_layout.addWidget(filter_label)
+        controls_layout.addWidget(self.frame_filter_combo)
+        controls_layout.addStretch()
+        
+        # File list
         self.file_tree = QTreeWidget()
         self.file_tree.setHeaderLabels(["Object", "Type", "Date", "Exposure", "Filter", "Telescope", "Instrument", "Temperature", "Filename"])
         
@@ -134,19 +150,91 @@ class ImagesTab(QWidget):
         self.file_tree.setColumnWidth(7, 100)  # Temperature
         self.file_tree.setColumnWidth(8, 200)  # Filename
         
+        # Pagination controls at the bottom
+        pagination_layout = QHBoxLayout()
+        self.page_info_label = QLabel("Page 1 of 1 (0 items)")
+        self.prev_page_button = QPushButton("◀ Previous")
+        self.prev_page_button.setMaximumSize(90, 28)
+        self.prev_page_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.next_page_button = QPushButton("Next ▶")
+        self.next_page_button.setMaximumSize(90, 28)
+        self.next_page_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.page_size_label = QLabel("Items per page:")
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["24", "50", "100", "200", "500"])
+        self.page_size_combo.setCurrentText("24")
+        self.page_size_combo.setMaximumHeight(28)
+        
+        pagination_layout.addWidget(self.page_info_label)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addWidget(self.page_size_label)
+        pagination_layout.addWidget(self.page_size_combo)
+        
+        # Add all layouts to main layout
         layout.addLayout(controls_layout)
         layout.addWidget(self.file_tree)
+        layout.addLayout(pagination_layout)
         
         # Connect signals
-        self.load_repo_button.clicked.connect(self.load_repo)
-        self.sync_repo_button.clicked.connect(self.sync_repo)
-        self.download_repo_button.clicked.connect(self.show_download_dialog)
-        self.clear_button.clicked.connect(self.clear_files)
-        self.mapping_button.clicked.connect(self.open_mappings_dialog)
-        self.refresh_button.clicked.connect(self.load_fits_data)
+        self.search_input.returnPressed.connect(self.perform_search)
+        self.search_button.clicked.connect(self.perform_search)
+        self.clear_search_button.clicked.connect(self.clear_search)
         self.sort_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when sort changes
         self.frame_filter_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when filter changes
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.prev_page_button.clicked.connect(self.prev_page)
+        self.next_page_button.clicked.connect(self.next_page)
+        self.page_size_combo.currentTextChanged.connect(self.change_page_size)
+    
+    def perform_search(self):
+        """Perform search and reset to first page."""
+        self.search_term = self.search_input.text().strip()
+        self.current_page = 0
+        self.load_fits_data()
+    
+    def clear_search(self):
+        """Clear search and reset to first page."""
+        self.search_input.clear()
+        self.search_term = ""
+        self.current_page = 0
+        self.load_fits_data()
+    
+    def prev_page(self):
+        """Go to previous page."""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.load_fits_data()
+    
+    def next_page(self):
+        """Go to next page."""
+        max_page = (self.total_items - 1) // self.page_size
+        if self.current_page < max_page:
+            self.current_page += 1
+            self.load_fits_data()
+    
+    def change_page_size(self):
+        """Change page size and reset to first page."""
+        self.page_size = int(self.page_size_combo.currentText())
+        self.current_page = 0
+        self.load_fits_data()
+    
+    def update_pagination_controls(self):
+        """Update pagination control states and labels."""
+        max_page = (self.total_items - 1) // self.page_size if self.total_items > 0 else 0
+        current_page_display = self.current_page + 1
+        total_pages = max_page + 1
+        
+        # Update page info label
+        start_item = self.current_page * self.page_size + 1 if self.total_items > 0 else 0
+        end_item = min((self.current_page + 1) * self.page_size, self.total_items)
+        
+        self.page_info_label.setText(f"Page {current_page_display} of {total_pages} ({start_item}-{end_item} of {self.total_items} items)")
+        
+        # Update button states
+        self.prev_page_button.setEnabled(self.current_page > 0)
+        self.next_page_button.setEnabled(self.current_page < max_page)
     
     def load_repo(self):
         """Load the repository by running registerFitsImages with progress dialog."""
@@ -375,7 +463,7 @@ class ImagesTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
 
     def load_fits_data(self):
-        """Load FITS file data from the database and populate the tree widget based on selected sort criteria and frame filter."""
+        """Load FITS file data from the database with pagination and populate the tree widget based on selected sort criteria and frame filter."""
         try:
             self.file_tree.clear()
 
@@ -394,32 +482,236 @@ class ImagesTab(QWidget):
                 frame_filter = "Light Frames Only"  # Default when UI isn't ready yet
             
             if sort_by == "Object":
-                self._load_fits_data_by_object(frame_filter)
+                self._load_fits_data_by_object_paginated(frame_filter)
             else:  # Date
-                self._load_fits_data_by_date(frame_filter)
+                self._load_fits_data_by_date_paginated(frame_filter)
             
-            logger.debug(f"FITS data loaded and organized by {sort_by} with filter: {frame_filter}")
+            # Update pagination controls
+            self.update_pagination_controls()
+            
+            logger.debug(f"FITS data loaded and organized by {sort_by} with filter: {frame_filter}, page {self.current_page + 1}")
                 
         except Exception as e:
             logger.error(f"Error loading FITS data: {e}")
             if "no such table" not in str(e).lower():
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
 
-    def _get_fits_files_query(self, frame_filter):
-        """Get the appropriate database query based on the frame filter selection."""
+    def _get_fits_files_query(self, frame_filter, include_search=True):
+        """Get the appropriate database query based on the frame filter selection and search term."""
+        # Start with frame filter
         if frame_filter == "Light Frames Only":
             # Only show files where fitsFileType contains "Light"
-            return FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light"))
+            query = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light"))
         elif frame_filter == "Calibration Frames Only":
             # Show dark, flat, bias frames (anything that's not light)
-            return FitsFileModel.select().where(
+            query = FitsFileModel.select().where(
                 (FitsFileModel.fitsFileType.contains("Dark")) |
                 (FitsFileModel.fitsFileType.contains("Flat")) |
                 (FitsFileModel.fitsFileType.contains("Bias"))
             )
         else:  # "All Frames"
             # Show all files regardless of type
-            return FitsFileModel.select()
+            query = FitsFileModel.select()
+        
+        # Add search filter if search term is provided and include_search is True
+        if include_search and self.search_term:
+            query = query.where(FitsFileModel.fitsFileObject.contains(self.search_term))
+        
+        return query
+    
+    def _load_fits_data_by_object_paginated(self, frame_filter="Light Frames Only"):
+        """Load FITS file data grouped by object name with pagination of top-level objects."""
+        # Get all files matching filter and search criteria
+        all_files = self._get_fits_files_query(frame_filter, include_search=True).order_by(
+            FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate
+        )
+
+        # Group files by object name first
+        all_objects_dict = {}
+        for fits_file in all_files:
+            object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
+            date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
+
+            if object_name not in all_objects_dict:
+                all_objects_dict[object_name] = {}
+            if date_str not in all_objects_dict[object_name]:
+                all_objects_dict[object_name][date_str] = []
+
+            all_objects_dict[object_name][date_str].append(fits_file)
+
+        # Get sorted list of object names for pagination
+        sorted_objects = sorted(all_objects_dict.keys())
+        self.total_items = len(sorted_objects)
+        
+        # Apply pagination to object list
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        objects_for_page = sorted_objects[start_idx:end_idx]
+
+        # Create tree items only for objects on current page
+        for object_name in objects_for_page:
+            dates_dict = all_objects_dict[object_name]
+            # Create parent item for the object
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, object_name)  # Object name in first column
+            parent_item.setText(1, f"({sum(len(files) for files in dates_dict.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each date (sorted by date)
+            for date_str in sorted(dates_dict.keys(), reverse=True):  # Most recent dates first
+                files = dates_dict[date_str]
+                date_item = QTreeWidgetItem()
+                date_item.setText(0, date_str)  # Date in first column
+                date_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                date_item.setText(2, "")  # Empty other columns for date
+                date_item.setText(3, "")
+                date_item.setText(4, "")
+                date_item.setText(5, "")
+                date_item.setText(6, "")
+                date_item.setText(7, "")
+                date_item.setText(8, "")
+
+                # Add child items for each file
+                for fits_file in files:
+                    self._add_file_item(date_item, fits_file)
+
+                # Add date item to parent
+                parent_item.addChild(date_item)
+
+                # Keep the date item collapsed by default
+                date_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+
+            # Keep the parent item collapsed by default
+            parent_item.setExpanded(False)
+
+        total_files_on_page = sum(len(files) for object_name in objects_for_page 
+                                 for files in all_objects_dict[object_name].values())
+        logger.debug(f"Loaded {len(objects_for_page)} objects with {total_files_on_page} total files (sorted by object, page {self.current_page + 1})")
+    
+    def _load_fits_data_by_date_paginated(self, frame_filter="Light Frames Only"):
+        """Load FITS file data grouped by date with pagination of top-level dates."""
+        # Get all files matching filter and search criteria
+        all_files = self._get_fits_files_query(frame_filter, include_search=True).order_by(
+            FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject
+        )
+
+        # Group files by date first
+        all_dates_dict = {}
+        for fits_file in all_files:
+            object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
+            date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
+
+            if date_str not in all_dates_dict:
+                all_dates_dict[date_str] = {}
+            if object_name not in all_dates_dict[date_str]:
+                all_dates_dict[date_str][object_name] = []
+
+            all_dates_dict[date_str][object_name].append(fits_file)
+
+        # Get sorted list of dates for pagination (newest first)
+        sorted_dates = sorted(all_dates_dict.keys(), reverse=True)
+        self.total_items = len(sorted_dates)
+        
+        # Apply pagination to date list
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        dates_for_page = sorted_dates[start_idx:end_idx]
+
+        # Create tree items only for dates on current page
+        for date_str in dates_for_page:
+            objects_dict = all_dates_dict[date_str]
+            # Create parent item for the date
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, date_str)  # Date in first column
+            parent_item.setText(1, f"({sum(len(files) for files in objects_dict.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each object (sorted alphabetically)
+            for object_name in sorted(objects_dict.keys()):
+                files = objects_dict[object_name]
+                object_item = QTreeWidgetItem()
+                object_item.setText(0, object_name)  # Object name in first column
+                object_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                object_item.setText(2, "")  # Empty other columns for object
+                object_item.setText(3, "")
+                object_item.setText(4, "")
+                object_item.setText(5, "")
+                object_item.setText(6, "")
+                object_item.setText(7, "")
+                object_item.setText(8, "")
+
+                # Add child items for each file
+                for fits_file in files:
+                    self._add_file_item(object_item, fits_file)
+
+                # Add object item to parent
+                parent_item.addChild(object_item)
+
+                # Keep the object item collapsed by default
+                object_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+
+            # Keep the parent item collapsed by default
+            parent_item.setExpanded(False)
+
+        total_files_on_page = sum(len(files) for date_str in dates_for_page 
+                                 for files in all_dates_dict[date_str].values())
+        logger.debug(f"Loaded {len(dates_for_page)} dates with {total_files_on_page} total files (sorted by date, page {self.current_page + 1})")
 
     def _load_fits_data_by_object(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by object name, then by date."""
@@ -1102,7 +1394,9 @@ class SmartTelescopeDownloadDialog(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
         self.download_button = QPushButton("Download")
+        self.download_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setStyleSheet("QPushButton { font-size: 11px; }")
         
         button_layout.addStretch()
         button_layout.addWidget(self.download_button)
@@ -1316,6 +1610,7 @@ class SessionsTab(QWidget):
         # Controls
         controls_layout = QHBoxLayout()
         self.regenerate_button = QPushButton("Regenerate")
+        self.regenerate_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.regenerate_button.setToolTip("Clear all sessions and regenerate: Update Lights → Update Calibrations → Link Sessions")
         
         controls_layout.addWidget(self.regenerate_button)
@@ -2380,6 +2675,7 @@ class MappingsDialog(QDialog):
         
         # Add button at the top
         add_button = QPushButton("Add Mapping")
+        add_button.setStyleSheet("QPushButton { font-size: 11px; }")
         add_button.clicked.connect(lambda: self.add_mapping_row())
         layout.addWidget(add_button)
         
@@ -2390,16 +2686,51 @@ class MappingsDialog(QDialog):
         self.scroll_layout = QVBoxLayout(self.scroll_widget)
         self.scroll_layout.setAlignment(Qt.AlignTop)  # Top-justify the mapping rows
         self.scroll_layout.setSpacing(5)  # Add consistent spacing between rows
+        self.scroll_layout.setContentsMargins(5, 5, 5, 5)  # Add margins for better appearance
+        
+        # Add a stretch to push all rows to the top
+        self.scroll_layout.addStretch()
+        
         self.scroll_area.setWidget(self.scroll_widget)
         layout.addWidget(self.scroll_area)
         
         # Bottom buttons
         bottom_layout = QVBoxLayout()
         
+        # Add checkboxes
+        checkbox_layout = QHBoxLayout()
+        
+        # Update files checkbox
+        self.update_files_checkbox = QCheckBox("Update FITS headers on disk")
+        self.update_files_checkbox.setChecked(False)
+        self.update_files_checkbox.setToolTip("Also update the FITS headers in the actual files on disk")
+        self.update_files_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
+        checkbox_layout.addWidget(self.update_files_checkbox)
+        
+        # Apply to database checkbox
+        self.apply_to_database_checkbox = QCheckBox("Apply mappings to database")
+        self.apply_to_database_checkbox.setChecked(True)
+        self.apply_to_database_checkbox.setToolTip("Apply the mappings to update database records")
+        self.apply_to_database_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
+        checkbox_layout.addWidget(self.apply_to_database_checkbox)
+        
+        bottom_layout.addLayout(checkbox_layout)
+        
         # Dialog buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept_mappings)
         button_box.rejected.connect(self.reject)
+        
+        # Reduce button sizes
+        ok_button = button_box.button(QDialogButtonBox.Ok)
+        cancel_button = button_box.button(QDialogButtonBox.Cancel)
+        if ok_button:
+            ok_button.setStyleSheet("QPushButton { font-size: 10px; }")
+            ok_button.setMaximumSize(60, 28)
+        if cancel_button:
+            cancel_button.setStyleSheet("QPushButton { font-size: 10px; }")
+            cancel_button.setMaximumSize(60, 28)
+        
         bottom_layout.addWidget(button_box)
         
         layout.addLayout(bottom_layout)
@@ -2439,6 +2770,13 @@ class MappingsDialog(QDialog):
         """Add a new mapping row to the dialog"""
         row_widget = QWidget()
         row_layout = QGridLayout(row_widget)
+        row_layout.setSpacing(5)  # Consistent spacing
+        row_layout.setContentsMargins(5, 5, 5, 5)  # Consistent margins
+        
+        # Set column stretch factors for consistent alignment
+        row_layout.setColumnStretch(1, 2)  # Card combo
+        row_layout.setColumnStretch(3, 3)  # Current combo
+        row_layout.setColumnStretch(5, 3)  # Replace combo
         
         # Card dropdown
         card_combo = QComboBox()
@@ -2464,7 +2802,7 @@ class MappingsDialog(QDialog):
                 color: #44ff44;
                 border: 1px solid #555;
                 border-radius: 3px;
-                font-size: 14px;
+                font-size: 10px;
                 padding: 2px;
             }
             QPushButton:hover {
@@ -2489,7 +2827,7 @@ class MappingsDialog(QDialog):
                 color: #ff4444;
                 border: 1px solid #555;
                 border-radius: 3px;
-                font-size: 14px;
+                font-size: 10px;
                 padding: 2px;
             }
             QPushButton:hover {
@@ -2525,8 +2863,8 @@ class MappingsDialog(QDialog):
         current_combo.setCurrentText(current)
         replace_combo.setCurrentText(replace)
         
-        # Add to scroll layout
-        self.scroll_layout.addWidget(row_widget)
+        # Add to scroll layout (insert before the stretch)
+        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, row_widget)
         self.mapping_rows.append(row_widget)
     
     def update_current_values(self, row_widget):
@@ -2749,12 +3087,13 @@ class MappingsDialog(QDialog):
             logger.error(f"Error loading existing mappings: {e}")
     
     def accept_mappings(self):
-        """Save mappings to database without applying them"""
+        """Save mappings to database and optionally apply them"""
         try:
             # Clear existing mappings
             MappingModel.delete().execute()
             
             # Save new mappings
+            mappings_to_apply = []
             for row_widget in self.mapping_rows:
                 card = row_widget.card_combo.currentText()
                 current = row_widget.current_combo.currentText()
@@ -2762,11 +3101,20 @@ class MappingsDialog(QDialog):
                 # Set is_default to False since we removed the checkbox
                 is_default = False
                 
-                MappingModel.create(
+                mapping = MappingModel.create(
                     card=card,
                     current=current if current else None,
                     replace=replace if replace else None
                 )
+                
+                # Collect mappings for application if checkbox is checked
+                if self.apply_to_database_checkbox.isChecked():
+                    mappings_to_apply.append({
+                        'card': card,
+                        'current': current,
+                        'replace': replace,
+                        'is_default': is_default
+                    })
             
             # Clear the mapping cache so file processing picks up new mappings
             try:
@@ -2774,6 +3122,10 @@ class MappingsDialog(QDialog):
                 clearMappingCache()
             except ImportError:
                 pass  # Function might not be available in older versions
+            
+            # Apply mappings to database if requested
+            if mappings_to_apply and self.apply_to_database_checkbox.isChecked():
+                self.apply_database_mappings(mappings_to_apply)
             
             self.accept()
             
@@ -3049,8 +3401,11 @@ class MergeTab(QWidget):
         # Buttons
         button_layout = QHBoxLayout()
         self.preview_button = QPushButton("Preview Changes")
+        self.preview_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.merge_button = QPushButton("Execute Merge")
+        self.merge_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.clear_button = QPushButton("Clear Fields")
+        self.clear_button.setStyleSheet("QPushButton { font-size: 11px; }")
         
         self.preview_button.clicked.connect(self.preview_merge)
         self.merge_button.clicked.connect(self.execute_merge)
@@ -3560,6 +3915,7 @@ class ConfigTab(QWidget):
         source_path_layout = QHBoxLayout()
         self.source_path = QLineEdit()
         self.source_path_button = QPushButton("Browse...")
+        self.source_path_button.setStyleSheet("QPushButton { font-size: 10px; }")
         self.source_path_button.clicked.connect(self.browse_source_path)
         source_path_layout.addWidget(self.source_path)
         source_path_layout.addWidget(self.source_path_button)
@@ -3568,6 +3924,7 @@ class ConfigTab(QWidget):
         repo_path_layout = QHBoxLayout()
         self.repo_path = QLineEdit()
         self.repo_path_button = QPushButton("Browse...")
+        self.repo_path_button.setStyleSheet("QPushButton { font-size: 10px; }")
         self.repo_path_button.clicked.connect(self.browse_repo_path)
         repo_path_layout.addWidget(self.repo_path)
         repo_path_layout.addWidget(self.repo_path_button)
@@ -3615,6 +3972,7 @@ class ConfigTab(QWidget):
         self.fits_viewer_path = QLineEdit()
         self.fits_viewer_path.setPlaceholderText("Select external FITS file viewer...")
         self.fits_viewer_button = QPushButton("Browse...")
+        self.fits_viewer_button.setStyleSheet("QPushButton { font-size: 10px; }")
         self.fits_viewer_button.clicked.connect(self.browse_fits_viewer)
         fits_viewer_layout.addWidget(self.fits_viewer_path)
         fits_viewer_layout.addWidget(self.fits_viewer_button)
@@ -3624,9 +3982,13 @@ class ConfigTab(QWidget):
         # Action buttons
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Settings")
+        self.save_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.reset_button = QPushButton("Reset to Defaults")
+        self.reset_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.import_button = QPushButton("Import Config")
+        self.import_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.export_button = QPushButton("Export Config")
+        self.export_button.setStyleSheet("QPushButton { font-size: 11px; }")
         
         button_layout.addWidget(self.save_button)
         button_layout.addWidget(self.reset_button)
@@ -3976,8 +4338,10 @@ class LogTab(QWidget):
         # Controls layout with Clear button
         controls_layout = QHBoxLayout()
         self.clear_button = QPushButton("Clear")
+        self.clear_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.clear_button.clicked.connect(self.clear_log)
         self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.refresh_button.clicked.connect(self.load_log_content)
         
         controls_layout.addWidget(self.clear_button)
@@ -4064,6 +4428,7 @@ class DuplicatesTab(QWidget):
         
         # Refresh button
         refresh_button = QPushButton("Refresh Duplicates")
+        refresh_button.setStyleSheet("QPushButton { font-size: 11px; }")
         refresh_button.clicked.connect(self.refresh_duplicates)
         layout.addWidget(refresh_button)
         
@@ -4956,7 +5321,7 @@ class StatsTab(QWidget):
         self._last_size = event.size()
 
 
-class AstroFilerGUI(QWidget):
+class AstroFilerGUI(QMainWindow):
     """Main GUI class that encapsulates the entire AstroFiler application interface"""
     
     def __init__(self):
@@ -4969,18 +5334,24 @@ class AstroFilerGUI(QWidget):
         """Initialize the user interface"""
         # Set window properties
         self.setWindowTitle("AstroFiler - Astronomy File Management Tool")
-        self.resize(1000, 700)
+        self.resize(1200, 800)
         
         # Center the window on the screen
         self.center_on_screen()
         
-        # Main layout
-        layout = QVBoxLayout(self)
+        # Create central widget with stacked layout instead of tabs
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
         
-        # Create tab widget
-        self.tab_widget = QTabWidget()
+        # Create main layout
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Create and add tabs
+        # Create stacked widget to hold the different views
+        self.stacked_widget = QStackedWidget()
+        main_layout.addWidget(self.stacked_widget)
+        
+        # Create the different view widgets (formerly tabs)
         self.images_tab = ImagesTab()
         self.sessions_tab = SessionsTab()
         self.merge_tab = MergeTab()
@@ -4990,18 +5361,214 @@ class AstroFilerGUI(QWidget):
         self.log_tab = LogTab()
         self.about_tab = AboutTab()
         
-        self.tab_widget.addTab(self.stats_tab, "Stats")
-        self.tab_widget.addTab(self.images_tab, "Images")
-        self.tab_widget.addTab(self.sessions_tab, "Sessions")
-        self.tab_widget.addTab(self.merge_tab, "Merge")
-        self.tab_widget.addTab(self.duplicates_tab, "Duplicates")
-        self.tab_widget.addTab(self.log_tab, "Log")
-        self.tab_widget.addTab(self.config_tab, "Config")
-        self.tab_widget.addTab(self.about_tab, "About")
-        # Set the default tab to be the Stats tab
-        self.tab_widget.setCurrentWidget(self.stats_tab)
+        # Add views to stacked widget
+        self.stacked_widget.addWidget(self.images_tab)      # Index 0 - Default view
+        self.stacked_widget.addWidget(self.sessions_tab)    # Index 1
+        self.stacked_widget.addWidget(self.merge_tab)       # Index 2
+        self.stacked_widget.addWidget(self.stats_tab)       # Index 3
+        self.stacked_widget.addWidget(self.duplicates_tab)  # Index 4
+        self.stacked_widget.addWidget(self.log_tab)         # Index 5
+        self.stacked_widget.addWidget(self.config_tab)      # Index 6
+        self.stacked_widget.addWidget(self.about_tab)       # Index 7
         
-        layout.addWidget(self.tab_widget)
+        # Set default view to Images
+        self.stacked_widget.setCurrentIndex(0)
+        
+        # Create menu bar
+        self.create_menu_bar()
+        
+        # Create status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready - Images View")
+
+    def create_menu_bar(self):
+        """Create the menu bar with pulldown menus"""
+        menubar = self.menuBar()
+        
+        # File Menu
+        file_menu = menubar.addMenu('&File')
+        file_menu.addAction('E&xit', self.close, 'Ctrl+Q')
+        
+        # Images Menu (repository management)
+        images_menu = menubar.addMenu('&Images')
+        
+        # Load Repository
+        load_repo_action = images_menu.addAction('&Load Repository...')
+        load_repo_action.setShortcut('Ctrl+L')
+        load_repo_action.triggered.connect(self.load_repo)
+        
+        # Sync Repository
+        sync_repo_action = images_menu.addAction('&Sync Repository...')
+        sync_repo_action.setShortcut('Ctrl+S')
+        sync_repo_action.triggered.connect(self.sync_repo)
+        
+        # Download Repository
+        download_repo_action = images_menu.addAction('&Download Repository...')
+        download_repo_action.setShortcut('Ctrl+D')
+        download_repo_action.triggered.connect(self.download_repo)
+        
+        images_menu.addSeparator()
+        
+        # Clear Repository
+        clear_repo_action = images_menu.addAction('&Clear Repository...')
+        clear_repo_action.triggered.connect(self.clear_repo)
+        
+        images_menu.addSeparator()
+        
+        # Field Mappings
+        mappings_action = images_menu.addAction('Field &Mappings...')
+        mappings_action.setShortcut('Ctrl+M')
+        mappings_action.triggered.connect(self.open_mappings_dialog)
+        
+        # View Menu (main navigation)
+        view_menu = menubar.addMenu('&View')
+        
+        # Images view (default)
+        images_action = view_menu.addAction('&Images')
+        images_action.setShortcut('Ctrl+1')
+        images_action.triggered.connect(lambda: self.switch_view(0))
+        
+        # Sessions view
+        sessions_action = view_menu.addAction('&Sessions')
+        sessions_action.setShortcut('Ctrl+2')
+        sessions_action.triggered.connect(lambda: self.switch_view(1))
+        
+        # Merge view
+        merge_action = view_menu.addAction('&Merge')
+        merge_action.setShortcut('Ctrl+3')
+        merge_action.triggered.connect(lambda: self.switch_view(2))
+        
+        # Statistics view
+        stats_action = view_menu.addAction('&Statistics')
+        stats_action.setShortcut('Ctrl+4')
+        stats_action.triggered.connect(lambda: self.switch_view(3))
+        
+        # Duplicates view
+        duplicates_action = view_menu.addAction('&Duplicates')
+        duplicates_action.setShortcut('Ctrl+5')
+        duplicates_action.triggered.connect(lambda: self.switch_view(4))
+        
+        # Log view
+        log_action = view_menu.addAction('&Log')
+        log_action.setShortcut('Ctrl+6')
+        log_action.triggered.connect(lambda: self.switch_view(5))
+        
+        view_menu.addSeparator()
+        
+        # Refresh action
+        refresh_action = view_menu.addAction('&Refresh Current View')
+        refresh_action.setShortcut('F5')
+        refresh_action.triggered.connect(self.refresh_current_view)
+        
+        # Tools Menu
+        tools_menu = menubar.addMenu('&Tools')
+        
+        # Download from telescope
+        download_action = tools_menu.addAction('&Download from Telescope...')
+        download_action.triggered.connect(self.open_download_dialog)
+        
+        tools_menu.addSeparator()
+        
+        # Configuration
+        config_action = tools_menu.addAction('&Configuration...')
+        config_action.setShortcut('Ctrl+,')
+        config_action.triggered.connect(lambda: self.switch_view(6))
+        
+        # Help Menu
+        help_menu = menubar.addMenu('&Help')
+        
+        about_action = help_menu.addAction('&About AstroFiler')
+        about_action.triggered.connect(lambda: self.switch_view(7))
+
+    def switch_view(self, index):
+        """Switch to the specified view"""
+        self.stacked_widget.setCurrentIndex(index)
+        
+        # Update status bar to show current view
+        view_names = ['Images', 'Sessions', 'Merge', 'Statistics', 'Duplicates', 'Log', 'Configuration', 'About']
+        self.status_bar.showMessage(f"Current View: {view_names[index]}")
+        
+        # Update window title to include current view
+        self.setWindowTitle(f"AstroFiler - {view_names[index]}")
+        
+        # Trigger any view-specific refresh if needed
+        if index == 0:  # Images view
+            if hasattr(self.images_tab, 'refresh_view'):
+                self.images_tab.refresh_view()
+
+    def refresh_current_view(self):
+        """Refresh the currently active view"""
+        current_index = self.stacked_widget.currentIndex()
+        current_widget = self.stacked_widget.currentWidget()
+        
+        # Call refresh method based on current view
+        if current_index == 0:  # Images
+            if hasattr(current_widget, 'load_fits_data'):
+                current_widget.load_fits_data()
+        elif current_index == 1:  # Sessions
+            if hasattr(current_widget, 'load_sessions_data'):
+                current_widget.load_sessions_data()
+        elif current_index == 2:  # Merge
+            if hasattr(current_widget, 'refresh_data'):
+                current_widget.refresh_data()
+        elif current_index == 3:  # Stats
+            if hasattr(current_widget, 'load_stats_data'):
+                current_widget.load_stats_data()
+        elif current_index == 4:  # Duplicates
+            if hasattr(current_widget, 'load_duplicates_data'):
+                current_widget.load_duplicates_data()
+        elif current_index == 5:  # Log
+            if hasattr(current_widget, 'load_log_content'):
+                current_widget.load_log_content()
+
+    def open_download_dialog(self):
+        """Open the telescope download dialog"""
+        try:
+            dialog = SmartTelescopeDownloadDialog(self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open download dialog: {e}")
+
+    def open_mappings_dialog(self):
+        """Open the field mappings dialog"""
+        try:
+            if hasattr(self.images_tab, 'open_mappings_dialog'):
+                self.images_tab.open_mappings_dialog()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open mappings dialog: {e}")
+
+    def load_repo(self):
+        """Load repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'load_repo'):
+                self.images_tab.load_repo()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not load repository: {e}")
+
+    def sync_repo(self):
+        """Sync repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'sync_repo'):
+                self.images_tab.sync_repo()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not sync repository: {e}")
+
+    def download_repo(self):
+        """Download repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'show_download_dialog'):
+                self.images_tab.show_download_dialog()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open download dialog: {e}")
+
+    def clear_repo(self):
+        """Clear repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'clear_files'):
+                self.images_tab.clear_files()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not clear repository: {e}")
 
     def invalidate_stats_cache(self):
         """Helper method to invalidate stats cache from any tab"""
@@ -5021,7 +5588,8 @@ class AstroFilerGUI(QWidget):
         app = QApplication.instance()
         app.setStyleSheet(get_dark_stylesheet())
         self.current_theme = "Dark"
-        self.config_tab.theme.setCurrentText("Dark")
+        if hasattr(self, 'config_tab'):
+            self.config_tab.theme.setCurrentText("Dark")
     
     def get_config_settings(self):
         """Get current configuration settings from the GUI"""
@@ -5052,7 +5620,8 @@ class AstroFilerGUI(QWidget):
             self.config_tab.grid_size.setValue(settings['grid_size'])
 
     def showEvent(self, event):
-        """Handle show events to reload data when tab regains focus"""
+        """Handle show events to reload data when window regains focus"""
         super().showEvent(event)
-        # Reload FITS data when tab becomes visible
-        self.images_tab.load_fits_data()
+        # Load images data by default since that's the default view
+        if hasattr(self.images_tab, 'load_fits_data'):
+            self.images_tab.load_fits_data()
