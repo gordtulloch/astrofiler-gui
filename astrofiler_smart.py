@@ -32,7 +32,7 @@ class SmartTelescopeManager:
     def __init__(self):
         self.supported_telescopes = {
             'SeeStar': {
-                'default_hostname': 'SEESTAR',
+                'default_hostname': 'SEESTAR.local',
                 'default_username': 'guest',
                 'default_password': 'guest',
                 'share_name': 'EMMC Images',
@@ -113,9 +113,21 @@ class SmartTelescopeManager:
                 logger.debug(f"Hostname {hostname} resolved to {ip}")
                 
                 if self.check_smb_port(ip):
+                    # First check if the provided hostname matches the telescope type
+                    if self.is_target_device(hostname, telescope_type):
+                        logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
+                        return ip, None
+                    
+                    # Fallback to reverse DNS lookup if provided hostname doesn't match
                     actual_hostname = self.get_hostname(ip)
-                    if self.is_target_device(actual_hostname, telescope_type):
-                        logger.info(f"Found {telescope_type} telescope at {ip} (hostname: {actual_hostname})")
+                    if actual_hostname and self.is_target_device(actual_hostname, telescope_type):
+                        logger.info(f"Found {telescope_type} telescope at {ip} (resolved hostname: {actual_hostname})")
+                        return ip, None
+                    
+                    # If reverse DNS fails but SMB is accessible and user provided a likely hostname,
+                    # be more permissive for known device patterns
+                    if telescope_type == 'SeeStar' and ('seestar' in hostname.lower() or hostname.upper() == 'SEESTAR'):
+                        logger.info(f"Found {telescope_type} telescope at {ip} (user provided SEESTAR hostname, reverse DNS unavailable)")
                         return ip, None
                 logger.warning(f"Device {hostname} ({ip}) not found or not accessible")
                 return None, f"Device {hostname} not found or not accessible"
