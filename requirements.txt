@@ -6,4 +6,4 @@ matplotlib
 pytz
 PySide6
 Pillow
-
+pysmb
