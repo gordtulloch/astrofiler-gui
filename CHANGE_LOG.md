@@ -4,10 +4,6 @@
 
 ### Changes in new version
 - **Converted GUI from tab-based to menu-based interface**: Complete redesign of main interface from QTabWidget to QMainWindow with pulldown menu system (File, Images, View, Tools, Help)
-- **Added Images menu for repository management**: Moved Load Repo, Sync Repo, Download Repo, Clear Repo, and Mapping functions to dedicated Images menu with keyboard shortcuts
-- **Streamlined Images tab interface**: Removed repository management and refresh buttons from screen, organized search and filter controls in single compact row with smaller buttons
-- **Reduced button font sizes throughout application**: Set font-size to 10-11px on all buttons including OK/Cancel dialog buttons to prevent text truncation in compact button layouts
-- **Enhanced pagination logic**: Items per page now refers to top-level tree items (objects or dates) rather than total database records for more intuitive navigation
 - **Added paginated Images view with search**: Images tab now supports pagination (24-500 items per page, default 24) and real-time search by object name for better performance with large datasets
 - **Updated SeeStar network connectivity for firmware changes**: Modified SeeStar telescope discovery to use only mDNS resolution (seestar.local) and disabled reverse DNS lookups due to recent firmware patches
 - **Enhanced mapping dialog with database value population**: Mapping of values for selected cards is supported with both current and replace fields in mapping dialog now populate with actual database values
@@ -18,12 +14,13 @@
 - **Added apply button with progress indicator for individual mappings**: Each mapping row now has an apply button to immediately apply that mapping with detailed progress feedback
 - **Added calibration frame support in Images tab**: New frame filter allows viewing light frames only, all frames, or calibration frames only (dark, flat, bias)
 - **Smart calibration frame grouping**: Calibration frames without object names are automatically grouped by frame type for better organization
-- **Fixed SEESTAR telescope connectivity**: Updated default hostname from "SEESTAR" to "SEESTAR.local" to resolve network discovery issues
 - **Enhanced sessions tab with multi-selection**: Added support for Ctrl+click and Shift+click to select multiple light sessions, with context menu restricted to light sessions only
 - **Multiple sessions checkout**: New batch checkout feature allows checking out multiple light sessions simultaneously into organized directory structure
 - **Improved progress bar display**: Session creation progress now shows filename only instead of full file path for better readability
 - **Restored mapping dialog bottom checkboxes**: "Apply to Database" and "Update Files on Disk" checkboxes preserved while removing individual row Default checkboxes
-- **Fixed mapping dialog layout alignment**: Improved card row alignment and spacing with consistent margins and column stretch factors
+
+- **Enhanced filter chart display**: Filter pie chart now groups filters with less than 1% of total time into "Other (<1%)" category for cleaner visualization
+- **Fixed filter chart size**: Corrected pie chart display scaling to properly reduce size by 24% and prevent stretching back to full container size
 - **Fixed logging to astrofiler.log**: Removed duplicate logging configuration that prevented log file creation
 - **Fixed FITS file flush warning**: Corrected variable name typo that caused flush() to be called on readonly file handle instead of update mode handle
 - **Mapping applies to directories**: Renamed folders where mappings indicate

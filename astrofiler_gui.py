@@ -4731,22 +4731,6 @@ class StatsTab(QWidget):
         layout.setContentsMargins(10, 5, 10, 10)  # Reduce top margin from default
         layout.setSpacing(5)  # Reduce spacing between elements
         
-        # Refresh button
-        refresh_layout = QHBoxLayout()
-        refresh_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins around button layout
-        self.refresh_button = QPushButton("Refresh Stats")
-        self.refresh_button.clicked.connect(self.force_refresh_stats)
-        self.refresh_button.setToolTip("Force refresh of statistics (clears cache)")
-        
-        # Add cache status label
-        self.cache_status_label = QLabel("")
-        self.cache_status_label.setStyleSheet("color: gray; font-size: 10px;")
-        
-        refresh_layout.addWidget(self.refresh_button)
-        refresh_layout.addWidget(self.cache_status_label)
-        refresh_layout.addStretch()
-        layout.addLayout(refresh_layout)
-        
         # Main content area with horizontal splitter for two columns
         splitter = QSplitter(Qt.Horizontal)
         splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -4755,11 +4739,13 @@ class StatsTab(QWidget):
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(5, 0, 5, 5)  # Reduce margins
-        left_layout.setSpacing(10)  # Reduce spacing between sections
+        left_layout.setSpacing(0)  # Remove automatic spacing - use manual margins instead
+        left_layout.setAlignment(Qt.AlignTop)  # Align content to top
         
         # Last 10 Objects Observed section
         recent_objects_label = QLabel("Last 10 Objects Observed")
         recent_objects_label.setFont(QFont("Arial", 12, QFont.Bold))
+        recent_objects_label.setContentsMargins(0, 0, 0, 2)  # Small bottom margin for tighter spacing
         left_layout.addWidget(recent_objects_label)
         
         # Recent objects table - provide adequate space for 10 entries
@@ -4781,12 +4767,10 @@ class StatsTab(QWidget):
         
         left_layout.addWidget(self.recent_objects_table)
         
-        # Add spacing
-        left_layout.addSpacing(10)  # Reduce spacing between sections
-        
-        # Summary Statistics section
+        # Summary Statistics section (remove extra spacing)
         summary_label = QLabel("Summary Statistics")
         summary_label.setFont(QFont("Arial", 12, QFont.Bold))
+        summary_label.setContentsMargins(0, 15, 0, 2)  # Top margin for separation, small bottom margin for tighter spacing
         left_layout.addWidget(summary_label)
         
         self.summary_table = QTreeWidget()
@@ -4815,10 +4799,12 @@ class StatsTab(QWidget):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(5, 0, 5, 5)  # Reduce margins
         right_layout.setSpacing(10)  # Reduce spacing between sections
+        right_layout.setAlignment(Qt.AlignTop)  # Align content to top
         
         # Top 10 Objects section
         objects_label = QLabel("Top 10 Objects by Total Integration Time")
         objects_label.setFont(QFont("Arial", 12, QFont.Bold))
+        objects_label.setContentsMargins(0, 0, 0, 2)  # Match left column title spacing for alignment
         right_layout.addWidget(objects_label)
         
         # Objects table with columns - give it more dedicated space
@@ -4840,12 +4826,10 @@ class StatsTab(QWidget):
         
         right_layout.addWidget(self.objects_table)
         
-        # Add spacing
-        right_layout.addSpacing(10)  # Reduce spacing between sections
-        
         # Filter Chart section
         chart_label = QLabel("Total Imaging Time by Filter")
         chart_label.setFont(QFont("Arial", 12, QFont.Bold))
+        chart_label.setContentsMargins(0, 15, 0, 2)  # Add top margin to separate from table above, reduce bottom spacing
         right_layout.addWidget(chart_label)
         
         # Chart area - responsive sizing that scales with window
@@ -4883,22 +4867,13 @@ class StatsTab(QWidget):
     
     def _update_cache_status(self):
         """Update the cache status label"""
-        if self._cache_timestamp is None:
-            self.cache_status_label.setText("")
-        else:
-            import time
-            cache_age = int(time.time() - self._cache_timestamp)
-            if cache_age < 60:
-                self.cache_status_label.setText(f"Cache: {cache_age}s ago")
-            else:
-                minutes = cache_age // 60
-                self.cache_status_label.setText(f"Cache: {minutes}m ago")
+        # Cache status label removed - now handled via menu
+        pass
     
     def _invalidate_cache(self):
         """Invalidate the stats cache"""
         self._stats_cache.clear()
         self._cache_timestamp = None
-        self.cache_status_label.setText("")
         logger.debug("Stats cache invalidated")
     
     def force_refresh_stats(self):
@@ -5207,24 +5182,48 @@ class StatsTab(QWidget):
             filters = []
             times = []
             
+            # First pass: collect all data
+            all_filters = []
+            all_times = []
+            
             for result in query:
                 filter_name = result.fitsFileFilter if result.fitsFileFilter else 'Unknown'
                 total_seconds = float(result.total_time)
                 
-                filters.append(filter_name)
-                times.append(total_seconds)
+                all_filters.append(filter_name)
+                all_times.append(total_seconds)
             
-            if not filters:
+            if not all_filters:
                 self.chart_label.setText("No light frame data available")
                 return
+            
+            # Calculate total time and 1% threshold
+            total_time = sum(all_times)
+            threshold = total_time * 0.01  # 1% threshold
+            
+            # Second pass: filter out values less than 1% and group them as "Other"
+            other_time = 0
+            
+            for filter_name, time_seconds in zip(all_filters, all_times):
+                if time_seconds >= threshold:
+                    filters.append(filter_name)
+                    times.append(time_seconds)
+                else:
+                    other_time += time_seconds
+            
+            # Add "Other" category if there are small filters
+            if other_time > 0:
+                filters.append('Other (<1%)')
+                times.append(other_time)
             
             # Get the current size of the chart label to determine optimal figure size
             label_width = max(300, self.chart_label.width())  # Ensure minimum width
             label_height = max(250, self.chart_label.height())  # Ensure minimum height
             
             # Calculate figure size based on available space (convert pixels to inches, assuming 100 DPI)
-            fig_width = max(4, min(12, label_width / 100))   # Between 4-12 inches wide
-            fig_height = max(3, min(10, label_height / 100))  # Between 3-10 inches tall
+            # Reduce chart size by 24% (multiply by 0.76)
+            fig_width = max(4, min(12, label_width / 100)) * 0.76   # Between 4-12 inches wide, reduced 24%
+            fig_height = max(3, min(10, label_height / 100)) * 0.76  # Between 3-10 inches tall, reduced 24%
             
             logging.debug(f"Chart label size: {label_width}x{label_height}, figure size: {fig_width:.1f}x{fig_height:.1f}")
             
@@ -5277,8 +5276,12 @@ class StatsTab(QWidget):
             
             # Scale pixmap to fit label while maintaining aspect ratio
             if not pixmap.isNull():
+                # Reduce the display size by 24% by scaling to 76% of label size
+                label_size = self.chart_label.size()
+                target_width = int(label_size.width() * 0.76)
+                target_height = int(label_size.height() * 0.76)
                 scaled_pixmap = pixmap.scaled(
-                    self.chart_label.size(), 
+                    target_width, target_height, 
                     Qt.KeepAspectRatio, 
                     Qt.SmoothTransformation
                 )
@@ -5394,7 +5397,7 @@ class AstroFilerGUI(QMainWindow):
         images_menu = menubar.addMenu('&Images')
         
         # Load Repository
-        load_repo_action = images_menu.addAction('&Load Repository...')
+        load_repo_action = images_menu.addAction('&Load from Incoming...')
         load_repo_action.setShortcut('Ctrl+L')
         load_repo_action.triggered.connect(self.load_repo)
         
@@ -5475,6 +5478,19 @@ class AstroFilerGUI(QMainWindow):
         config_action.setShortcut('Ctrl+,')
         config_action.triggered.connect(lambda: self.switch_view(6))
         
+        # Stats Menu
+        stats_menu = menubar.addMenu('&Stats')
+        
+        # Show Stats
+        show_stats_action = stats_menu.addAction('&Show Stats')
+        show_stats_action.setShortcut('Ctrl+4')  # Keep existing shortcut
+        show_stats_action.triggered.connect(lambda: self.switch_view(3))
+        
+        # Refresh Stats
+        refresh_stats_action = stats_menu.addAction('&Refresh Stats')
+        refresh_stats_action.setShortcut('Shift+F5')
+        refresh_stats_action.triggered.connect(self.refresh_stats)
+        
         # Help Menu
         help_menu = menubar.addMenu('&Help')
         
@@ -5521,6 +5537,24 @@ class AstroFilerGUI(QMainWindow):
         elif current_index == 5:  # Log
             if hasattr(current_widget, 'load_log_content'):
                 current_widget.load_log_content()
+
+    def refresh_stats(self):
+        """Refresh statistics by forcing a cache refresh"""
+        stats_widget = None
+        for i in range(self.stacked_widget.count()):
+            widget = self.stacked_widget.widget(i)
+            if hasattr(widget, 'force_refresh_stats'):
+                stats_widget = widget
+                break
+        
+        if stats_widget:
+            stats_widget.force_refresh_stats()
+        else:
+            # Fallback: try to get stats tab directly
+            try:
+                self.stats_tab.force_refresh_stats()
+            except AttributeError:
+                QMessageBox.information(self, "Stats", "Stats refresh not available")
 
     def open_download_dialog(self):
         """Open the telescope download dialog"""
