@@ -1057,11 +1057,13 @@ class TelescopeDownloadWorker(QThread):
     download_completed = Signal(str)
     error_occurred = Signal(str)
     
-    def __init__(self, telescope_type, hostname, network, delete_files=False):
+    def __init__(self, telescope_type, hostname, network, telescope_directory, target_directory, delete_files=False):
         super().__init__()
         self.telescope_type = telescope_type
         self.hostname = hostname
         self.network = network
+        self.telescope_directory = telescope_directory
+        self.target_directory = target_directory
         self.delete_files = delete_files
         self._stop_requested = False
     
@@ -1138,7 +1140,7 @@ class TelescopeDownloadWorker(QThread):
             logger.info("Scanning SeeStar for FITS files...")
             self.progress_percent_updated.emit(15)
             
-            fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
+            fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip, telescope_directory=self.telescope_directory)
             
             if self._stop_requested:
                 return
@@ -1157,12 +1159,14 @@ class TelescopeDownloadWorker(QThread):
             logger.info(f"Found {len(fits_files)} FITS files to download")
             self.progress_percent_updated.emit(20)
             
-            # Step 3: Create temp directory
-            logger.info("Creating temporary directory for downloads")
+            # Step 3: Use target directory for downloads
+            logger.info(f"Using target directory: {self.target_directory}")
             if self._stop_requested:
                 return
             
-            temp_dir = tempfile.mkdtemp(prefix="astrofiler_download_")
+            # Ensure target directory exists
+            os.makedirs(self.target_directory, exist_ok=True)
+            download_dir = self.target_directory
             
             # Step 4: Download and process each file (20-100% of progress)
             successful_downloads = 0
@@ -1189,8 +1193,8 @@ class TelescopeDownloadWorker(QThread):
                 logger.info(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")  
                 self.progress_percent_updated.emit(current_file_start)
                 
-                # Download file to temp directory
-                local_path = os.path.join(temp_dir, file_name)
+                # Download file to target directory
+                local_path = os.path.join(download_dir, file_name)
                 
                 def download_progress_callback(progress):
                     if self._stop_requested:
@@ -1321,13 +1325,7 @@ class TelescopeDownloadWorker(QThread):
             logger.info("Download complete!")
             self.progress_percent_updated.emit(100)
             
-            # Step 5: Clean up temp directory
-            try:
-                os.rmdir(temp_dir)
-            except:
-                pass
-            
-            # Step 6: Show final status
+            # Step 5: Show final status
             if not self._stop_requested:
                 message = (f"Download complete!\n\n"
                           f"Files found: {len(fits_files)}\n"
@@ -1364,6 +1362,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         
         self.telescope_list = QListWidget()
         self.telescope_list.addItem("SeeStar")
+        self.telescope_list.addItem("Dwarf 3")
         self.telescope_list.setCurrentRow(0)  # Select first item by default
         self.telescope_list.setMaximumHeight(80)
         
@@ -1382,8 +1381,17 @@ class SmartTelescopeDownloadDialog(QDialog):
         self.network_edit.setText(default_network)
         self.network_edit.setToolTip("Network range to scan (e.g., 10.0.0.0/24)")
         
+        # Telescope directory (directory on the telescope to scan)
+        self.telescope_dir_edit = QLineEdit()
+        self.telescope_dir_edit.setToolTip("Directory on the telescope to scan for FITS files")
+        
+        # Set default telescope directory based on telescope type
+        default_telescope_dir = self.get_default_telescope_directory()
+        self.telescope_dir_edit.setText(default_telescope_dir)
+        
         connection_layout.addRow("Hostname:", self.hostname_edit)
         connection_layout.addRow("Network:", self.network_edit)
+        connection_layout.addRow("Telescope Directory:", self.telescope_dir_edit)
         
         # Delete files option
         self.delete_files_checkbox = QCheckBox("Delete files on host after download")
@@ -1415,6 +1423,39 @@ class SmartTelescopeDownloadDialog(QDialog):
         
         # Update initial state
         self.on_telescope_changed()
+    
+    def get_default_telescope_directory(self):
+        """Get the default telescope directory based on telescope type."""
+        current_telescope = self.telescope_list.currentItem()
+        if current_telescope:
+            telescope_type = current_telescope.text()
+            if telescope_type == "SeeStar":
+                return "MyWorks"
+            elif telescope_type == "Dwarf 3":
+                return "/Astronomy"
+        
+        # Default fallback
+        return "MyWorks"
+    
+    def get_repository_incoming_directory(self):
+        """Get the repository's incoming directory from configuration."""
+        try:
+            import configparser
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            
+            # Get source path from configuration (this is the incoming directory)
+            if config.has_option('DEFAULT', 'source'):
+                source_path = config.get('DEFAULT', 'source')
+                if source_path and os.path.exists(source_path):
+                    return source_path
+            
+            # Fallback to current directory if no source path is configured
+            return os.getcwd()
+            
+        except Exception as e:
+            logger.debug(f"Error reading configuration: {e}")
+            return os.getcwd()
     
     def closeEvent(self, event):
         """Handle dialog close event to ensure worker thread is stopped."""
@@ -1453,6 +1494,10 @@ class SmartTelescopeDownloadDialog(QDialog):
             telescope_type = current_telescope.text()
             if telescope_type == "SeeStar":
                 self.hostname_edit.setText("seestar.local")
+                self.telescope_dir_edit.setText("MyWorks")
+            elif telescope_type == "Dwarf 3":
+                self.hostname_edit.setText("192.168.88.1")
+                self.telescope_dir_edit.setText("/Astronomy")
     
     def start_download(self):
         """Start the download process."""
@@ -1464,10 +1509,33 @@ class SmartTelescopeDownloadDialog(QDialog):
         telescope_type = current_telescope.text()
         hostname = self.hostname_edit.text().strip()
         network = self.network_edit.text().strip()
+        telescope_directory = self.telescope_dir_edit.text().strip()
         delete_files = self.delete_files_checkbox.isChecked()
+        
+        # Get the repository's incoming directory
+        target_directory = self.get_repository_incoming_directory()
         
         if not network:
             QMessageBox.warning(self, "Warning", "Please enter a network range.")
+            return
+        
+        if not telescope_directory:
+            QMessageBox.warning(self, "Warning", "Please specify a telescope directory.")
+            return
+        
+        # Ensure repository incoming directory exists
+        if not os.path.exists(target_directory):
+            try:
+                os.makedirs(target_directory, exist_ok=True)
+                logger.info(f"Created repository incoming directory: {target_directory}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to create repository incoming directory:\n{e}")
+                return
+        
+        # Check if target directory is writable
+        if not os.access(target_directory, os.W_OK):
+            QMessageBox.warning(self, "Warning", 
+                               f"Repository incoming directory is not writable:\n{target_directory}")
             return
         
         # Confirmation dialog for file deletion
@@ -1509,8 +1577,8 @@ class SmartTelescopeDownloadDialog(QDialog):
         
         self.progress_dialog.show()
         
-        # Create and start worker thread with delete_files parameter
-        self.worker = TelescopeDownloadWorker(telescope_type, hostname, network, delete_files)
+        # Create and start worker thread with telescope directory and delete_files parameter
+        self.worker = TelescopeDownloadWorker(telescope_type, hostname, network, telescope_directory, target_directory, delete_files)
         
         # Connect signals
         self.worker.progress_updated.connect(self.on_progress_updated)
