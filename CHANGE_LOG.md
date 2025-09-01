@@ -18,13 +18,14 @@
 - **Multiple sessions checkout**: New batch checkout feature allows checking out multiple light sessions simultaneously into organized directory structure
 - **Improved progress bar display**: Session creation progress now shows filename only instead of full file path for better readability
 - **Restored mapping dialog bottom checkboxes**: "Apply to Database" and "Update Files on Disk" checkboxes preserved while removing individual row Default checkboxes
-
 - **Enhanced filter chart display**: Filter pie chart now groups filters with less than 1% of total time into "Other (<1%)" category for cleaner visualization
 - **Fixed filter chart size**: Corrected pie chart display scaling to properly reduce size by 24% and prevent stretching back to full container size
 - **Fixed logging to astrofiler.log**: Removed duplicate logging configuration that prevented log file creation
 - **Fixed FITS file flush warning**: Corrected variable name typo that caused flush() to be called on readonly file handle instead of update mode handle
 - **Mapping applies to directories**: Renamed folders where mappings indicate
-2025-08-17
+- **Added configurable telescope directory in Smart Telescope dialog**: Telescope Directory field allows specifying custom directory on telescope to scan (defaults to "MyWorks" for SeeStar)
+- **Added Dwarf 3 telescope support**: New telescope type with FTP protocol support (default address: 192.168.88.1, directory: /Astronomy)
+
 
 ### Added
 - **FILTER Support in Mapping Dialog**: Added FILTER as a mapping type in the dropdown alongside TELESCOP, INSTRUME, OBSERVER, and NOTES
