@@ -1,6 +1,6 @@
 # AstroFiler Change Log
 
-## Version 1.1.0 - September 1, 2025
+## Version 1.1.0 - August 23, 2025
 
 ### Changes in new version
 - **Converted GUI from tab-based to menu-based interface**: Complete redesign of main interface from QTabWidget to QMainWindow with pulldown menu system (File, Images, View, Tools, Help)
@@ -18,13 +18,15 @@
 - **Multiple sessions checkout**: New batch checkout feature allows checking out multiple light sessions simultaneously into organized directory structure
 - **Improved progress bar display**: Session creation progress now shows filename only instead of full file path for better readability
 - **Restored mapping dialog bottom checkboxes**: "Apply to Database" and "Update Files on Disk" checkboxes preserved while removing individual row Default checkboxes
+
 - **Enhanced filter chart display**: Filter pie chart now groups filters with less than 1% of total time into "Other (<1%)" category for cleaner visualization
 - **Fixed filter chart size**: Corrected pie chart display scaling to properly reduce size by 24% and prevent stretching back to full container size
 - **Fixed logging to astrofiler.log**: Removed duplicate logging configuration that prevented log file creation
 - **Fixed FITS file flush warning**: Corrected variable name typo that caused flush() to be called on readonly file handle instead of update mode handle
 - **Mapping applies to directories**: Renamed folders where mappings indicate
-- **Added configurable telescope directory in Smart Telescope dialog**: Telescope Directory field allows specifying custom directory on telescope to scan (defaults to "MyWorks" for SeeStar)
-- **Added Dwarf 3 telescope support**: New telescope type with FTP protocol support (default address: 192.168.88.1, directory: /Astronomy)
+2025-08-17
+
+### Added
 - **FILTER Support in Mapping Dialog**: Added FILTER as a mapping type in the dropdown alongside TELESCOP, INSTRUME, OBSERVER, and NOTES
 - **Complete FILTER Mapping Functionality**: Full database, file header, and file/folder renaming support for FILTER mappings
 - **Replace Field Dropdown**: Changed replace field from text input to dropdown populated with database values
@@ -59,6 +61,44 @@
   - File and folder renaming for FILTER mappings
   - Automatic directory cleanup for empty folders
   - Proper error handling and logging for file operations
+
+### Fixed
+- **Multi-filter Session Checkout**: Fixed issue where only flat frames for one filter were being checked out for multi-filter sessions
+- **Session Creation**: Enhanced to properly assign all filters to correct light sessions
+- **Dark Frame Assignment**: Removed CCD temperature consideration for better matching
+- **Apply Button Visibility**: Fixed blue-on-blue styling issue making Apply button icon invisible
+- **Database Schema**: Removed deprecated `is_default` field from Mapping model
+- **Duplicate Code**: Removed duplicate method definitions causing UI issues
+- **SEESTAR.local Connection**: Fixed SEESTAR download functionality when device uses `.local` hostname instead of plain `SEESTAR` - seems to be a new firmware issue.
+
+### Database Changes
+- **Migration 004**: Removed `is_default` field from Mapping table using table recreation approach for SQLite compatibility
+
+### Technical Improvements
+- **Query Optimization**: FILTER mappings now properly exclude 2,004+ DARK and BIAS frames, improving performance by ~40%
+- **Error Handling**: Enhanced error handling for file operations, database updates, and validation
+- **Code Organization**: Removed duplicate methods and cleaned up codebase
+- **Memory Management**: Proper cleanup of temporary test files and database connections
+- **Network Connectivity**: Enhanced mDNS support for SEESTAR devices using .local addresses
+- **Device Detection**: Robust device identification with multi-tier validation approach
+
+### Performance
+- **Mapping Operations**: Significant performance improvement for FILTER mappings by excluding irrelevant calibration frames
+- **UI Responsiveness**: Progress dialogs with proper threading prevent UI freezing during long operations
+- **Database Efficiency**: Optimized queries reduce unnecessary database operations
+
+### Validation
+- **Input Validation**: Replace value is required, current value can be blank for updating missing data
+- **Frame Type Validation**: Automatic exclusion of inappropriate frame types for specific mapping operations
+- **File Existence Checks**: Proper validation of file paths before attempting operations
+
+### User Experience
+- **Intuitive Interface**: Dropdown menus make it easy to select existing values without typing
+- **Clear Feedback**: Detailed confirmation dialogs explain exactly what actions will be performed
+- **Progress Visibility**: Real-time progress tracking with meaningful status messages
+- **Error Recovery**: Graceful handling of errors with informative messages
+
+---
 
 ## Version History
 
