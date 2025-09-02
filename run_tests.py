@@ -24,9 +24,13 @@ def main():
     parser.add_argument('--install-xvfb', action='store_true', help='Install Xvfb for headless GUI testing (requires sudo)')
     args = parser.parse_args()
     
-    # Determine the path to the virtual environment's Python
-    venv_python = os.path.join('.venv', 'bin', 'python')
-    
+    # Determine the path to the virtual environment's Python depending on the OS
+    if sys.platform.startswith('win'):
+        venv_python = os.path.join('.venv', 'Scripts', 'python.exe')
+    else:   # Assume Unix-like OS
+        venv_python = os.path.join('.venv', 'bin', 'python')
+        
+    # Check if the virtual environment's Python exists
     if not os.path.exists(venv_python):
         print(f"Error: Virtual environment Python not found at {venv_python}")
         print("Make sure you have activated your virtual environment.")

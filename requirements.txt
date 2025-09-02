@@ -1,8 +1,9 @@
 astropy
 peewee
+peewee-migrate
 numpy
 matplotlib
 pytz
 PySide6
 Pillow
-
+pysmb

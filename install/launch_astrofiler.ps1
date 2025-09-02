@@ -25,6 +25,24 @@ if (Test-Path ".git") {
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "Successfully updated to latest version." -ForegroundColor Green
                 Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Successfully updated to latest version from GitHub"
+                # Run database migrations after successful update
+                Write-Host "Running database migrations..." -ForegroundColor Yellow
+                Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Running database migrations after update"
+                if (Test-Path ".venv\Scripts\python.exe") {
+                    try {
+                        & ".venv\Scripts\python.exe" migrate.py run
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Host "Database migrations completed successfully." -ForegroundColor Green
+                            Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Database migrations completed successfully"
+                        } else {
+                            Write-Host "Warning: Database migration failed. AstroFiler may not function correctly." -ForegroundColor Yellow
+                            Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - WARNING - Database migration failed after update"
+                        }
+                    } catch {
+                        Write-Host "Warning: Error running database migrations: $_" -ForegroundColor Yellow
+                        Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - WARNING - Error running database migrations: $_"
+                    }
+                }
             } else {
                 Write-Host "Warning: Failed to update from GitHub. Continuing with current version." -ForegroundColor Yellow
                 Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - WARNING - Failed to update from GitHub. Continuing with current version"
