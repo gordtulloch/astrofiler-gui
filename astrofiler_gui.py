@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import configparser
 import datetime
 from datetime import datetime
@@ -8,19 +9,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Import necessary PySide6 modules
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Q_ARG, QThread, Signal, QTimer
 from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout, 
                                QHBoxLayout, QWidget, QTabWidget, QListWidget, 
                                QTextEdit, QFormLayout, QLineEdit, QSpinBox, 
                                QCheckBox, QComboBox, QGroupBox, QFileDialog,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QStackedLayout,
-                               QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy)
-from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices
+                               QMessageBox, QScrollArea,QMenu,QProgressDialog, QSizePolicy,
+                               QDialog, QDialogButtonBox, QGridLayout, QAbstractItemView,
+                               QMainWindow, QMenuBar, QStackedWidget, QStatusBar, QToolBar)
+from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices, QIcon
 from astrofiler_file import fitsProcessing
-from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
+from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Mapping as MappingModel
+from astrofiler_smart import smart_telescope_manager
 
 # Global version variable
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
@@ -60,47 +64,78 @@ def detect_system_theme():
 
 class ImagesTab(QWidget):
     """
-    Images tab for viewing and managing FITS files.
+    Images tab for viewing and managing FITS files with pagination and search.
     
     Features:
-    - Hierarchical view of FITS files
+    - Paginated view of FITS files for better performance
+    - Text search functionality on object field
     - Sortable by Object (default) or Date
     - File loading and repository synchronization
     - Context menus and double-click actions
     """
     def __init__(self):
         super().__init__()
-        self.init_ui()        # Load existing data on startup
+        # Pagination variables
+        self.page_size = 24
+        self.current_page = 0
+        self.total_items = 0  # Count of top-level items (objects or dates)
+        self.search_term = ""
+        self.init_ui()
+        # Load first page on startup
         self.load_fits_data()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
         
-        # File controls
+        # Combined search and filter controls in single row
         controls_layout = QHBoxLayout()
-        self.load_repo_button = QPushButton("Load Repo")
-        self.sync_repo_button = QPushButton("Sync Repo")
-        self.clear_button = QPushButton("Clear Repo")
-        self.refresh_button = QPushButton("Refresh")
+        
+        # Search controls
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search object names...")
+        self.search_input.setMaximumWidth(250)
+        self.search_button = QPushButton("Search")
+        self.search_button.setMaximumSize(80, 28)
+        self.search_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.clear_search_button = QPushButton("Clear")
+        self.clear_search_button.setMaximumSize(60, 28)
+        self.clear_search_button.setStyleSheet("QPushButton { font-size: 10px; }")
         
         # Add sort control
         sort_label = QLabel("Sort by:")
-        sort_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        sort_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
         self.sort_combo = QComboBox()
         self.sort_combo.addItems(["Object", "Date"])
         self.sort_combo.setCurrentText("Object")  # Set default to Object
         self.sort_combo.setToolTip("Choose how to organize the file tree:\n• Object: Group by astronomical object, then by date\n• Date: Group by observation date, then by object")
         self.sort_combo.setMinimumWidth(80)
+        self.sort_combo.setMaximumHeight(28)
         self.sort_combo.setStyleSheet("QComboBox { padding: 3px; }")
         
-        controls_layout.addWidget(self.load_repo_button)
-        controls_layout.addWidget(self.sync_repo_button)
-        controls_layout.addWidget(self.clear_button)
-        controls_layout.addWidget(self.refresh_button)
-        controls_layout.addStretch()
+        # Add frame type filter control
+        filter_label = QLabel("Show:")
+        filter_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
+        self.frame_filter_combo = QComboBox()
+        self.frame_filter_combo.addItems(["Light Frames Only", "All Frames", "Calibration Frames Only"])
+        self.frame_filter_combo.setCurrentText("Light Frames Only")  # Set default to Light Frames Only
+        self.frame_filter_combo.setToolTip("Choose which frame types to display:\n• Light Frames Only: Show only light/science frames\n• All Frames: Show light and calibration frames\n• Calibration Frames Only: Show only dark, flat, and bias frames")
+        self.frame_filter_combo.setMinimumWidth(120)
+        self.frame_filter_combo.setMaximumHeight(28)
+        self.frame_filter_combo.setStyleSheet("QComboBox { padding: 3px; }")
+        
+        controls_layout.addWidget(search_label)
+        controls_layout.addWidget(self.search_input)
+        controls_layout.addWidget(self.search_button)
+        controls_layout.addWidget(self.clear_search_button)
         controls_layout.addWidget(sort_label)
         controls_layout.addWidget(self.sort_combo)
-          # File list
+        controls_layout.addWidget(filter_label)
+        controls_layout.addWidget(self.frame_filter_combo)
+        controls_layout.addStretch()
+        
+        # File list
         self.file_tree = QTreeWidget()
         self.file_tree.setHeaderLabels(["Object", "Type", "Date", "Exposure", "Filter", "Telescope", "Instrument", "Temperature", "Filename"])
         
@@ -115,16 +150,91 @@ class ImagesTab(QWidget):
         self.file_tree.setColumnWidth(7, 100)  # Temperature
         self.file_tree.setColumnWidth(8, 200)  # Filename
         
+        # Pagination controls at the bottom
+        pagination_layout = QHBoxLayout()
+        self.page_info_label = QLabel("Page 1 of 1 (0 items)")
+        self.prev_page_button = QPushButton("◀ Previous")
+        self.prev_page_button.setMaximumSize(90, 28)
+        self.prev_page_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.next_page_button = QPushButton("Next ▶")
+        self.next_page_button.setMaximumSize(90, 28)
+        self.next_page_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.page_size_label = QLabel("Items per page:")
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["24", "50", "100", "200", "500"])
+        self.page_size_combo.setCurrentText("24")
+        self.page_size_combo.setMaximumHeight(28)
+        
+        pagination_layout.addWidget(self.page_info_label)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addWidget(self.page_size_label)
+        pagination_layout.addWidget(self.page_size_combo)
+        
+        # Add all layouts to main layout
         layout.addLayout(controls_layout)
         layout.addWidget(self.file_tree)
+        layout.addLayout(pagination_layout)
         
         # Connect signals
-        self.load_repo_button.clicked.connect(self.load_repo)
-        self.sync_repo_button.clicked.connect(self.sync_repo)
-        self.clear_button.clicked.connect(self.clear_files)
-        self.refresh_button.clicked.connect(self.load_fits_data)
+        self.search_input.returnPressed.connect(self.perform_search)
+        self.search_button.clicked.connect(self.perform_search)
+        self.clear_search_button.clicked.connect(self.clear_search)
         self.sort_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when sort changes
+        self.frame_filter_combo.currentTextChanged.connect(self.load_fits_data)  # Reload data when filter changes
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.prev_page_button.clicked.connect(self.prev_page)
+        self.next_page_button.clicked.connect(self.next_page)
+        self.page_size_combo.currentTextChanged.connect(self.change_page_size)
+    
+    def perform_search(self):
+        """Perform search and reset to first page."""
+        self.search_term = self.search_input.text().strip()
+        self.current_page = 0
+        self.load_fits_data()
+    
+    def clear_search(self):
+        """Clear search and reset to first page."""
+        self.search_input.clear()
+        self.search_term = ""
+        self.current_page = 0
+        self.load_fits_data()
+    
+    def prev_page(self):
+        """Go to previous page."""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.load_fits_data()
+    
+    def next_page(self):
+        """Go to next page."""
+        max_page = (self.total_items - 1) // self.page_size
+        if self.current_page < max_page:
+            self.current_page += 1
+            self.load_fits_data()
+    
+    def change_page_size(self):
+        """Change page size and reset to first page."""
+        self.page_size = int(self.page_size_combo.currentText())
+        self.current_page = 0
+        self.load_fits_data()
+    
+    def update_pagination_controls(self):
+        """Update pagination control states and labels."""
+        max_page = (self.total_items - 1) // self.page_size if self.total_items > 0 else 0
+        current_page_display = self.current_page + 1
+        total_pages = max_page + 1
+        
+        # Update page info label
+        start_item = self.current_page * self.page_size + 1 if self.total_items > 0 else 0
+        end_item = min((self.current_page + 1) * self.page_size, self.total_items)
+        
+        self.page_info_label.setText(f"Page {current_page_display} of {total_pages} ({start_item}-{end_item} of {self.total_items} items)")
+        
+        # Update button states
+        self.prev_page_button.setEnabled(self.current_page > 0)
+        self.next_page_button.setEnabled(self.current_page < max_page)
     
     def load_repo(self):
         """Load the repository by running registerFitsImages with progress dialog."""
@@ -260,6 +370,30 @@ class ImagesTab(QWidget):
         if reply != QMessageBox.Ok:
             return  # User cancelled, exit the function
         
+        # Clear repository first before syncing
+        try:
+            # Clear the tree widget
+            self.file_tree.clear()
+            
+            # Delete all fitsSession records from the database
+            deleted_sessions = FitsSessionModel.delete().execute()
+            
+            # Delete all fitsFile records from the database
+            deleted_files = FitsFileModel.delete().execute()
+            
+            # Invalidate stats cache since all data was cleared
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'invalidate_stats_cache'):
+                parent_widget = parent_widget.parent()
+            if parent_widget:
+                parent_widget.invalidate_stats_cache()
+            
+            logger.info(f"Cleared repository before sync: {deleted_sessions} sessions, {deleted_files} files")
+        except Exception as e:
+            logger.error(f"Error clearing repository before sync: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to clear repository before sync: {e}")
+            return
+        
         progress_dialog = None
         was_cancelled = False
         
@@ -329,7 +463,7 @@ class ImagesTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to sync repository: {e}")
 
     def load_fits_data(self):
-        """Load FITS file data from the database and populate the tree widget based on selected sort criteria."""
+        """Load FITS file data from the database with pagination and populate the tree widget based on selected sort criteria and frame filter."""
         try:
             self.file_tree.clear()
 
@@ -340,27 +474,267 @@ class ImagesTab(QWidget):
             else:
                 sort_by = "Object"  # Default when UI isn't ready yet
             
-            if sort_by == "Object":
-                self._load_fits_data_by_object()
-            else:  # Date
-                self._load_fits_data_by_date()
+            # Get the current frame filter (default to Light Frames Only if UI not yet initialized)
+            frame_filter = getattr(self, 'frame_filter_combo', None)
+            if frame_filter is not None:
+                frame_filter = self.frame_filter_combo.currentText()
+            else:
+                frame_filter = "Light Frames Only"  # Default when UI isn't ready yet
             
-            logger.debug(f"FITS data loaded and organized by {sort_by}")
+            if sort_by == "Object":
+                self._load_fits_data_by_object_paginated(frame_filter)
+            else:  # Date
+                self._load_fits_data_by_date_paginated(frame_filter)
+            
+            # Update pagination controls
+            self.update_pagination_controls()
+            
+            logger.debug(f"FITS data loaded and organized by {sort_by} with filter: {frame_filter}, page {self.current_page + 1}")
                 
         except Exception as e:
             logger.error(f"Error loading FITS data: {e}")
             if "no such table" not in str(e).lower():
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
 
-    def _load_fits_data_by_object(self):
+    def _get_fits_files_query(self, frame_filter, include_search=True):
+        """Get the appropriate database query based on the frame filter selection and search term."""
+        # Start with frame filter
+        if frame_filter == "Light Frames Only":
+            # Only show files where fitsFileType contains "Light"
+            query = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light"))
+        elif frame_filter == "Calibration Frames Only":
+            # Show dark, flat, bias frames (anything that's not light)
+            query = FitsFileModel.select().where(
+                (FitsFileModel.fitsFileType.contains("Dark")) |
+                (FitsFileModel.fitsFileType.contains("Flat")) |
+                (FitsFileModel.fitsFileType.contains("Bias"))
+            )
+        else:  # "All Frames"
+            # Show all files regardless of type
+            query = FitsFileModel.select()
+        
+        # Add search filter if search term is provided and include_search is True
+        if include_search and self.search_term:
+            query = query.where(FitsFileModel.fitsFileObject.contains(self.search_term))
+        
+        return query
+    
+    def _load_fits_data_by_object_paginated(self, frame_filter="Light Frames Only"):
+        """Load FITS file data grouped by object name with pagination of top-level objects."""
+        # Get all files matching filter and search criteria
+        all_files = self._get_fits_files_query(frame_filter, include_search=True).order_by(
+            FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate
+        )
+
+        # Group files by object name first
+        all_objects_dict = {}
+        for fits_file in all_files:
+            object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
+            date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
+
+            if object_name not in all_objects_dict:
+                all_objects_dict[object_name] = {}
+            if date_str not in all_objects_dict[object_name]:
+                all_objects_dict[object_name][date_str] = []
+
+            all_objects_dict[object_name][date_str].append(fits_file)
+
+        # Get sorted list of object names for pagination
+        sorted_objects = sorted(all_objects_dict.keys())
+        self.total_items = len(sorted_objects)
+        
+        # Apply pagination to object list
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        objects_for_page = sorted_objects[start_idx:end_idx]
+
+        # Create tree items only for objects on current page
+        for object_name in objects_for_page:
+            dates_dict = all_objects_dict[object_name]
+            # Create parent item for the object
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, object_name)  # Object name in first column
+            parent_item.setText(1, f"({sum(len(files) for files in dates_dict.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each date (sorted by date)
+            for date_str in sorted(dates_dict.keys(), reverse=True):  # Most recent dates first
+                files = dates_dict[date_str]
+                date_item = QTreeWidgetItem()
+                date_item.setText(0, date_str)  # Date in first column
+                date_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                date_item.setText(2, "")  # Empty other columns for date
+                date_item.setText(3, "")
+                date_item.setText(4, "")
+                date_item.setText(5, "")
+                date_item.setText(6, "")
+                date_item.setText(7, "")
+                date_item.setText(8, "")
+
+                # Add child items for each file
+                for fits_file in files:
+                    self._add_file_item(date_item, fits_file)
+
+                # Add date item to parent
+                parent_item.addChild(date_item)
+
+                # Keep the date item collapsed by default
+                date_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+
+            # Keep the parent item collapsed by default
+            parent_item.setExpanded(False)
+
+        total_files_on_page = sum(len(files) for object_name in objects_for_page 
+                                 for files in all_objects_dict[object_name].values())
+        logger.debug(f"Loaded {len(objects_for_page)} objects with {total_files_on_page} total files (sorted by object, page {self.current_page + 1})")
+    
+    def _load_fits_data_by_date_paginated(self, frame_filter="Light Frames Only"):
+        """Load FITS file data grouped by date with pagination of top-level dates."""
+        # Get all files matching filter and search criteria
+        all_files = self._get_fits_files_query(frame_filter, include_search=True).order_by(
+            FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject
+        )
+
+        # Group files by date first
+        all_dates_dict = {}
+        for fits_file in all_files:
+            object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
+            date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
+
+            if date_str not in all_dates_dict:
+                all_dates_dict[date_str] = {}
+            if object_name not in all_dates_dict[date_str]:
+                all_dates_dict[date_str][object_name] = []
+
+            all_dates_dict[date_str][object_name].append(fits_file)
+
+        # Get sorted list of dates for pagination (newest first)
+        sorted_dates = sorted(all_dates_dict.keys(), reverse=True)
+        self.total_items = len(sorted_dates)
+        
+        # Apply pagination to date list
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        dates_for_page = sorted_dates[start_idx:end_idx]
+
+        # Create tree items only for dates on current page
+        for date_str in dates_for_page:
+            objects_dict = all_dates_dict[date_str]
+            # Create parent item for the date
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, date_str)  # Date in first column
+            parent_item.setText(1, f"({sum(len(files) for files in objects_dict.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each object (sorted alphabetically)
+            for object_name in sorted(objects_dict.keys()):
+                files = objects_dict[object_name]
+                object_item = QTreeWidgetItem()
+                object_item.setText(0, object_name)  # Object name in first column
+                object_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                object_item.setText(2, "")  # Empty other columns for object
+                object_item.setText(3, "")
+                object_item.setText(4, "")
+                object_item.setText(5, "")
+                object_item.setText(6, "")
+                object_item.setText(7, "")
+                object_item.setText(8, "")
+
+                # Add child items for each file
+                for fits_file in files:
+                    self._add_file_item(object_item, fits_file)
+
+                # Add object item to parent
+                parent_item.addChild(object_item)
+
+                # Keep the object item collapsed by default
+                object_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+
+            # Keep the parent item collapsed by default
+            parent_item.setExpanded(False)
+
+        total_files_on_page = sum(len(files) for date_str in dates_for_page 
+                                 for files in all_dates_dict[date_str].values())
+        logger.debug(f"Loaded {len(dates_for_page)} dates with {total_files_on_page} total files (sorted by date, page {self.current_page + 1})")
+
+    def _load_fits_data_by_object(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by object name, then by date."""
-        # Query all FITS files from the database where fitsFileType contains "Light"
-        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
+        # Get the appropriate query based on frame filter
+        fits_files = self._get_fits_files_query(frame_filter).order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate)
 
         # Group files by object name and date
         objects_dict = {}
         for fits_file in fits_files:
             object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
             date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
 
             if object_name not in objects_dict:
@@ -428,15 +802,28 @@ class ImagesTab(QWidget):
         else:
             logger.info("No FITS files found in database")
 
-    def _load_fits_data_by_date(self):
+    def _load_fits_data_by_date(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by date, then by object."""
-        # Query all FITS files from the database where fitsFileType contains "Light"
-        fits_files = FitsFileModel.select().where(FitsFileModel.fitsFileType.contains("Light")).order_by(FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject)
+        # Get the appropriate query based on frame filter
+        fits_files = self._get_fits_files_query(frame_filter).order_by(FitsFileModel.fitsFileDate.desc(), FitsFileModel.fitsFileObject)
 
         # Group files by date and object
         dates_dict = {}
         for fits_file in fits_files:
             object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
             date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
 
             if date_str not in dates_dict:
@@ -640,6 +1027,659 @@ class ImagesTab(QWidget):
         else:
             QMessageBox.warning(self, "Configuration Error", 
                               "Unable to access FITS viewer configuration.")
+    
+    def show_download_dialog(self):
+        """Show the download dialog for smart telescopes."""
+        try:
+            dialog = SmartTelescopeDownloadDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening download dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Error opening download dialog: {e}")
+    
+    def open_mappings_dialog(self):
+        """Open the mappings dialog"""
+        try:
+            dialog = MappingsDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening mappings dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Error opening mappings dialog: {e}")
+
+
+
+class TelescopeDownloadWorker(QThread):
+    """Worker thread for downloading files from smart telescopes."""
+    
+    # Signals for thread-safe communication
+    progress_updated = Signal(str)
+    progress_percent_updated = Signal(int)  # New signal for progress percentage
+    download_completed = Signal(str)
+    error_occurred = Signal(str)
+    
+    def __init__(self, telescope_type, hostname, network, target_directory, delete_files=False):
+        super().__init__()
+        self.telescope_type = telescope_type
+        self.hostname = hostname
+        self.network = network
+        self.target_directory = target_directory
+        self.delete_files = delete_files
+        self._stop_requested = False
+    
+    def _modify_fits_headers(self, fits_path, folder_name):
+        """Modify FITS headers based on folder name."""
+        try:
+            from astropy.io import fits
+            
+            with fits.open(fits_path, mode='update') as hdul:
+                header = hdul[0].header
+                
+                # Extract OBJECT from folder name (strip _sub or _mosaic_sub suffix)
+                object_name = folder_name
+                if folder_name.endswith('_mosaic_sub'):
+                    object_name = folder_name[:-11]  # Remove '_mosaic_sub'
+                elif folder_name.endswith('_sub'):
+                    object_name = folder_name[:-4]   # Remove '_sub'
+                
+                # Set OBJECT header
+                header['OBJECT'] = object_name
+                
+                # Set MOSAIC header for mosaic folders
+                if folder_name.endswith('_mosaic_sub'):
+                    header['MOSAIC'] = True
+                else:
+                    header['MOSAIC'] = False
+                
+                hdul.flush()
+                
+        except Exception as e:
+            self.progress_updated.emit(f"Warning: Could not modify headers for {os.path.basename(fits_path)}: {str(e)}")
+    
+    def stop(self):
+        """Request the worker to stop."""
+        logger.debug("Worker thread stop requested")
+        self._stop_requested = True
+    
+    def run(self):
+        """Perform the actual download process."""
+        import tempfile
+        
+        try:
+            # Step 1: Find the telescope (10% of progress)
+            if self._stop_requested:
+                return
+            
+            self.progress_updated.emit("Scanning network for SeeStar telescope (mDNS only)...")
+            logger.info("Scanning network for SeeStar telescope (mDNS only)...")
+            self.progress_percent_updated.emit(5)
+            
+            ip, error = smart_telescope_manager.find_telescope(
+                self.telescope_type, 
+                network_range=self.network if self.network else None,
+                hostname=self.hostname if self.hostname else None
+            )
+            
+            if self._stop_requested:
+                return
+            
+            if not ip:
+                self.error_occurred.emit(f"Failed to find telescope: {error}")
+                logger.error(f"Failed to find telescope: {error}")
+                return
+            
+            self.progress_updated.emit(f"Connected to SeeStar at {ip}")
+            logger.info(f"Connected to SeeStar at {ip}")
+            self.progress_percent_updated.emit(10)
+            
+            # Step 2: Connect and get FITS files (20% of progress)
+            if self._stop_requested:
+                return
+            
+            self.progress_updated.emit("Scanning SeeStar for FITS files...")
+            logger.info("Scanning SeeStar for FITS files...")
+            self.progress_percent_updated.emit(15)
+            
+            fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
+            
+            if self._stop_requested:
+                return
+            
+            if error:
+                self.error_occurred.emit(f"Failed to get FITS files: {error}")
+                logger.error(f"Failed to get FITS files: {error}")
+                return
+            
+            if not fits_files:
+                self.download_completed.emit("No FITS files found on telescope.")
+                logger.info("No FITS files found on telescope.")
+                return
+            
+            self.progress_updated.emit(f"Found {len(fits_files)} FITS files to download")
+            logger.info(f"Found {len(fits_files)} FITS files to download")
+            self.progress_percent_updated.emit(20)
+            
+            # Step 3: Use target directory for downloads
+            logger.info(f"Using target directory: {self.target_directory}")
+            if self._stop_requested:
+                return
+            
+            # Ensure target directory exists
+            os.makedirs(self.target_directory, exist_ok=True)
+            download_dir = self.target_directory
+            
+            # Step 4: Download and process each file (20-100% of progress)
+            successful_downloads = 0
+            failed_downloads = 0
+            processed_files = 0
+            
+            fits_processor = fitsProcessing()
+            
+            for i, file_info in enumerate(fits_files):
+                if self._stop_requested:
+                    logger.debug("Stop requested - breaking out of download loop")
+                    break
+                
+                file_name = file_info['name']
+                file_size = smart_telescope_manager.format_file_size(file_info['size'])
+                
+                # Calculate progress: 20% base + 80% for files (each file gets equal share)
+                base_progress = 20
+                file_progress_range = 80
+                current_file_start = base_progress + (i * file_progress_range // len(fits_files))
+                next_file_start = base_progress + ((i + 1) * file_progress_range // len(fits_files))
+                
+                self.progress_updated.emit(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")
+                logger.info(f"Downloading {file_name} ({file_size}) - {i+1} of {len(fits_files)}")  
+                self.progress_percent_updated.emit(current_file_start)
+                
+                # Download file to target directory
+                local_path = os.path.join(download_dir, file_name)
+                
+                def download_progress_callback(progress):
+                    if self._stop_requested:
+                        return False  # Signal to stop the download
+                    # Update progress within this file's range
+                    file_percent = current_file_start + int((progress / 100) * (next_file_start - current_file_start) * 0.8)
+                    self.progress_percent_updated.emit(file_percent)
+                    self.progress_updated.emit(f"Downloading {file_name}: {progress:.1f}%")
+                    logger.info(f"Downloading {file_name}: {progress:.1f}%")
+                    return True  # Continue downloading
+                
+                success, error = smart_telescope_manager.download_file(
+                    self.telescope_type, ip, file_info, local_path,
+                    progress_callback=download_progress_callback
+                )
+                
+                if self._stop_requested:
+                    break
+                
+                if not success:
+                    if "cancelled by user" in str(error).lower():
+                        # Download was cancelled, break out of loop
+                        self.progress_updated.emit("Download cancelled by user")
+                        logger.info("Download cancelled by user")
+                        break
+                    else:
+                        self.progress_updated.emit(f"Failed to download {file_name}: {error}")
+                        logger.error(f"Failed to download {file_name}: {error}")
+                        failed_downloads += 1
+                        continue
+                
+                successful_downloads += 1
+                
+                # Check for cancellation immediately after download
+                if self._stop_requested:
+                    self.progress_updated.emit("Download cancelled")
+                    logger.info("Download cancelled")
+                    break
+                
+                # Processing phase (remaining 20% of this file's progress range)
+                processing_progress = current_file_start + int((next_file_start - current_file_start) * 0.8)
+                self.progress_updated.emit(f"Processing {file_name}...")
+                logger.info(f"Processing {file_name}...")
+                self.progress_percent_updated.emit(processing_progress)
+                
+                # Process the file with registerFitsImage
+                try:
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
+                        break
+                    
+                    # Modify FITS headers before processing
+                    self._modify_fits_headers(local_path, file_info.get('folder_name', ''))
+                    
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
+                        break
+                    
+                    # Process file (this might take time, but we can't easily interrupt it)
+                    self.progress_updated.emit(f"Adding {file_name} to repository...")
+                    logger.info(f"Adding {file_name} to repository...")
+                    result = fits_processor.registerFitsImage(
+                        os.path.dirname(local_path), 
+                        file_name, 
+                        moveFiles=True
+                    )
+                    
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
+                        break
+                    
+                    if result:
+                        processed_files += 1
+                        self.progress_updated.emit(f"Successfully processed {file_name}")
+                        logger.info(f"Successfully processed {file_name}")
+
+                        # Delete file from host if requested
+                        if self.delete_files:
+                            if self._stop_requested:
+                                self.progress_updated.emit("Download cancelled")
+                                logger.info("Download cancelled")
+                                break
+                            
+                            self.progress_updated.emit(f"Deleting {file_name} from telescope...")
+                            logger.info(f"Deleting {file_name} from telescope...")
+                            delete_success, delete_error = smart_telescope_manager.delete_file(
+                                self.telescope_type, ip, file_info
+                            )
+                            
+                            if delete_success:
+                                self.progress_updated.emit(f"Successfully deleted {file_name} from telescope")
+                                logger.info(f"Successfully deleted {file_name} from telescope")
+                            else:
+                                self.progress_updated.emit(f"Warning: Failed to delete {file_name} from telescope: {delete_error}")
+                                logger.error(f"Failed to delete {file_name} from telescope: {delete_error}")
+                    else:
+                        self.progress_updated.emit(f"Failed to process {file_name} (file may be invalid)")
+                        logger.error(f"Failed to process {file_name} (file may be invalid)")
+
+                except Exception as e:
+                    if self._stop_requested:
+                        self.progress_updated.emit("Download cancelled")
+                        logger.info("Download cancelled")
+                        break
+                    self.progress_updated.emit(f"Error processing {file_name}: {str(e)}")
+                    logger.error(f"Error processing {file_name}: {str(e)}")
+
+                # Update progress to next file start
+                self.progress_percent_updated.emit(next_file_start)
+                
+                # Clean up downloaded file (since moveFiles=True should have moved it)
+                try:
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                except:
+                    pass
+            
+            # Final completion
+            if self._stop_requested:
+                self.progress_updated.emit("Download cancelled")
+                logger.info("Download cancelled")
+                return
+            
+            self.progress_updated.emit("Download complete!")
+            logger.info("Download complete!")
+            self.progress_percent_updated.emit(100)
+            
+            # Step 5: Clean up temp directory
+            try:
+                os.rmdir(temp_dir)
+            except:
+                pass
+            
+            # Step 6: Show final status
+            if not self._stop_requested:
+                message = (f"Download complete!\n\n"
+                          f"Files found: {len(fits_files)}\n"
+                          f"Successfully downloaded: {successful_downloads}\n"
+                          f"Failed downloads: {failed_downloads}\n"
+                          f"Successfully processed: {processed_files}\n\n"
+                          f"Files have been moved to your repository and registered in the database.")
+                logger.info(message)
+
+                self.download_completed.emit(message)
+            
+        except Exception as e:
+            if not self._stop_requested:
+                self.error_occurred.emit(f"Unexpected error during download: {str(e)}")
+                logger.error(f"Unexpected error during download: {str(e)}")
+
+
+class SmartTelescopeDownloadDialog(QDialog):
+    """Dialog for downloading files from smart telescopes."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Download Repository")
+        self.setModal(True)
+        self.resize(400, 300)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Telescope selection
+        telescope_group = QGroupBox("Smart Telescope")
+        telescope_layout = QFormLayout(telescope_group)
+        
+        self.telescope_list = QListWidget()
+        self.telescope_list.addItem("SeeStar")
+        self.telescope_list.setCurrentRow(0)  # Select first item by default
+        self.telescope_list.setMaximumHeight(80)
+        
+        telescope_layout.addRow("Telescope Type:", self.telescope_list)
+        
+        # Connection settings
+        connection_group = QGroupBox("Connection Settings")
+        connection_layout = QFormLayout(connection_group)
+        
+        self.hostname_edit = QLineEdit("seestar.local")
+        self.hostname_edit.setToolTip("Hostname or IP address of the telescope")
+        
+        self.network_edit = QLineEdit()
+        # Set default network
+        default_network = smart_telescope_manager.get_local_network()
+        self.network_edit.setText(default_network)
+        self.network_edit.setToolTip("Network range to scan (e.g., 10.0.0.0/24)")
+        
+        # Target directory for downloads
+        self.target_dir_edit = QLineEdit()
+        self.target_dir_edit.setToolTip("Directory where downloaded files will be stored")
+        
+        # Set default target directory from configuration
+        default_target_dir = self.get_default_target_directory()
+        self.target_dir_edit.setText(default_target_dir)
+        
+        self.browse_target_button = QPushButton("Browse...")
+        self.browse_target_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.browse_target_button.clicked.connect(self.browse_target_directory)
+        
+        target_dir_layout = QHBoxLayout()
+        target_dir_layout.addWidget(self.target_dir_edit)
+        target_dir_layout.addWidget(self.browse_target_button)
+        
+        connection_layout.addRow("Hostname:", self.hostname_edit)
+        connection_layout.addRow("Network:", self.network_edit)
+        connection_layout.addRow("Target Directory:", target_dir_layout)
+        
+        # Delete files option
+        self.delete_files_checkbox = QCheckBox("Delete files on host after download")
+        self.delete_files_checkbox.setChecked(False)  # Default to False
+        self.delete_files_checkbox.setToolTip("WARNING: This will permanently delete files from the telescope after successful download")
+        connection_layout.addRow("", self.delete_files_checkbox)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.download_button = QPushButton("Download")
+        self.download_button.setStyleSheet("QPushButton { font-size: 11px; }")
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setStyleSheet("QPushButton { font-size: 11px; }")
+        
+        button_layout.addStretch()
+        button_layout.addWidget(self.download_button)
+        button_layout.addWidget(self.cancel_button)
+        
+        # Add to main layout
+        layout.addWidget(telescope_group)
+        layout.addWidget(connection_group)
+        layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        # Connect signals
+        self.telescope_list.currentTextChanged.connect(self.on_telescope_changed)
+        self.download_button.clicked.connect(self.start_download)
+        self.cancel_button.clicked.connect(self.reject)
+        
+        # Update initial state
+        self.on_telescope_changed()
+    
+    def get_default_target_directory(self):
+        """Get the default target directory from configuration (source path)."""
+        try:
+            import configparser
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            
+            # Get source path from configuration (this is the incoming directory)
+            if config.has_option('DEFAULT', 'source'):
+                source_path = config.get('DEFAULT', 'source')
+                if source_path and os.path.exists(source_path):
+                    return source_path
+            
+            # Fallback to current directory if no source path is configured
+            return os.getcwd()
+            
+        except Exception as e:
+            logger.debug(f"Error reading configuration: {e}")
+            return os.getcwd()
+    
+    def browse_target_directory(self):
+        """Open directory picker for target directory."""
+        current_dir = self.target_dir_edit.text().strip()
+        if not current_dir or not os.path.exists(current_dir):
+            current_dir = os.getcwd()
+        
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Target Directory for Downloads",
+            current_dir,
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+        
+        if directory:
+            self.target_dir_edit.setText(directory)
+    
+    def closeEvent(self, event):
+        """Handle dialog close event to ensure worker thread is stopped."""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            # Stop the worker thread before closing
+            self.worker.stop()
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                self.worker.terminate()
+                self.worker.wait(1000)
+        
+        # Close progress dialog if it exists
+        self.close_progress_dialog()
+        
+        # Accept the close event
+        event.accept()
+    
+    def reject(self):
+        """Handle dialog rejection (ESC key, X button, etc.)."""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            # Stop the worker thread before rejecting
+            self.worker.stop()
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                self.worker.terminate()
+                self.worker.wait(1000)
+        
+        # Close progress dialog if it exists
+        self.close_progress_dialog()
+        
+        # Call parent reject
+        super().reject()
+    
+    def on_telescope_changed(self):
+        """Handle telescope selection change."""
+        current_telescope = self.telescope_list.currentItem()
+        if current_telescope:
+            telescope_type = current_telescope.text()
+            if telescope_type == "SeeStar":
+                self.hostname_edit.setText("seestar.local")
+    
+    def start_download(self):
+        """Start the download process."""
+        current_telescope = self.telescope_list.currentItem()
+        if not current_telescope:
+            QMessageBox.warning(self, "Warning", "Please select a telescope type.")
+            return
+        
+        telescope_type = current_telescope.text()
+        hostname = self.hostname_edit.text().strip()
+        network = self.network_edit.text().strip()
+        target_directory = self.target_dir_edit.text().strip()
+        delete_files = self.delete_files_checkbox.isChecked()
+        
+        if not network:
+            QMessageBox.warning(self, "Warning", "Please enter a network range.")
+            return
+        
+        if not target_directory:
+            QMessageBox.warning(self, "Warning", "Please specify a target directory.")
+            return
+        
+        # Validate target directory exists
+        if not os.path.exists(target_directory):
+            reply = QMessageBox.question(
+                self, 
+                "Create Directory",
+                f"Target directory does not exist:\n{target_directory}\n\nDo you want to create it?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply == QMessageBox.Yes:
+                try:
+                    os.makedirs(target_directory, exist_ok=True)
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to create directory:\n{e}")
+                    return
+            else:
+                return
+        
+        # Check if target directory is writable
+        if not os.access(target_directory, os.W_OK):
+            QMessageBox.warning(self, "Warning", 
+                               f"Target directory is not writable:\n{target_directory}")
+            return
+        
+        # Confirmation dialog for file deletion
+        if delete_files:
+            reply = QMessageBox.question(
+                self, 
+                "Confirm File Deletion",
+                "WARNING: You have selected to delete files from the telescope after download.\n\n"
+                "This will PERMANENTLY DELETE the original files from the telescope's storage "
+                "after they are successfully downloaded and processed.\n\n"
+                "Are you sure you want to proceed?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                logger.info("File deletion cancelled by user.")
+                return
+        
+        # Don't hide the main dialog yet - keep it alive for signal handling
+        # self.hide()  # Comment this out for now
+        
+        # Create and show progress dialog with proper parent
+        self.progress_dialog = QProgressDialog("Connecting to SeeStar...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Downloading from Smart Telescope")
+        self.progress_dialog.setWindowModality(Qt.ApplicationModal)  # Changed to ApplicationModal
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setAutoClose(False)  # Prevent auto-close
+        self.progress_dialog.setAutoReset(False)  # Prevent auto-reset
+        
+        # Center the progress dialog
+        if self.parent():
+            parent_center = self.parent().geometry().center()
+            dialog_size = self.progress_dialog.sizeHint()
+            self.progress_dialog.move(
+                parent_center.x() - dialog_size.width() // 2,
+                parent_center.y() - dialog_size.height() // 2
+            )
+        
+        self.progress_dialog.show()
+        
+        # Create and start worker thread with delete_files parameter
+        self.worker = TelescopeDownloadWorker(telescope_type, hostname, network, target_directory, delete_files)
+        
+        # Connect signals
+        self.worker.progress_updated.connect(self.on_progress_updated)
+        self.worker.progress_percent_updated.connect(self.on_progress_percent_updated)
+        self.worker.download_completed.connect(self.on_download_completed)
+        self.worker.error_occurred.connect(self.on_error_occurred)
+        self.worker.finished.connect(self.on_worker_finished)
+        
+        # Connect cancel button
+        self.progress_dialog.canceled.connect(self.on_cancel_download)
+        
+        # Start the worker
+        self.worker.start()
+    
+    def on_progress_updated(self, message):
+        """Update progress dialog with new message."""
+        logger.debug(f"Progress update: {message}")
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.setLabelText(message)
+            # Force update
+            self.progress_dialog.repaint()
+    
+    def on_progress_percent_updated(self, percent):
+        """Update progress dialog with percentage."""
+        logger.debug(f"Progress percent: {percent}%")
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.setValue(percent)
+            # Force update
+            self.progress_dialog.repaint()
+    
+    def on_download_completed(self, message):
+        """Handle successful download completion."""
+        logger.info("Download completed successfully")
+        self.close_progress_dialog()
+        self.accept()  # Close the main dialog now
+        QMessageBox.information(self.parent(), "Download Complete", message)
+    
+    def on_error_occurred(self, error_message):
+        """Handle download error."""
+        logger.error(f"Download error occurred: {error_message}")
+        self.close_progress_dialog()
+        self.show()  # Show the main dialog again for retry
+        QMessageBox.critical(self, "Download Error", error_message)
+    
+    def on_worker_finished(self):
+        """Handle worker thread completion."""
+        logger.debug("Worker thread finished")
+        if hasattr(self, 'progress_dialog') and self.progress_dialog is not None:
+            self.close_progress_dialog()
+    
+    def on_cancel_download(self):
+        """Handle download cancellation."""
+        logger.debug("Cancel button clicked!")
+        
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            logger.debug("Stopping worker thread...")
+            self.progress_dialog.setLabelText("Cancelling download...")
+            self.progress_dialog.setValue(0)
+            
+            # Request graceful stop
+            self.worker.stop()
+            
+            # Give worker time to stop gracefully
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                logger.debug("Force terminating worker thread")
+                self.progress_dialog.setLabelText("Forcing cancellation...")
+                self.worker.terminate()  # Force termination if needed
+                self.worker.wait(2000)   # Wait up to 2 more seconds
+            
+            # Ensure worker is fully stopped before proceeding
+            if self.worker.isRunning():
+                logger.debug("Final termination of worker thread")
+                self.worker.terminate()
+                self.worker.wait()
+        
+        logger.debug("Closing progress dialog...")
+        self.close_progress_dialog()
+        self.show()  # Show the main dialog again
+    
+    def close_progress_dialog(self):
+        """Close the progress dialog safely."""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog is not None:
+            self.progress_dialog.close()
+            self.progress_dialog = None
 
 
 class SessionsTab(QWidget):
@@ -655,6 +1695,7 @@ class SessionsTab(QWidget):
         # Controls
         controls_layout = QHBoxLayout()
         self.regenerate_button = QPushButton("Regenerate")
+        self.regenerate_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.regenerate_button.setToolTip("Clear all sessions and regenerate: Update Lights → Update Calibrations → Link Sessions")
         
         controls_layout.addWidget(self.regenerate_button)
@@ -663,6 +1704,9 @@ class SessionsTab(QWidget):
         # Sessions list
         self.sessions_tree = QTreeWidget()
         self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager"])
+        
+        # Enable multi-selection
+        self.sessions_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         
         # Set column widths for better display
         self.sessions_tree.setColumnWidth(0, 200)  # Object Name
@@ -686,26 +1730,43 @@ class SessionsTab(QWidget):
         if not item:
             return
             
-        # Determine if this is a session item (child of an object)
-        parent = item.parent()
-        if not parent:
-            return  # This is a parent item (object name), not a session
+        # Get all selected items
+        selected_items = self.sessions_tree.selectedItems()
+        if not selected_items:
+            return
+            
+        # Check if all selected items are sessions (not parent objects) and are light sessions
+        valid_sessions = []
+        for selected_item in selected_items:
+            parent = selected_item.parent()
+            if not parent:
+                continue  # This is a parent item (object name), not a session
+                
+            # Check if this is a light session (not calibration)
+            object_name = parent.text(0)
+            if object_name not in ['Bias', 'Dark', 'Flat']:
+                valid_sessions.append(selected_item)
+        
+        if not valid_sessions:
+            return  # No valid light sessions selected
             
         # Create context menu
         context_menu = QMenu(self)
-        checkout_action = context_menu.addAction("Check out")
-        # don't really need delete action but maybe later
-        #delete_action = context_menu.addAction("Delete Session")
+        if len(valid_sessions) == 1:
+            checkout_action = context_menu.addAction("Check out")
+        else:
+            checkout_action = context_menu.addAction(f"Check out ({len(valid_sessions)} sessions)")
 
         # Show the menu and get the selected action
         action = context_menu.exec_(self.sessions_tree.viewport().mapToGlobal(position))
         
         if action == checkout_action:
-            logging.info(f"Checking out session: {item.text(0)} on {item.text(1)}")
-            self.checkout_session(item)
-        #elif action == delete_action:
-        #    logging.info(f"Deleting session: {item.text(0)} on {item.text(1)}")
-        #    self.delete_session(item)
+            if len(valid_sessions) == 1:
+                logging.info(f"Checking out session: {valid_sessions[0].parent().text(0)} on {valid_sessions[0].text(1)}")
+                self.checkout_session(valid_sessions[0])
+            else:
+                logging.info(f"Checking out {len(valid_sessions)} sessions")
+                self.checkout_multiple_sessions(valid_sessions)
 
     def checkout_session(self, item):
         """Create symbolic links for session files in a Siril-friendly format"""
@@ -727,26 +1788,41 @@ class SessionsTab(QWidget):
                 logging.info(f"Found session: {object_name} on {session_date}")
             # Get light files
             light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
-            
+
             # Get calibration files if this is a light session
             dark_files = []
             bias_files = []
             flat_files = []
-            
+
             if object_name not in ['Bias', 'Dark', 'Flat']:
                 # Get linked calibration files
                 if session.fitsBiasSession:
                     bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
                     logging.info(f"Found {bias_files.count()} bias files")
-                    
+
                 if session.fitsDarkSession:
                     dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
                     logging.info(f"Found {dark_files.count()} dark files")
-                    
-                if session.fitsFlatSession:
-                    flat_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsFlatSession)
-                    logging.info(f"Found {flat_files.count()} flat files")
-            
+
+                # Get all unique filters used in light frames
+                filters = set([lf.fitsFileFilter for lf in light_files if lf.fitsFileFilter])
+                logging.info(f"Filters used in light frames: {filters}")
+                from astrofiler_db import fitsSession as FitsSessionModel, fitsFile as FitsFileModel
+                for filter_name in filters:
+                    # Find flat session(s) matching this filter and other session parameters
+                    flat_sessions = FitsSessionModel.select().where(
+                        (FitsSessionModel.fitsSessionObjectName == 'Flat') &
+                        (FitsSessionModel.fitsSessionTelescope == session.fitsSessionTelescope) &
+                        (FitsSessionModel.fitsSessionImager == session.fitsSessionImager) &
+                        (FitsSessionModel.fitsSessionBinningX == session.fitsSessionBinningX) &
+                        (FitsSessionModel.fitsSessionBinningY == session.fitsSessionBinningY) &
+                        (FitsSessionModel.fitsSessionFilter == filter_name)
+                    )
+                    for flat_session in flat_sessions:
+                        these_flats = FitsFileModel.select().where(FitsFileModel.fitsFileSession == flat_session.fitsSessionId)
+                        flat_files.extend(list(these_flats))
+                        logging.info(f"Found {these_flats.count()} flat files for filter {filter_name}")
+
             # Combine all files for progress tracking
             all_files = list(light_files) + list(dark_files) + list(bias_files) + list(flat_files)
             total_files = len(all_files)
@@ -835,7 +1911,31 @@ class SessionsTab(QWidget):
             # Close progress dialog
             progress.setValue(100)
             
-            # PLACEHOLDER - Create a Siril script
+            # Create a simple Siril script
+            """script_path = os.path.join(session_dir, "process.ssf")
+            with open(script_path, "w") as f:
+                f.write(f"# Siril processing script for {object_name} {session_date}\n")
+                f.write("requires 1.0.0\n\n")
+                f.write("# Convert to .fit files\n")
+                f.write("cd lights\n")
+                f.write("convert fits\n")
+                f.write("cd ../darks\n")
+                f.write("convert fits\n")
+                f.write("cd ../flats\n")
+                f.write("convert fits\n")
+                f.write("cd ../bias\n")
+                f.write("convert fits\n")
+                f.write("cd ..\n\n")
+                f.write("# Stack calibration frames\n")
+                f.write("stack darks rej 3 3 -nonorm\n")
+                f.write("stack bias rej 3 3 -nonorm\n")
+                f.write("stack flats rej 3 3 -norm=mul\n\n")
+                f.write("# Calibrate light frames\n")
+                f.write("calibrate lights bias=bias_stacked flat=flat_stacked dark=dark_stacked\n\n")
+                f.write("# Register light frames\n")
+                f.write("register pp_lights\n\n")
+                f.write("# Stack registered light frames\n")
+                f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")"""
             
             # Display success message
             QMessageBox.information(
@@ -850,6 +1950,172 @@ class SessionsTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create symbolic links: {str(e)}")
             logging.error(f"Error in checkout_session: {str(e)}")
+
+    def checkout_multiple_sessions(self, session_items):
+        """Create symbolic links for multiple sessions in a common directory structure"""
+        try:
+            # Ask user for destination directory
+            dest_dir = QFileDialog.getExistingDirectory(
+                self, 
+                "Select Destination Directory for Multiple Sessions",
+                os.path.expanduser("~"),
+                QFileDialog.ShowDirsOnly
+            )
+            
+            if not dest_dir:
+                return  # User cancelled
+            
+            # Create main checkout directory
+            checkout_dir = os.path.join(dest_dir, f"Sessions_Checkout_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            os.makedirs(checkout_dir, exist_ok=True)
+            
+            # Calculate total work for progress tracking
+            total_sessions = len(session_items)
+            current_session = 0
+            
+            # Progress dialog for overall operation
+            overall_progress = QProgressDialog("Processing sessions...", "Cancel", 0, total_sessions, self)
+            overall_progress.setWindowModality(Qt.WindowModal)
+            overall_progress.setWindowTitle("Checking Out Multiple Sessions")
+            
+            successful_sessions = 0
+            failed_sessions = []
+            
+            for session_item in session_items:
+                if overall_progress.wasCanceled():
+                    break
+                    
+                try:
+                    # Get session information
+                    session_date = session_item.text(1)
+                    object_name = session_item.parent().text(0)
+                    
+                    overall_progress.setLabelText(f"Processing {object_name} - {session_date}...")
+                    overall_progress.setValue(current_session)
+                    
+                    # Get the session from database
+                    session = FitsSessionModel.select().where(
+                        (FitsSessionModel.fitsSessionObjectName == object_name) & 
+                        (FitsSessionModel.fitsSessionDate == session_date)
+                    ).first()
+                    
+                    if not session:
+                        failed_sessions.append(f"{object_name} - {session_date}: Not found in database")
+                        continue
+                    
+                    # Create session-specific directory
+                    session_dir = os.path.join(checkout_dir, f"{object_name}_{session_date.replace(':', '-')}")
+                    light_dir = os.path.join(session_dir, "lights")
+                    dark_dir = os.path.join(session_dir, "darks")
+                    flat_dir = os.path.join(session_dir, "flats")
+                    bias_dir = os.path.join(session_dir, "bias")
+                    process_dir = os.path.join(session_dir, "process")
+                    
+                    # Create directories
+                    os.makedirs(light_dir, exist_ok=True)
+                    os.makedirs(dark_dir, exist_ok=True)
+                    os.makedirs(flat_dir, exist_ok=True)
+                    os.makedirs(bias_dir, exist_ok=True)
+                    os.makedirs(process_dir, exist_ok=True)
+                    
+                    # Get files
+                    light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
+                    dark_files = []
+                    bias_files = []
+                    flat_files = []
+                    
+                    # Get calibration files
+                    if session.fitsBiasSession:
+                        bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
+                    if session.fitsDarkSession:
+                        dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
+                    if session.fitsFlatSession:
+                        flat_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsFlatSession)
+                    
+                    # Create symbolic links
+                    all_files = list(light_files) + list(dark_files) + list(bias_files) + list(flat_files)
+                    session_links = 0
+                    
+                    for file in all_files:
+                        # Determine destination directory based on file type
+                        if "LIGHT" in file.fitsFileType.upper():
+                            dest_folder = light_dir
+                        elif "DARK" in file.fitsFileType.upper():
+                            dest_folder = dark_dir
+                        elif "FLAT" in file.fitsFileType.upper():
+                            dest_folder = flat_dir
+                        elif "BIAS" in file.fitsFileType.upper():
+                            dest_folder = bias_dir
+                        else:
+                            continue
+                        
+                        filename = os.path.basename(file.fitsFileName)
+                        dest_path = os.path.join(dest_folder, filename)
+                        
+                        try:
+                            if not os.path.exists(dest_path):
+                                if sys.platform == "win32":
+                                    import subprocess
+                                    subprocess.run(["mklink", dest_path, file.fitsFileName], shell=True)
+                                else:
+                                    os.symlink(file.fitsFileName, dest_path)
+                                session_links += 1
+                        except Exception as e:
+                            logging.error(f"Error creating link for {file.fitsFileName}: {e}")
+                    
+                    # Create Siril script
+                    script_path = os.path.join(session_dir, "process.ssf")
+                    with open(script_path, "w") as f:
+                        f.write(f"# Siril processing script for {object_name} {session_date}\n")
+                        f.write("requires 1.0.0\n\n")
+                        f.write("# Convert to .fit files\n")
+                        f.write("cd lights\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../darks\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../flats\n")
+                        f.write("convert fits\n")
+                        f.write("cd ../bias\n")
+                        f.write("convert fits\n")
+                        f.write("cd ..\n\n")
+                        f.write("# Stack calibration frames\n")
+                        f.write("stack darks rej 3 3 -nonorm\n")
+                        f.write("stack bias rej 3 3 -nonorm\n")
+                        f.write("stack flats rej 3 3 -norm=mul\n\n")
+                        f.write("# Calibrate light frames\n")
+                        f.write("calibrate lights bias=bias_stacked flat=flat_stacked dark=dark_stacked\n\n")
+                        f.write("# Register light frames\n")
+                        f.write("register pp_lights\n\n")
+                        f.write("# Stack registered light frames\n")
+                        f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
+                    
+                    successful_sessions += 1
+                    logging.info(f"Successfully processed session {object_name} - {session_date} with {session_links} links")
+                    
+                except Exception as e:
+                    failed_sessions.append(f"{object_name} - {session_date}: {str(e)}")
+                    logging.error(f"Error processing session {object_name} - {session_date}: {e}")
+                
+                current_session += 1
+            
+            overall_progress.setValue(total_sessions)
+            
+            # Show results
+            message = f"Successfully processed {successful_sessions} out of {total_sessions} sessions."
+            if failed_sessions:
+                message += f"\n\nFailed sessions:\n" + "\n".join(failed_sessions)
+            
+            if successful_sessions > 0:
+                message += f"\n\nFiles created in: {checkout_dir}"
+                QMessageBox.information(self, "Multiple Sessions Checkout Complete", message)
+                # Open the directory
+                QDesktopServices.openUrl(QUrl.fromLocalFile(checkout_dir))
+            else:
+                QMessageBox.warning(self, "Multiple Sessions Checkout Failed", message)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to checkout multiple sessions: {str(e)}")
+            logging.error(f"Error in checkout_multiple_sessions: {str(e)}")
 
     def update_sessions(self):
         """Update light sessions by running createLightSessions method with progress dialog."""
@@ -1375,7 +2641,7 @@ class SessionsTab(QWidget):
                         step_progress = int((current / total) * 25) if total > 0 else 0
                         overall_progress = 50 + step_progress
                         progress_dialog.setValue(overall_progress)
-                        progress_dialog.setLabelText(f"Step 3/4: Creating calibration sessions {current}/{total}: {filename}")
+                        progress_dialog.setLabelText(f"Step 3/4: Creating calibration sessions {current}/{total}: {os.path.basename(filename)}")
                         QApplication.processEvents()
                     
                     return not was_cancelled
@@ -1474,6 +2740,695 @@ class SessionsTab(QWidget):
             logger.error(f"Error during session regeneration: {e}")
             QMessageBox.warning(self, "Error", f"Failed to regenerate sessions: {e}")
 
+class MappingsDialog(QDialog):
+    """Dialog for managing FITS header mappings"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Mappings")
+        self.setModal(True)
+        self.resize(800, 600)
+        
+        # Store mapping rows for dynamic management
+        self.mapping_rows = []
+        
+        self.init_ui()
+        self.load_existing_mappings()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Add button at the top
+        add_button = QPushButton("Add Mapping")
+        add_button.setStyleSheet("QPushButton { font-size: 11px; }")
+        add_button.clicked.connect(lambda: self.add_mapping_row())
+        layout.addWidget(add_button)
+        
+        # Scroll area for mappings
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_widget = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        self.scroll_layout.setAlignment(Qt.AlignTop)  # Top-justify the mapping rows
+        self.scroll_layout.setSpacing(5)  # Add consistent spacing between rows
+        self.scroll_layout.setContentsMargins(5, 5, 5, 5)  # Add margins for better appearance
+        
+        # Add a stretch to push all rows to the top
+        self.scroll_layout.addStretch()
+        
+        self.scroll_area.setWidget(self.scroll_widget)
+        layout.addWidget(self.scroll_area)
+        
+        # Bottom buttons
+        bottom_layout = QVBoxLayout()
+        
+        # Add checkboxes
+        checkbox_layout = QHBoxLayout()
+        
+        # Update files checkbox
+        self.update_files_checkbox = QCheckBox("Update FITS headers on disk")
+        self.update_files_checkbox.setChecked(False)
+        self.update_files_checkbox.setToolTip("Also update the FITS headers in the actual files on disk")
+        self.update_files_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
+        checkbox_layout.addWidget(self.update_files_checkbox)
+        
+        # Apply to database checkbox
+        self.apply_to_database_checkbox = QCheckBox("Apply mappings to database")
+        self.apply_to_database_checkbox.setChecked(True)
+        self.apply_to_database_checkbox.setToolTip("Apply the mappings to update database records")
+        self.apply_to_database_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
+        checkbox_layout.addWidget(self.apply_to_database_checkbox)
+        
+        bottom_layout.addLayout(checkbox_layout)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept_mappings)
+        button_box.rejected.connect(self.reject)
+        
+        # Reduce button sizes
+        ok_button = button_box.button(QDialogButtonBox.Ok)
+        cancel_button = button_box.button(QDialogButtonBox.Cancel)
+        if ok_button:
+            ok_button.setStyleSheet("QPushButton { font-size: 10px; }")
+            ok_button.setMaximumSize(60, 28)
+        if cancel_button:
+            cancel_button.setStyleSheet("QPushButton { font-size: 10px; }")
+            cancel_button.setMaximumSize(60, 28)
+        
+        bottom_layout.addWidget(button_box)
+        
+        layout.addLayout(bottom_layout)
+    
+    def get_current_values_for_card(self, card):
+        """Get all current values in the database for a given card"""
+        try:
+            values = set()
+            
+            # Map card names to database fields
+            field_mapping = {
+                'TELESCOP': 'fitsFileTelescop',
+                'INSTRUME': 'fitsFileInstrument', 
+                'OBSERVER': None,  # Not currently in database
+                'NOTES': None,      # Not currently in database
+                'FILTER': 'fitsFileFilter',
+            }
+            
+            field_name = field_mapping.get(card)
+            if field_name:
+                # Query the database for distinct values
+                query = FitsFileModel.select(getattr(FitsFileModel, field_name)).distinct()
+                for record in query:
+                    value = getattr(record, field_name)
+                    if value is not None:
+                        values.add(str(value))
+            
+            # Always add blank option
+            values.add("")
+            
+            return sorted(list(values))
+        except Exception as e:
+            logger.error(f"Error getting current values for {card}: {e}")
+            return [""]
+    
+    def add_mapping_row(self, card="TELESCOP", current="", replace="", is_default=False):
+        """Add a new mapping row to the dialog"""
+        row_widget = QWidget()
+        row_layout = QGridLayout(row_widget)
+        row_layout.setSpacing(5)  # Consistent spacing
+        row_layout.setContentsMargins(5, 5, 5, 5)  # Consistent margins
+        
+        # Set column stretch factors for consistent alignment
+        row_layout.setColumnStretch(1, 2)  # Card combo
+        row_layout.setColumnStretch(3, 3)  # Current combo
+        row_layout.setColumnStretch(5, 3)  # Replace combo
+        
+        # Card dropdown
+        card_combo = QComboBox()
+        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES","FILTER"])
+        card_combo.setCurrentText(card)
+        card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
+        
+        # Current dropdown
+        current_combo = QComboBox()
+        current_combo.setEditable(True)
+        
+        # Replace dropdown (changed from text field to combo box)
+        replace_combo = QComboBox()
+        replace_combo.setEditable(True)
+        
+        # Apply button (check icon)
+        apply_button = QPushButton("✓")
+        apply_button.setMaximumWidth(30)
+        apply_button.setToolTip("Apply this mapping immediately")
+        apply_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #44ff44;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-size: 10px;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #66ff66;
+                border: 1px solid #44ff44;
+            }
+            QPushButton:pressed {
+                background-color: #1d1d1d;
+                color: #22ff22;
+            }
+        """)
+        apply_button.clicked.connect(lambda: self.apply_single_mapping(row_widget))
+        
+        # Delete button (trash icon)
+        delete_button = QPushButton("🗑")
+        delete_button.setMaximumWidth(30)
+        delete_button.setToolTip("Delete this mapping")
+        delete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ff4444;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-size: 10px;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #ff6666;
+                border: 1px solid #ff4444;
+            }
+            QPushButton:pressed {
+                background-color: #1d1d1d;
+                color: #ff2222;
+            }
+        """)
+        delete_button.clicked.connect(lambda: self.delete_mapping_row(row_widget))
+        
+        # Add to layout
+        row_layout.addWidget(QLabel("Card:"), 0, 0)
+        row_layout.addWidget(card_combo, 0, 1)
+        row_layout.addWidget(QLabel("Current:"), 0, 2)
+        row_layout.addWidget(current_combo, 0, 3)
+        row_layout.addWidget(QLabel("Replace:"), 0, 4)
+        row_layout.addWidget(replace_combo, 0, 5)
+        row_layout.addWidget(apply_button, 0, 6)
+        row_layout.addWidget(delete_button, 0, 7)
+        
+        # Store references
+        row_widget.card_combo = card_combo
+        row_widget.current_combo = current_combo
+        row_widget.replace_combo = replace_combo
+        # Remove default_checkbox reference since it no longer exists
+        
+        # Update current and replace values for initial card
+        self.update_current_values(row_widget)
+        current_combo.setCurrentText(current)
+        replace_combo.setCurrentText(replace)
+        
+        # Add to scroll layout (insert before the stretch)
+        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, row_widget)
+        self.mapping_rows.append(row_widget)
+    
+    def update_current_values(self, row_widget):
+        """Update the current and replace values dropdowns when card changes"""
+        card = row_widget.card_combo.currentText()
+        current_values = self.get_current_values_for_card(card)
+        
+        # Remember current selections
+        current_text = row_widget.current_combo.currentText()
+        replace_text = row_widget.replace_combo.currentText()
+        
+        # Update both combo boxes with the same values
+        row_widget.current_combo.clear()
+        row_widget.current_combo.addItems(current_values)
+        
+        row_widget.replace_combo.clear()
+        row_widget.replace_combo.addItems(current_values)
+        
+        # Restore selections if they still exist
+        if current_text in current_values:
+            row_widget.current_combo.setCurrentText(current_text)
+        if replace_text in current_values:
+            row_widget.replace_combo.setCurrentText(replace_text)
+    
+    def delete_mapping_row(self, row_widget):
+        """Delete a mapping row"""
+        if row_widget in self.mapping_rows:
+            self.mapping_rows.remove(row_widget)
+            self.scroll_layout.removeWidget(row_widget)
+            row_widget.deleteLater()
+    
+    def apply_single_mapping(self, row_widget):
+        """Apply a single mapping immediately"""
+        try:
+            card = row_widget.card_combo.currentText()
+            current = row_widget.current_combo.currentText()
+            replace = row_widget.replace_combo.currentText()
+            
+            # Validate inputs
+            if not card:
+                QMessageBox.warning(self, "Invalid Mapping", "Please select a card type.")
+                return
+            
+            if not replace:
+                QMessageBox.warning(self, "Invalid Mapping", "Please enter a replacement value.")
+                return
+            
+            # Confirm the action
+            if current:
+                message = f"Apply mapping for {card}:\n'{current}' → '{replace}'\n\nThis will update the database immediately."
+            else:
+                message = f"Apply mapping for {card}:\n'(empty/null)' → '{replace}'\n\nThis will update the database immediately."
+            
+            reply = QMessageBox.question(
+                self, 
+                "Confirm Apply Mapping", 
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Create progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Applying Mapping")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+            
+            try:
+                # Step 1: Save mapping to database (25%)
+                progress.setLabelText("Saving mapping to database...")
+                progress.setValue(25)
+                QApplication.processEvents()
+                
+                if progress.wasCanceled():
+                    return
+                
+                try:
+                    existing_mapping = MappingModel.get(
+                        (MappingModel.card == card) & 
+                        (MappingModel.current == (current if current else None))
+                    )
+                    # Update existing mapping
+                    existing_mapping.replace = replace if replace else None
+                    existing_mapping.save()
+                except MappingModel.DoesNotExist:
+                    # Create new mapping
+                    MappingModel.create(
+                        card=card,
+                        current=current if current else None,
+                        replace=replace if replace else None,
+                        is_default=False
+                    )
+                
+                # Step 2: Apply to database records (50%)
+                progress.setLabelText(f"Applying {card} mapping to database records...")
+                progress.setValue(50)
+                QApplication.processEvents()
+                
+                if progress.wasCanceled():
+                    return
+                
+                # Create a single mapping to apply
+                mapping_to_apply = {
+                    'card': card,
+                    'current': current,
+                    'replace': replace,
+                    'is_default': False
+                }
+                
+                # Apply the mapping to database records
+                update_files = self.update_files_checkbox.isChecked()
+                total_updates = 0
+                
+                if mapping_to_apply['card'] in ['TELESCOP', 'INSTRUME']:
+                    field_name = 'fitsFileTelescop' if mapping_to_apply['card'] == 'TELESCOP' else 'fitsFileInstrument'
+                    
+                    # Find files that match the current value
+                    if mapping_to_apply['current']:
+                        # Specific value mapping
+                        query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == mapping_to_apply['current'])
+                    else:
+                        # Default mapping for null/empty values
+                        query = FitsFileModel.select().where(
+                            (getattr(FitsFileModel, field_name).is_null()) |
+                            (getattr(FitsFileModel, field_name) == '')
+                        )
+                    
+                    # Step 3: Update database records (75%)
+                    progress.setLabelText(f"Updating {query.count()} database records...")
+                    progress.setValue(75)
+                    QApplication.processEvents()
+                    
+                    if progress.wasCanceled():
+                        return
+                    
+                    # Update matching files
+                    for fits_file in query:
+                        if mapping_to_apply['replace']:
+                            setattr(fits_file, field_name, mapping_to_apply['replace'])
+                            fits_file.save()
+                            total_updates += 1
+                            
+                            # Update FITS header if requested
+                            if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                                try:
+                                    from astropy.io import fits
+                                    with fits.open(fits_file.fitsFileName, mode='update') as hdul:
+                                        hdul[0].header[mapping_to_apply['card']] = mapping_to_apply['replace']
+                                        hdul[0].header.comments[mapping_to_apply['card']] = 'Updated via Astrofiler mapping'
+                                        hdul.flush()
+                                except Exception as e:
+                                    logger.error(f"Error updating FITS header for {fits_file.fitsFileName}: {e}")
+
+                    # If user has requested that files be updated we also have to update folder name
+                    if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                        try:
+                            new_folder_name = mapping_to_apply['replace']
+                            os.rename(os.path.dirname(fits_file.fitsFileName), new_folder_name)
+                        except Exception as e:
+                            logger.error(f"Error updating folder name for {fits_file.fitsFileName}: {e}")
+
+                # Step 4: Clear cache and update UI (100%)
+                progress.setLabelText("Finalizing changes...")
+                progress.setValue(100)
+                QApplication.processEvents()
+                
+                # Clear the mapping cache so file processing picks up new mappings
+                try:
+                    from astrofiler_file import clearMappingCache
+                    clearMappingCache()
+                except ImportError:
+                    pass  # Function might not be available in older versions
+                
+                # Update the current values dropdowns to reflect changes
+                self.update_current_values(row_widget)
+                
+                progress.close()
+                
+                # Show success message
+                if total_updates > 0:
+                    QMessageBox.information(
+                        self, 
+                        "Mapping Applied", 
+                        f"Successfully applied mapping and updated {total_updates} database records."
+                    )
+                else:
+                    QMessageBox.information(
+                        self, 
+                        "Mapping Applied", 
+                        "Mapping saved successfully. No matching records found to update."
+                    )
+                
+            except Exception as e:
+                if 'progress' in locals():
+                    progress.close()
+                raise e
+            
+        except Exception as e:
+            logger.error(f"Error applying single mapping: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying mapping: {e}")
+    
+    def load_existing_mappings(self):
+        """Load existing mappings from the database"""
+        try:
+            mappings = MappingModel.select()
+            for mapping in mappings:
+                self.add_mapping_row(
+                    card=mapping.card,
+                    current=mapping.current or "",
+                    replace=mapping.replace or ""
+                )
+        except Exception as e:
+            logger.error(f"Error loading existing mappings: {e}")
+    
+    def accept_mappings(self):
+        """Save mappings to database and optionally apply them"""
+        try:
+            # Clear existing mappings
+            MappingModel.delete().execute()
+            
+            # Save new mappings
+            mappings_to_apply = []
+            for row_widget in self.mapping_rows:
+                card = row_widget.card_combo.currentText()
+                current = row_widget.current_combo.currentText()
+                replace = row_widget.replace_combo.currentText()
+                # Set is_default to False since we removed the checkbox
+                is_default = False
+                
+                mapping = MappingModel.create(
+                    card=card,
+                    current=current if current else None,
+                    replace=replace if replace else None
+                )
+                
+                # Collect mappings for application if checkbox is checked
+                if self.apply_to_database_checkbox.isChecked():
+                    mappings_to_apply.append({
+                        'card': card,
+                        'current': current,
+                        'replace': replace,
+                        'is_default': is_default
+                    })
+            
+            # Clear the mapping cache so file processing picks up new mappings
+            try:
+                from astrofiler_file import clearMappingCache
+                clearMappingCache()
+            except ImportError:
+                pass  # Function might not be available in older versions
+            
+            # Apply mappings to database if requested
+            if mappings_to_apply and self.apply_to_database_checkbox.isChecked():
+                self.apply_database_mappings(mappings_to_apply)
+            
+            self.accept()
+            
+        except Exception as e:
+            logger.error(f"Error saving mappings: {e}")
+            QMessageBox.critical(self, "Error", f"Error saving mappings: {e}")
+    
+    def apply_database_mappings(self, mappings):
+        """Apply mappings to database records"""
+        try:
+            update_files = self.update_files_checkbox.isChecked()
+            total_updates = 0
+            
+            # Create progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress = QProgressDialog("Updating database records...", "Cancel", 0, len(mappings), self)
+            progress.setWindowTitle("Applying Mappings")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            for i, mapping in enumerate(mappings):
+                if progress.wasCanceled():
+                    break
+                    
+                progress.setValue(i)
+                progress.setLabelText(f"Processing {mapping['card']} mapping: '{mapping['current']}' → '{mapping['replace']}'")
+                QApplication.processEvents()
+                
+                if mapping['card'] in ['TELESCOP', 'INSTRUME']:
+                    field_name = 'fitsFileTelescop' if mapping['card'] == 'TELESCOP' else 'fitsFileInstrument'
+                    
+                    # Find files that match the current value
+                    if mapping['current']:
+                        # Specific value mapping
+                        query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == mapping['current'])
+                    else:
+                        # Default mapping for null/empty values
+                        query = FitsFileModel.select().where(
+                            (getattr(FitsFileModel, field_name).is_null()) |
+                            (getattr(FitsFileModel, field_name) == '')
+                        )
+                    
+                    # Update matching files
+                    for fits_file in query:
+                        if mapping['replace']:
+                            setattr(fits_file, field_name, mapping['replace'])
+                            fits_file.save()
+                            total_updates += 1
+                            
+                            # Update FITS header if requested
+                            if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
+                                try:
+                                    from astropy.io import fits
+                                    with fits.open(fits_file.fitsFileName, mode='update') as hdul:
+                                        hdul[0].header[mapping['card']] = mapping['replace']
+                                        hdul[0].header.comments[mapping['card']] = 'Updated via Astrofiler mapping'
+                                        hdul.flush()
+                                except Exception as e:
+                                    logger.error(f"Error updating FITS header for {fits_file.fitsFileName}: {e}")
+            
+            progress.setValue(len(mappings))
+            progress.close()
+            
+            if total_updates > 0:
+                QMessageBox.information(self, "Database Updated", 
+                                      f"Successfully updated {total_updates} database records.")
+            
+        except Exception as e:
+            logger.error(f"Error applying database mappings: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying database mappings: {e}")
+    
+    def apply_file_folder_mappings(self, mappings):
+        """Apply mappings to filenames and folder names on disk"""
+        try:
+            # Get repository folder from config
+            import configparser
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            repo_folder = config.get('DEFAULT', 'repo', fallback='.')
+            if not repo_folder.endswith('/') and not repo_folder.endswith('\\'):
+                repo_folder += os.sep
+            
+            # Create progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            progress = QProgressDialog("Scanning files and folders...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Renaming Files and Folders")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            renamed_files = 0
+            renamed_folders = 0
+            errors = []
+            
+            # Process each mapping
+            for mapping_idx, mapping in enumerate(mappings):
+                if progress.wasCanceled():
+                    break
+                
+                if not mapping['current'] or not mapping['replace']:
+                    continue
+                
+                current_text = mapping['current']
+                replace_text = mapping['replace']
+                
+                progress.setLabelText(f"Processing mapping {mapping_idx + 1}/{len(mappings)}: '{current_text}' → '{replace_text}'")
+                QApplication.processEvents()
+                
+                # Walk through the repository directory
+                try:
+                    for root, dirs, files in os.walk(repo_folder):
+                        # Update progress
+                        progress.setValue(int((mapping_idx / len(mappings)) * 100))
+                        QApplication.processEvents()
+                        
+                        if progress.wasCanceled():
+                            break
+                        
+                        # Rename files containing the current text
+                        for filename in files:
+                            if current_text in filename:
+                                old_path = os.path.join(root, filename)
+                                new_filename = filename.replace(current_text, replace_text)
+                                new_path = os.path.join(root, new_filename)
+                                
+                                try:
+                                    if not os.path.exists(new_path):
+                                        os.rename(old_path, new_path)
+                                        renamed_files += 1
+                                        
+                                        # Update database record if it exists
+                                        try:
+                                            fits_file = FitsFileModel.get(FitsFileModel.fitsFileName == old_path)
+                                            fits_file.fitsFileName = new_path
+                                            fits_file.save()
+                                        except FitsFileModel.DoesNotExist:
+                                            pass  # File not in database
+                                        
+                                        logger.info(f"Renamed file: {old_path} → {new_path}")
+                                    else:
+                                        error_msg = f"Cannot rename {old_path} - target exists: {new_path}"
+                                        errors.append(error_msg)
+                                        logger.warning(error_msg)
+                                except Exception as e:
+                                    error_msg = f"Error renaming file {old_path}: {str(e)}"
+                                    errors.append(error_msg)
+                                    logger.error(error_msg)
+                        
+                        # Rename directories containing the current text
+                        # Process in reverse order to handle nested directories correctly
+                        for dirname in reversed(dirs):
+                            if current_text in dirname:
+                                old_dir_path = os.path.join(root, dirname)
+                                new_dirname = dirname.replace(current_text, replace_text)
+                                new_dir_path = os.path.join(root, new_dirname)
+                                
+                                try:
+                                    if not os.path.exists(new_dir_path):
+                                        os.rename(old_dir_path, new_dir_path)
+                                        renamed_folders += 1
+                                        
+                                        # Update database records with paths in this directory
+                                        old_prefix = old_dir_path + os.sep
+                                        new_prefix = new_dir_path + os.sep
+                                        
+                                        fits_files = FitsFileModel.select().where(
+                                            FitsFileModel.fitsFileName.startswith(old_prefix)
+                                        )
+                                        for fits_file in fits_files:
+                                            fits_file.fitsFileName = fits_file.fitsFileName.replace(old_prefix, new_prefix)
+                                            fits_file.save()
+                                        
+                                        logger.info(f"Renamed folder: {old_dir_path} → {new_dir_path}")
+                                    else:
+                                        error_msg = f"Cannot rename {old_dir_path} - target exists: {new_dir_path}"
+                                        errors.append(error_msg)
+                                        logger.warning(error_msg)
+                                except Exception as e:
+                                    error_msg = f"Error renaming folder {old_dir_path}: {str(e)}"
+                                    errors.append(error_msg)
+                                    logger.error(error_msg)
+                
+                except Exception as e:
+                    error_msg = f"Error processing mapping '{current_text}' → '{replace_text}': {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Show results
+            result_message = f"File and folder renaming completed:\n\n"
+            result_message += f"• Files renamed: {renamed_files}\n"
+            result_message += f"• Folders renamed: {renamed_folders}\n"
+            
+            if errors:
+                result_message += f"\n{len(errors)} errors encountered:\n"
+                result_message += "\n".join(errors[:10])  # Show first 10 errors
+                if len(errors) > 10:
+                    result_message += f"\n... and {len(errors) - 10} more errors (see log for details)"
+                
+                QMessageBox.warning(self, "Renaming Completed with Errors", result_message)
+            else:
+                QMessageBox.information(self, "Renaming Successful", result_message)
+            
+        except Exception as e:
+            logger.error(f"Error applying file/folder mappings: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying file/folder mappings: {e}")
+
+    def apply_mappings(self):
+        """Legacy method - redirects to new implementation"""
+        # This method is kept for compatibility but shouldn't be called anymore
+        # since the new accept_mappings method handles everything
+        pass
+
 class MergeTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -1531,8 +3486,11 @@ class MergeTab(QWidget):
         # Buttons
         button_layout = QHBoxLayout()
         self.preview_button = QPushButton("Preview Changes")
+        self.preview_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.merge_button = QPushButton("Execute Merge")
+        self.merge_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.clear_button = QPushButton("Clear Fields")
+        self.clear_button.setStyleSheet("QPushButton { font-size: 11px; }")
         
         self.preview_button.clicked.connect(self.preview_merge)
         self.merge_button.clicked.connect(self.execute_merge)
@@ -2014,6 +3972,15 @@ class MergeTab(QWidget):
             logger.exception("Full exception details for critical merge error:")
             QMessageBox.critical(self, "Merge Error", f"A critical error occurred during merge: {str(e)}\n\nCheck the log file for detailed error information.")
             self.results_text.setPlainText(f"CRITICAL ERROR: {error_msg}\n\nPlease check the log file for detailed error information.")
+    
+    def open_mappings_dialog(self):
+        """Open the mappings dialog"""
+        try:
+            dialog = MappingsDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening mappings dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Error opening mappings dialog: {e}")
 
 
 class ConfigTab(QWidget):
@@ -2033,6 +4000,7 @@ class ConfigTab(QWidget):
         source_path_layout = QHBoxLayout()
         self.source_path = QLineEdit()
         self.source_path_button = QPushButton("Browse...")
+        self.source_path_button.setStyleSheet("QPushButton { font-size: 10px; }")
         self.source_path_button.clicked.connect(self.browse_source_path)
         source_path_layout.addWidget(self.source_path)
         source_path_layout.addWidget(self.source_path_button)
@@ -2041,6 +4009,7 @@ class ConfigTab(QWidget):
         repo_path_layout = QHBoxLayout()
         self.repo_path = QLineEdit()
         self.repo_path_button = QPushButton("Browse...")
+        self.repo_path_button.setStyleSheet("QPushButton { font-size: 10px; }")
         self.repo_path_button.clicked.connect(self.browse_repo_path)
         repo_path_layout.addWidget(self.repo_path)
         repo_path_layout.addWidget(self.repo_path_button)
@@ -2049,9 +4018,15 @@ class ConfigTab(QWidget):
         self.refresh_on_startup = QCheckBox()
         self.refresh_on_startup.setChecked(True)  # Default to true
         
+        # Save modified headers (default unchecked)
+        self.save_modified_headers = QCheckBox()
+        self.save_modified_headers.setChecked(False)  # Default to false for safety
+        self.save_modified_headers.setToolTip("When enabled, AstroFiler will save any header modifications back to the FITS files")
+        
         general_layout.addRow("Source Path:", source_path_layout)
         general_layout.addRow("Repository Path:", repo_path_layout)
         general_layout.addRow("Refresh on Startup:", self.refresh_on_startup)
+        general_layout.addRow("Save Modified Headers:", self.save_modified_headers)
         
         # Display settings group
         display_group = QGroupBox("Display Settings")
@@ -2082,6 +4057,7 @@ class ConfigTab(QWidget):
         self.fits_viewer_path = QLineEdit()
         self.fits_viewer_path.setPlaceholderText("Select external FITS file viewer...")
         self.fits_viewer_button = QPushButton("Browse...")
+        self.fits_viewer_button.setStyleSheet("QPushButton { font-size: 10px; }")
         self.fits_viewer_button.clicked.connect(self.browse_fits_viewer)
         fits_viewer_layout.addWidget(self.fits_viewer_path)
         fits_viewer_layout.addWidget(self.fits_viewer_button)
@@ -2091,9 +4067,13 @@ class ConfigTab(QWidget):
         # Action buttons
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Settings")
+        self.save_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.reset_button = QPushButton("Reset to Defaults")
+        self.reset_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.import_button = QPushButton("Import Config")
+        self.import_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.export_button = QPushButton("Export Config")
+        self.export_button.setStyleSheet("QPushButton { font-size: 11px; }")
         
         button_layout.addWidget(self.save_button)
         button_layout.addWidget(self.reset_button)
@@ -2144,6 +4124,7 @@ class ConfigTab(QWidget):
                 'source': source_path,
                 'repo': repo_path,
                 'refresh_on_startup': str(self.refresh_on_startup.isChecked()),
+                'save_modified_headers': str(self.save_modified_headers.isChecked()),
                 'theme': self.theme.currentText(),
                 'font_size': str(self.font_size.value()),
                 'grid_size': str(self.grid_size.value()),
@@ -2179,6 +4160,10 @@ class ConfigTab(QWidget):
                 refresh_value = config.getboolean('DEFAULT', 'refresh_on_startup')
                 self.refresh_on_startup.setChecked(refresh_value)
             
+            if config.has_option('DEFAULT', 'save_modified_headers'):
+                save_headers_value = config.getboolean('DEFAULT', 'save_modified_headers')
+                self.save_modified_headers.setChecked(save_headers_value)
+            
             if config.has_option('DEFAULT', 'theme'):
                 theme_value = config.get('DEFAULT', 'theme')
                 index = self.theme.findText(theme_value)
@@ -2209,6 +4194,7 @@ class ConfigTab(QWidget):
         self.source_path.setText("")
         self.repo_path.setText("")
         self.refresh_on_startup.setChecked(True)
+        self.save_modified_headers.setChecked(False)
         self.theme.setCurrentIndex(0)
         self.font_size.setValue(10)
         self.grid_size.setValue(64)
@@ -2359,6 +4345,37 @@ class AboutTab(QWidget):
             logger.error(f"Error loading background image: {e}")
             self.set_default_background()
     
+    def load_background_image(self):
+        """Load the background image from local images/background.jpg file"""
+        try:
+            # Try to load the image from the images directory
+            pixmap = QPixmap("images/background.jpg")
+            
+            if not pixmap.isNull():
+                # Get the size of the container
+                container_size = self.container.size()
+                if container_size.width() <= 0:
+                    # Use minimum size if widget not yet properly sized
+                    container_size = self.container.minimumSize()
+                
+                # Scale the image to fit the container while maintaining aspect ratio
+                scaled_pixmap = pixmap.scaled(
+                    container_size, 
+                    Qt.KeepAspectRatioByExpanding, 
+                    Qt.SmoothTransformation
+                )
+                
+                self.background_label.setPixmap(scaled_pixmap)
+                self.background_label.setScaledContents(True)
+                logger.debug("Successfully loaded images/background.jpg as background")
+            else:
+                # If image loading fails, use the default background
+                logger.warning("Failed to load images/background.jpg, using default background")
+                self.set_default_background()
+        except Exception as e:
+            logger.error(f"Error loading background image: {e}")
+            self.set_default_background()
+    
     def set_default_background(self):
         """Set a default starry background if image download fails"""
         self.background_label.setStyleSheet("""
@@ -2406,8 +4423,10 @@ class LogTab(QWidget):
         # Controls layout with Clear button
         controls_layout = QHBoxLayout()
         self.clear_button = QPushButton("Clear")
+        self.clear_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.clear_button.clicked.connect(self.clear_log)
         self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.refresh_button.clicked.connect(self.load_log_content)
         
         controls_layout.addWidget(self.clear_button)
@@ -2474,7 +4493,7 @@ class DuplicatesTab(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
-        self.refresh_duplicates()
+        # Do not run duplicate detection on startup - user can manually refresh
     
     def init_ui(self):
         """Initialize the duplicates tab UI"""
@@ -2494,12 +4513,13 @@ class DuplicatesTab(QWidget):
         
         # Refresh button
         refresh_button = QPushButton("Refresh Duplicates")
+        refresh_button.setStyleSheet("QPushButton { font-size: 11px; }")
         refresh_button.clicked.connect(self.refresh_duplicates)
         layout.addWidget(refresh_button)
         
         # Duplicates tree widget
         self.duplicates_tree = QTreeWidget()
-        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type"])
+        self.duplicates_tree.setHeaderLabels(["File", "Object", "Date", "Filter", "Exposure", "Type", "Full Path"])
         self.duplicates_tree.setAlternatingRowColors(True)
         self.duplicates_tree.setSortingEnabled(True)
         layout.addWidget(self.duplicates_tree)
@@ -2542,9 +4562,15 @@ class DuplicatesTab(QWidget):
     def refresh_duplicates(self):
         """Refresh the list of duplicate files"""
         from astrofiler_db import fitsFile
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        import time
         
         self.duplicates_tree.clear()
         duplicate_groups = []
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             # Query for files with duplicate hashes
@@ -2563,9 +4589,34 @@ class DuplicatesTab(QWidget):
             duplicate_hashes = cursor.fetchall()
             conn.close()
             
+            # Only show progress dialog if we have duplicates to process
+            if duplicate_hashes:
+                # Create progress dialog
+                progress_dialog = QProgressDialog("Scanning for duplicate files...", "Cancel", 0, len(duplicate_hashes), self)
+                progress_dialog.setWindowTitle("Finding Duplicates")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)  # Show immediately
+                progress_dialog.setValue(0)  # Set initial value
+                progress_dialog.show()
+                QApplication.processEvents()  # Process events to show dialog
+                
+                # Small delay to ensure dialog is visible
+                time.sleep(0.1)
+            
             total_duplicates = 0
             
-            for hash_value, count in duplicate_hashes:
+            for i, (hash_value, count) in enumerate(duplicate_hashes):
+                # Check if user cancelled
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    break
+                
+                # Update progress
+                if progress_dialog:
+                    progress_dialog.setValue(i)
+                    progress_dialog.setLabelText(f"Processing duplicate group {i+1} of {len(duplicate_hashes)}...")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
                 # Get all files with this hash
                 files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value)
                 
@@ -2579,8 +4630,8 @@ class DuplicatesTab(QWidget):
                     # Style the group item
                     font = group_item.font(0)
                     font.setBold(True)
-                    for i in range(6):
-                        group_item.setFont(i, font)
+                    for col in range(7):  # Updated to 7 columns
+                        group_item.setFont(col, font)
                     
                     # Add individual files as children
                     for fits_file in files_with_hash:
@@ -2591,6 +4642,7 @@ class DuplicatesTab(QWidget):
                         file_item.setText(3, fits_file.fitsFileFilter or "Unknown")
                         file_item.setText(4, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "Unknown")
                         file_item.setText(5, fits_file.fitsFileType or "Unknown")
+                        file_item.setText(6, fits_file.fitsFileName or "Unknown")  # Full path
                         
                         # Store the file object for deletion
                         file_item.setData(0, Qt.UserRole, fits_file)
@@ -2598,8 +4650,15 @@ class DuplicatesTab(QWidget):
                     duplicate_groups.append((hash_value, count))
                     total_duplicates += count - 1  # count - 1 because we keep one copy
             
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
             # Update info label and button state
-            if duplicate_groups:
+            if was_cancelled:
+                self.info_label.setText("Duplicate scan was cancelled.")
+                self.delete_button.setEnabled(False)
+            elif duplicate_groups:
                 self.info_label.setText(f"Found {len(duplicate_groups)} duplicate groups with {total_duplicates} files that can be removed.")
                 self.delete_button.setEnabled(True)
             else:
@@ -2608,12 +4667,17 @@ class DuplicatesTab(QWidget):
                 
         except Exception as e:
             logging.error(f"Error refreshing duplicates: {str(e)}")
+            if progress_dialog:
+                progress_dialog.close()
             self.info_label.setText(f"Error loading duplicates: {str(e)}")
             self.delete_button.setEnabled(False)
     
     def delete_duplicates(self):
         """Delete duplicate files, keeping only one copy of each"""
         from astrofiler_db import fitsFile
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
         
         # Confirm deletion
         reply = QMessageBox.question(
@@ -2631,6 +4695,8 @@ class DuplicatesTab(QWidget):
         
         deleted_count = 0
         error_count = 0
+        progress_dialog = None
+        was_cancelled = False
         
         try:
             # Get all duplicate groups
@@ -2649,7 +4715,29 @@ class DuplicatesTab(QWidget):
             duplicate_hashes = [row[0] for row in cursor.fetchall()]
             conn.close()
             
-            for hash_value in duplicate_hashes:
+            # Only show progress dialog if we have duplicates to delete
+            if duplicate_hashes:
+                # Create progress dialog
+                progress_dialog = QProgressDialog("Deleting duplicate files...", "Cancel", 0, len(duplicate_hashes), self)
+                progress_dialog.setWindowTitle("Deleting Duplicates")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)  # Show immediately
+                progress_dialog.setValue(0)  # Set initial value
+                progress_dialog.show()
+                QApplication.processEvents()  # Process events to show dialog
+            
+            for i, hash_value in enumerate(duplicate_hashes):
+                # Check if user cancelled
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    break
+                
+                # Update progress
+                if progress_dialog:
+                    progress_dialog.setValue(i)
+                    progress_dialog.setLabelText(f"Deleting duplicate group {i+1} of {len(duplicate_hashes)}...")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
                 # Get all files with this hash, ordered by date (keep the earliest)
                 files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value).order_by(fitsFile.fitsFileDate)
                 files_list = list(files_with_hash)
@@ -2673,8 +4761,18 @@ class DuplicatesTab(QWidget):
                             logging.error(f"Error deleting file {fits_file.fitsFileName}: {str(e)}")
                             error_count += 1
             
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
             # Show results
-            if error_count == 0:
+            if was_cancelled:
+                QMessageBox.information(
+                    self, 
+                    "Deletion Cancelled", 
+                    f"Deletion was cancelled. {deleted_count} files were deleted before cancellation."
+                )
+            elif error_count == 0:
                 QMessageBox.information(
                     self, 
                     "Deletion Complete", 
@@ -2693,6 +4791,8 @@ class DuplicatesTab(QWidget):
             
         except Exception as e:
             logging.error(f"Error during duplicate deletion: {str(e)}")
+            if progress_dialog:
+                progress_dialog.close()
             QMessageBox.critical(
                 self, 
                 "Deletion Error", 
@@ -2716,22 +4816,6 @@ class StatsTab(QWidget):
         layout.setContentsMargins(10, 5, 10, 10)  # Reduce top margin from default
         layout.setSpacing(5)  # Reduce spacing between elements
         
-        # Refresh button
-        refresh_layout = QHBoxLayout()
-        refresh_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins around button layout
-        self.refresh_button = QPushButton("Refresh Stats")
-        self.refresh_button.clicked.connect(self.force_refresh_stats)
-        self.refresh_button.setToolTip("Force refresh of statistics (clears cache)")
-        
-        # Add cache status label
-        self.cache_status_label = QLabel("")
-        self.cache_status_label.setStyleSheet("color: gray; font-size: 10px;")
-        
-        refresh_layout.addWidget(self.refresh_button)
-        refresh_layout.addWidget(self.cache_status_label)
-        refresh_layout.addStretch()
-        layout.addLayout(refresh_layout)
-        
         # Main content area with horizontal splitter for two columns
         splitter = QSplitter(Qt.Horizontal)
         splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2740,11 +4824,13 @@ class StatsTab(QWidget):
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(5, 0, 5, 5)  # Reduce margins
-        left_layout.setSpacing(10)  # Reduce spacing between sections
+        left_layout.setSpacing(0)  # Remove automatic spacing - use manual margins instead
+        left_layout.setAlignment(Qt.AlignTop)  # Align content to top
         
         # Last 10 Objects Observed section
         recent_objects_label = QLabel("Last 10 Objects Observed")
         recent_objects_label.setFont(QFont("Arial", 12, QFont.Bold))
+        recent_objects_label.setContentsMargins(0, 0, 0, 2)  # Small bottom margin for tighter spacing
         left_layout.addWidget(recent_objects_label)
         
         # Recent objects table - provide adequate space for 10 entries
@@ -2766,12 +4852,10 @@ class StatsTab(QWidget):
         
         left_layout.addWidget(self.recent_objects_table)
         
-        # Add spacing
-        left_layout.addSpacing(10)  # Reduce spacing between sections
-        
-        # Summary Statistics section
+        # Summary Statistics section (remove extra spacing)
         summary_label = QLabel("Summary Statistics")
         summary_label.setFont(QFont("Arial", 12, QFont.Bold))
+        summary_label.setContentsMargins(0, 15, 0, 2)  # Top margin for separation, small bottom margin for tighter spacing
         left_layout.addWidget(summary_label)
         
         self.summary_table = QTreeWidget()
@@ -2800,10 +4884,12 @@ class StatsTab(QWidget):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(5, 0, 5, 5)  # Reduce margins
         right_layout.setSpacing(10)  # Reduce spacing between sections
+        right_layout.setAlignment(Qt.AlignTop)  # Align content to top
         
         # Top 10 Objects section
         objects_label = QLabel("Top 10 Objects by Total Integration Time")
         objects_label.setFont(QFont("Arial", 12, QFont.Bold))
+        objects_label.setContentsMargins(0, 0, 0, 2)  # Match left column title spacing for alignment
         right_layout.addWidget(objects_label)
         
         # Objects table with columns - give it more dedicated space
@@ -2825,12 +4911,10 @@ class StatsTab(QWidget):
         
         right_layout.addWidget(self.objects_table)
         
-        # Add spacing
-        right_layout.addSpacing(10)  # Reduce spacing between sections
-        
         # Filter Chart section
         chart_label = QLabel("Total Imaging Time by Filter")
         chart_label.setFont(QFont("Arial", 12, QFont.Bold))
+        chart_label.setContentsMargins(0, 15, 0, 2)  # Add top margin to separate from table above, reduce bottom spacing
         right_layout.addWidget(chart_label)
         
         # Chart area - responsive sizing that scales with window
@@ -2868,22 +4952,13 @@ class StatsTab(QWidget):
     
     def _update_cache_status(self):
         """Update the cache status label"""
-        if self._cache_timestamp is None:
-            self.cache_status_label.setText("")
-        else:
-            import time
-            cache_age = int(time.time() - self._cache_timestamp)
-            if cache_age < 60:
-                self.cache_status_label.setText(f"Cache: {cache_age}s ago")
-            else:
-                minutes = cache_age // 60
-                self.cache_status_label.setText(f"Cache: {minutes}m ago")
+        # Cache status label removed - now handled via menu
+        pass
     
     def _invalidate_cache(self):
         """Invalidate the stats cache"""
         self._stats_cache.clear()
         self._cache_timestamp = None
-        self.cache_status_label.setText("")
         logger.debug("Stats cache invalidated")
     
     def force_refresh_stats(self):
@@ -3192,24 +5267,48 @@ class StatsTab(QWidget):
             filters = []
             times = []
             
+            # First pass: collect all data
+            all_filters = []
+            all_times = []
+            
             for result in query:
                 filter_name = result.fitsFileFilter if result.fitsFileFilter else 'Unknown'
                 total_seconds = float(result.total_time)
                 
-                filters.append(filter_name)
-                times.append(total_seconds)
+                all_filters.append(filter_name)
+                all_times.append(total_seconds)
             
-            if not filters:
+            if not all_filters:
                 self.chart_label.setText("No light frame data available")
                 return
+            
+            # Calculate total time and 1% threshold
+            total_time = sum(all_times)
+            threshold = total_time * 0.01  # 1% threshold
+            
+            # Second pass: filter out values less than 1% and group them as "Other"
+            other_time = 0
+            
+            for filter_name, time_seconds in zip(all_filters, all_times):
+                if time_seconds >= threshold:
+                    filters.append(filter_name)
+                    times.append(time_seconds)
+                else:
+                    other_time += time_seconds
+            
+            # Add "Other" category if there are small filters
+            if other_time > 0:
+                filters.append('Other (<1%)')
+                times.append(other_time)
             
             # Get the current size of the chart label to determine optimal figure size
             label_width = max(300, self.chart_label.width())  # Ensure minimum width
             label_height = max(250, self.chart_label.height())  # Ensure minimum height
             
             # Calculate figure size based on available space (convert pixels to inches, assuming 100 DPI)
-            fig_width = max(4, min(12, label_width / 100))   # Between 4-12 inches wide
-            fig_height = max(3, min(10, label_height / 100))  # Between 3-10 inches tall
+            # Reduce chart size by 24% (multiply by 0.76)
+            fig_width = max(4, min(12, label_width / 100)) * 0.76   # Between 4-12 inches wide, reduced 24%
+            fig_height = max(3, min(10, label_height / 100)) * 0.76  # Between 3-10 inches tall, reduced 24%
             
             logging.debug(f"Chart label size: {label_width}x{label_height}, figure size: {fig_width:.1f}x{fig_height:.1f}")
             
@@ -3262,8 +5361,12 @@ class StatsTab(QWidget):
             
             # Scale pixmap to fit label while maintaining aspect ratio
             if not pixmap.isNull():
+                # Reduce the display size by 24% by scaling to 76% of label size
+                label_size = self.chart_label.size()
+                target_width = int(label_size.width() * 0.76)
+                target_height = int(label_size.height() * 0.76)
                 scaled_pixmap = pixmap.scaled(
-                    self.chart_label.size(), 
+                    target_width, target_height, 
                     Qt.KeepAspectRatio, 
                     Qt.SmoothTransformation
                 )
@@ -3306,7 +5409,7 @@ class StatsTab(QWidget):
         self._last_size = event.size()
 
 
-class AstroFilerGUI(QWidget):
+class AstroFilerGUI(QMainWindow):
     """Main GUI class that encapsulates the entire AstroFiler application interface"""
     
     def __init__(self):
@@ -3319,15 +5422,24 @@ class AstroFilerGUI(QWidget):
         """Initialize the user interface"""
         # Set window properties
         self.setWindowTitle("AstroFiler - Astronomy File Management Tool")
-        self.resize(1000, 700)
+        self.resize(1200, 800)
         
-        # Main layout
-        layout = QVBoxLayout(self)
+        # Center the window on the screen
+        self.center_on_screen()
         
-        # Create tab widget
-        self.tab_widget = QTabWidget()
+        # Create central widget with stacked layout instead of tabs
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
         
-        # Create and add tabs
+        # Create main layout
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create stacked widget to hold the different views
+        self.stacked_widget = QStackedWidget()
+        main_layout.addWidget(self.stacked_widget)
+        
+        # Create the different view widgets (formerly tabs)
         self.images_tab = ImagesTab()
         self.sessions_tab = SessionsTab()
         self.merge_tab = MergeTab()
@@ -3337,30 +5449,266 @@ class AstroFilerGUI(QWidget):
         self.log_tab = LogTab()
         self.about_tab = AboutTab()
         
-        self.tab_widget.addTab(self.stats_tab, "Stats")
-        self.tab_widget.addTab(self.images_tab, "Images")
-        self.tab_widget.addTab(self.sessions_tab, "Sessions")
-        self.tab_widget.addTab(self.merge_tab, "Merge")
-        self.tab_widget.addTab(self.duplicates_tab, "Duplicates")
-        self.tab_widget.addTab(self.log_tab, "Log")
-        self.tab_widget.addTab(self.config_tab, "Config")
-        self.tab_widget.addTab(self.about_tab, "About")
-        # Set the default tab to be the Stats tab
-        self.tab_widget.setCurrentWidget(self.stats_tab)
+        # Add views to stacked widget
+        self.stacked_widget.addWidget(self.images_tab)      # Index 0 - Default view
+        self.stacked_widget.addWidget(self.sessions_tab)    # Index 1
+        self.stacked_widget.addWidget(self.merge_tab)       # Index 2
+        self.stacked_widget.addWidget(self.stats_tab)       # Index 3
+        self.stacked_widget.addWidget(self.duplicates_tab)  # Index 4
+        self.stacked_widget.addWidget(self.log_tab)         # Index 5
+        self.stacked_widget.addWidget(self.config_tab)      # Index 6
+        self.stacked_widget.addWidget(self.about_tab)       # Index 7
         
-        layout.addWidget(self.tab_widget)
-    
+        # Set default view to Images
+        self.stacked_widget.setCurrentIndex(0)
+        
+        # Create menu bar
+        self.create_menu_bar()
+        
+        # Create status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready - Images View")
+
+    def create_menu_bar(self):
+        """Create the menu bar with pulldown menus"""
+        menubar = self.menuBar()
+        
+        # File Menu
+        file_menu = menubar.addMenu('&File')
+        file_menu.addAction('E&xit', self.close, 'Ctrl+Q')
+        
+        # Images Menu (repository management)
+        images_menu = menubar.addMenu('&Images')
+        
+        # Load Repository
+        load_repo_action = images_menu.addAction('&Load from Incoming...')
+        load_repo_action.setShortcut('Ctrl+L')
+        load_repo_action.triggered.connect(self.load_repo)
+        
+        # Sync Repository
+        sync_repo_action = images_menu.addAction('&Sync Repository...')
+        sync_repo_action.setShortcut('Ctrl+S')
+        sync_repo_action.triggered.connect(self.sync_repo)
+        
+        # Download Repository
+        download_repo_action = images_menu.addAction('&Download Repository...')
+        download_repo_action.setShortcut('Ctrl+D')
+        download_repo_action.triggered.connect(self.download_repo)
+        
+        images_menu.addSeparator()
+        
+        # Clear Repository
+        clear_repo_action = images_menu.addAction('&Clear Repository...')
+        clear_repo_action.triggered.connect(self.clear_repo)
+        
+        images_menu.addSeparator()
+        
+        # Field Mappings
+        mappings_action = images_menu.addAction('Field &Mappings...')
+        mappings_action.setShortcut('Ctrl+M')
+        mappings_action.triggered.connect(self.open_mappings_dialog)
+        
+        # View Menu (main navigation)
+        view_menu = menubar.addMenu('&View')
+        
+        # Images view (default)
+        images_action = view_menu.addAction('&Images')
+        images_action.setShortcut('Ctrl+1')
+        images_action.triggered.connect(lambda: self.switch_view(0))
+        
+        # Sessions view
+        sessions_action = view_menu.addAction('&Sessions')
+        sessions_action.setShortcut('Ctrl+2')
+        sessions_action.triggered.connect(lambda: self.switch_view(1))
+        
+        # Merge view
+        merge_action = view_menu.addAction('&Merge')
+        merge_action.setShortcut('Ctrl+3')
+        merge_action.triggered.connect(lambda: self.switch_view(2))
+        
+        # Statistics view
+        stats_action = view_menu.addAction('&Statistics')
+        stats_action.setShortcut('Ctrl+4')
+        stats_action.triggered.connect(lambda: self.switch_view(3))
+        
+        # Duplicates view
+        duplicates_action = view_menu.addAction('&Duplicates')
+        duplicates_action.setShortcut('Ctrl+5')
+        duplicates_action.triggered.connect(lambda: self.switch_view(4))
+        
+        # Log view
+        log_action = view_menu.addAction('&Log')
+        log_action.setShortcut('Ctrl+6')
+        log_action.triggered.connect(lambda: self.switch_view(5))
+        
+        view_menu.addSeparator()
+        
+        # Refresh action
+        refresh_action = view_menu.addAction('&Refresh Current View')
+        refresh_action.setShortcut('F5')
+        refresh_action.triggered.connect(self.refresh_current_view)
+        
+        # Tools Menu
+        tools_menu = menubar.addMenu('&Tools')
+        
+        # Download from telescope
+        download_action = tools_menu.addAction('&Download from Telescope...')
+        download_action.triggered.connect(self.open_download_dialog)
+        
+        tools_menu.addSeparator()
+        
+        # Configuration
+        config_action = tools_menu.addAction('&Configuration...')
+        config_action.setShortcut('Ctrl+,')
+        config_action.triggered.connect(lambda: self.switch_view(6))
+        
+        # Stats Menu
+        stats_menu = menubar.addMenu('&Stats')
+        
+        # Show Stats
+        show_stats_action = stats_menu.addAction('&Show Stats')
+        show_stats_action.setShortcut('Ctrl+4')  # Keep existing shortcut
+        show_stats_action.triggered.connect(lambda: self.switch_view(3))
+        
+        # Refresh Stats
+        refresh_stats_action = stats_menu.addAction('&Refresh Stats')
+        refresh_stats_action.setShortcut('Shift+F5')
+        refresh_stats_action.triggered.connect(self.refresh_stats)
+        
+        # Help Menu
+        help_menu = menubar.addMenu('&Help')
+        
+        about_action = help_menu.addAction('&About AstroFiler')
+        about_action.triggered.connect(lambda: self.switch_view(7))
+
+    def switch_view(self, index):
+        """Switch to the specified view"""
+        self.stacked_widget.setCurrentIndex(index)
+        
+        # Update status bar to show current view
+        view_names = ['Images', 'Sessions', 'Merge', 'Statistics', 'Duplicates', 'Log', 'Configuration', 'About']
+        self.status_bar.showMessage(f"Current View: {view_names[index]}")
+        
+        # Update window title to include current view
+        self.setWindowTitle(f"AstroFiler - {view_names[index]}")
+        
+        # Trigger any view-specific refresh if needed
+        if index == 0:  # Images view
+            if hasattr(self.images_tab, 'refresh_view'):
+                self.images_tab.refresh_view()
+
+    def refresh_current_view(self):
+        """Refresh the currently active view"""
+        current_index = self.stacked_widget.currentIndex()
+        current_widget = self.stacked_widget.currentWidget()
+        
+        # Call refresh method based on current view
+        if current_index == 0:  # Images
+            if hasattr(current_widget, 'load_fits_data'):
+                current_widget.load_fits_data()
+        elif current_index == 1:  # Sessions
+            if hasattr(current_widget, 'load_sessions_data'):
+                current_widget.load_sessions_data()
+        elif current_index == 2:  # Merge
+            if hasattr(current_widget, 'refresh_data'):
+                current_widget.refresh_data()
+        elif current_index == 3:  # Stats
+            if hasattr(current_widget, 'load_stats_data'):
+                current_widget.load_stats_data()
+        elif current_index == 4:  # Duplicates
+            if hasattr(current_widget, 'load_duplicates_data'):
+                current_widget.load_duplicates_data()
+        elif current_index == 5:  # Log
+            if hasattr(current_widget, 'load_log_content'):
+                current_widget.load_log_content()
+
+    def refresh_stats(self):
+        """Refresh statistics by forcing a cache refresh"""
+        stats_widget = None
+        for i in range(self.stacked_widget.count()):
+            widget = self.stacked_widget.widget(i)
+            if hasattr(widget, 'force_refresh_stats'):
+                stats_widget = widget
+                break
+        
+        if stats_widget:
+            stats_widget.force_refresh_stats()
+        else:
+            # Fallback: try to get stats tab directly
+            try:
+                self.stats_tab.force_refresh_stats()
+            except AttributeError:
+                QMessageBox.information(self, "Stats", "Stats refresh not available")
+
+    def open_download_dialog(self):
+        """Open the telescope download dialog"""
+        try:
+            dialog = SmartTelescopeDownloadDialog(self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open download dialog: {e}")
+
+    def open_mappings_dialog(self):
+        """Open the field mappings dialog"""
+        try:
+            if hasattr(self.images_tab, 'open_mappings_dialog'):
+                self.images_tab.open_mappings_dialog()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open mappings dialog: {e}")
+
+    def load_repo(self):
+        """Load repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'load_repo'):
+                self.images_tab.load_repo()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not load repository: {e}")
+
+    def sync_repo(self):
+        """Sync repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'sync_repo'):
+                self.images_tab.sync_repo()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not sync repository: {e}")
+
+    def download_repo(self):
+        """Download repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'show_download_dialog'):
+                self.images_tab.show_download_dialog()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open download dialog: {e}")
+
+    def clear_repo(self):
+        """Clear repository via Images tab"""
+        try:
+            if hasattr(self.images_tab, 'clear_files'):
+                self.images_tab.clear_files()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not clear repository: {e}")
+
     def invalidate_stats_cache(self):
         """Helper method to invalidate stats cache from any tab"""
         if hasattr(self, 'stats_tab'):
             self.stats_tab.invalidate_stats_cache()
+    
+    def center_on_screen(self):
+        """Center the main window on the screen"""
+        screen = QApplication.primaryScreen().geometry()
+        window_geometry = self.frameGeometry()
+        center_point = screen.center()
+        window_geometry.moveCenter(center_point)
+        self.move(window_geometry.topLeft())
     
     def apply_initial_theme(self):
         """Apply dark theme as default"""
         app = QApplication.instance()
         app.setStyleSheet(get_dark_stylesheet())
         self.current_theme = "Dark"
-        self.config_tab.theme.setCurrentText("Dark")
+        if hasattr(self, 'config_tab'):
+            self.config_tab.theme.setCurrentText("Dark")
     
     def get_config_settings(self):
         """Get current configuration settings from the GUI"""
@@ -3391,7 +5739,8 @@ class AstroFilerGUI(QWidget):
             self.config_tab.grid_size.setValue(settings['grid_size'])
 
     def showEvent(self, event):
-        """Handle show events to reload data when tab regains focus"""
+        """Handle show events to reload data when window regains focus"""
         super().showEvent(event)
-        # Reload FITS data when tab becomes visible
-        self.images_tab.load_fits_data()
+        # Load images data by default since that's the default view
+        if hasattr(self.images_tab, 'load_fits_data'):
+            self.images_tab.load_fits_data()

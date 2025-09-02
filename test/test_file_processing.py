@@ -48,7 +48,9 @@ class TestFitsProcessing:
             'OBJECT', 'DATE-OBS', 'INSTRUME', 'TELESCOP', 'EXPTIME', 
             'FILTER', 'IMAGETYP', 'XBINNING', 'YBINNING', 'CCD-TEMP'
         }
-        mock_header.__getitem__ = lambda self, key: {
+        
+        # Mock header values
+        header_values = {
             'OBJECT': 'TestObject',
             'DATE-OBS': '2025-07-17T12:00:00',
             'INSTRUME': 'TestCamera',
@@ -59,19 +61,10 @@ class TestFitsProcessing:
             'XBINNING': 1,
             'YBINNING': 1,
             'CCD-TEMP': -20
-        }[key]
-        mock_header.get = lambda self, key, default=None: {
-            'OBJECT': 'TestObject',
-            'DATE-OBS': '2025-07-17T12:00:00',
-            'INSTRUME': 'TestCamera',
-            'TELESCOP': 'TestTelescope',
-            'EXPTIME': 10.0,
-            'FILTER': 'TestFilter',
-            'IMAGETYP': 'Light Frame',
-            'XBINNING': 1,
-            'YBINNING': 1,
-            'CCD-TEMP': -20
-        }.get(key, default)
+        }
+        
+        mock_header.__getitem__ = lambda self, key: header_values[key]
+        mock_header.get = lambda key, default=None: header_values.get(key, default)
         mock_header.append = MagicMock()
         mock_fits_file.header = mock_header
         mock_hdul.flush = MagicMock()
