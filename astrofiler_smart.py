@@ -10,7 +10,6 @@ import os
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
-import ftplib
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,19 +32,11 @@ class SmartTelescopeManager:
     def __init__(self):
         self.supported_telescopes = {
             'SeeStar': {
-                'protocol': 'smb',
                 'default_hostname': 'seestar.local',
                 'default_username': 'guest',
                 'default_password': 'guest',
                 'share_name': 'EMMC Images',
                 'fits_path': 'MyWorks'
-            },
-            'Dwarf 3': {
-                'protocol': 'ftp',
-                'default_hostname': '192.168.88.1',
-                'default_username': 'anonymous',
-                'default_password': '',
-                'fits_path': '/Astronomy'
             }
         }
     
@@ -88,16 +79,6 @@ class SmartTelescopeManager:
         except:
             return False
     
-    def check_ftp_port(self, ip, timeout=2):
-        """Check if FTP port (21) is open on the given IP."""
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(timeout)
-                result = sock.connect_ex((str(ip), 21))
-                return result == 0
-        except:
-            return False
-    
     def get_hostname(self, ip):
         """Try to get the hostname for the given IP address."""
         try:
@@ -113,8 +94,6 @@ class SmartTelescopeManager:
         
         if telescope_type == 'SeeStar':
             return 'seestar' in hostname.lower()
-        elif telescope_type == 'Dwarf 3':
-            return 'dwarf' in hostname.lower() or hostname.startswith('192.168.88.')
         
         return False
     
@@ -122,15 +101,7 @@ class SmartTelescopeManager:
         """Find a specific telescope on the network."""
         logger.info(f"Starting search for {telescope_type} telescope (hostname={hostname}, network={network_range})")
         
-        config = self.supported_telescopes.get(telescope_type)
-        if not config:
-            logger.error(f"Unsupported telescope type: {telescope_type}")
-            return None, f"Unsupported telescope type: {telescope_type}"
-        
-        protocol = config['protocol']
-        
-        # Check protocol availability
-        if protocol == 'smb' and not SMB_AVAILABLE:
+        if not SMB_AVAILABLE:
             logger.error("SMB protocol not available. Install pysmb package.")
             return None, "SMB protocol not available. Install pysmb package."
         
@@ -142,8 +113,7 @@ class SmartTelescopeManager:
                 ip = socket.gethostbyname(hostname)
                 logger.debug(f"Hostname {hostname} resolved to {ip}")
                 
-                # Check the appropriate port based on protocol
-                if protocol == 'smb' and self.check_smb_port(ip):
+                if self.check_smb_port(ip):
                     # For SeeStar, trust the mDNS hostname and skip reverse DNS
                     if telescope_type == 'SeeStar':
                         if 'seestar' in hostname.lower() or hostname.upper().startswith('SEESTAR'):
@@ -153,39 +123,28 @@ class SmartTelescopeManager:
                             logger.warning(f"Hostname {hostname} doesn't match expected SeeStar pattern")
                             return None, f"Hostname {hostname} doesn't match expected SeeStar pattern"
                     
-                    # For other SMB telescope types, check if the provided hostname matches
+                    # For other telescope types, check if the provided hostname matches
                     if self.is_target_device(hostname, telescope_type):
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
                 
-                elif protocol == 'ftp' and self.check_ftp_port(ip):
-                    # For FTP telescopes like Dwarf 3
-                    if telescope_type == 'Dwarf 3':
-                        logger.info(f"Found {telescope_type} telescope at {ip} (FTP accessible)")
-                        return ip, None
-                
-                logger.warning(f"Device {hostname} ({ip}) not found or not accessible via {protocol.upper()}")
-                return None, f"Device {hostname} not found or not accessible via {protocol.upper()}"
+                logger.warning(f"Device {hostname} ({ip}) not found or not accessible")
+                return None, f"Device {hostname} not found or not accessible"
             except Exception as e:
                 logger.error(f"Unable to resolve hostname {hostname}: {e}")
                 return None, f"Unable to resolve hostname {hostname}"
         
-        # Try the default hostname for the telescope type first
-        if telescope_type in self.supported_telescopes:
-            default_hostname = self.supported_telescopes[telescope_type]['default_hostname']
-            logger.info(f"Trying default hostname: {default_hostname}")
+        # For SeeStar, try the default mDNS hostname first before network scanning
+        if telescope_type == 'SeeStar':
+            default_hostname = self.supported_telescopes['SeeStar']['default_hostname']
+            logger.info(f"Trying default mDNS hostname: {default_hostname}")
             try:
-                ip = socket.gethostbyname(default_hostname) if not default_hostname.replace('.', '').isdigit() else default_hostname
-                
-                if protocol == 'smb' and self.check_smb_port(ip):
-                    logger.info(f"Found {telescope_type} telescope at {ip} via default hostname ({default_hostname})")
+                ip = socket.gethostbyname(default_hostname)
+                if self.check_smb_port(ip):
+                    logger.info(f"Found {telescope_type} telescope at {ip} via mDNS ({default_hostname})")
                     return ip, None
-                elif protocol == 'ftp' and self.check_ftp_port(ip):
-                    logger.info(f"Found {telescope_type} telescope at {ip} via default hostname ({default_hostname})")
-                    return ip, None
-                    
             except Exception as e:
-                logger.debug(f"Default hostname {default_hostname} not reachable: {e}")
+                logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
         
         # Scan network for device (no reverse DNS lookups for SeeStar)
         if not network_range:
@@ -222,13 +181,7 @@ class SmartTelescopeManager:
     
     def _scan_ip_for_telescope(self, ip, telescope_type):
         """Scan a single IP for the target telescope type."""
-        config = self.supported_telescopes.get(telescope_type)
-        if not config:
-            return None
-            
-        protocol = config['protocol']
-        
-        if protocol == 'smb' and self.check_smb_port(ip):
+        if self.check_smb_port(ip):
             # For SeeStar, skip reverse DNS lookups due to firmware changes
             # Only rely on SMB port availability and network position
             if telescope_type == 'SeeStar':
@@ -239,56 +192,30 @@ class SmartTelescopeManager:
                 logger.debug(f"Found SMB service at {ip} - potential {telescope_type} device")
                 return str(ip)
             else:
-                # For other SMB telescope types, still use reverse DNS if needed
+                # For other telescope types, still use reverse DNS if needed
                 hostname = self.get_hostname(ip)
                 if self.is_target_device(hostname, telescope_type):
                     return str(ip)
-        elif protocol == 'ftp' and self.check_ftp_port(ip):
-            # For FTP telescopes like Dwarf 3
-            if telescope_type == 'Dwarf 3':
-                # Check if this is the expected Dwarf 3 IP range (192.168.88.x)
-                if str(ip).startswith('192.168.88.'):
-                    logger.debug(f"Found FTP service at {ip} - potential {telescope_type} device")
-                    return str(ip)
-                else:
-                    # For other IP ranges, check hostname
-                    hostname = self.get_hostname(ip)
-                    if self.is_target_device(hostname, telescope_type):
-                        return str(ip)
         return None
     
-    def get_fits_files(self, telescope_type, ip, username=None, password=None, telescope_directory=None):
+    def get_fits_files(self, telescope_type, ip, username=None, password=None):
         """Get all FITS files from the telescope."""
         logger.info(f"Starting FITS file discovery on {telescope_type} at {ip}")
+        
+        if not SMB_AVAILABLE:
+            logger.error("SMB protocol not available")
+            return [], "SMB protocol not available"
         
         config = self.supported_telescopes.get(telescope_type)
         if not config:
             logger.error(f"Unsupported telescope type: {telescope_type}")
             return [], f"Unsupported telescope type: {telescope_type}"
         
-        protocol = config['protocol']
-        
-        # Check protocol availability
-        if protocol == 'smb' and not SMB_AVAILABLE:
-            logger.error("SMB protocol not available")
-            return [], "SMB protocol not available"
-        
         username = username or config['default_username']
         password = password or config['default_password']
-        # Use custom telescope directory if provided, otherwise use default from config
-        fits_path = telescope_directory or config['fits_path']
-        
-        if protocol == 'smb':
-            return self._get_fits_files_smb(ip, config, username, password, fits_path)
-        elif protocol == 'ftp':
-            return self._get_fits_files_ftp(ip, config, username, password, fits_path)
-        else:
-            logger.error(f"Unsupported protocol: {protocol}")
-            return [], f"Unsupported protocol: {protocol}"
-    
-    def _get_fits_files_smb(self, ip, config, username, password, fits_path):
-        """Get FITS files via SMB protocol."""
         share_name = config['share_name']
+        fits_path = config['fits_path']
+        
         logger.debug(f"Using SMB share: {share_name}, path: {fits_path}, username: {username}")
         
         try:
@@ -309,7 +236,7 @@ class SmartTelescopeManager:
                 # Get FITS files from the specified path
                 logger.debug(f"Scanning for FITS files in {share_name}/{fits_path}")
                 start_time = time.time()
-                fits_files = self._get_fits_files_from_path_smb(conn, share_name, fits_path)
+                fits_files = self._get_fits_files_from_path(conn, share_name, fits_path)
                 scan_time = time.time() - start_time
                 
                 conn.close()
@@ -325,44 +252,7 @@ class SmartTelescopeManager:
             logger.error(f"Connection error to {ip}: {e}")
             return [], f"Connection error: {e}"
     
-    def _get_fits_files_ftp(self, ip, config, username, password, fits_path):
-        """Get FITS files via FTP protocol."""
-        logger.debug(f"Using FTP path: {fits_path}, username: {username}")
-        
-        try:
-            # Create FTP connection
-            ftp = ftplib.FTP()
-            logger.debug(f"Attempting FTP connection to {ip}:21...")
-            ftp.connect(str(ip), 21, timeout=10)
-            
-            if username and password:
-                ftp.login(username, password)
-            else:
-                ftp.login()  # Anonymous login
-            
-            logger.info(f"Successfully connected to FTP service at {ip}")
-            
-            try:
-                # Get FITS files from the specified path
-                logger.debug(f"Scanning for FITS files in {fits_path}")
-                start_time = time.time()
-                fits_files = self._get_fits_files_from_path_ftp(ftp, fits_path)
-                scan_time = time.time() - start_time
-                
-                ftp.quit()
-                logger.info(f"Found {len(fits_files)} FITS files in {scan_time:.2f} seconds")
-                return fits_files, None
-                
-            except Exception as e:
-                ftp.quit()
-                logger.error(f"Error accessing files on {ip}: {e}")
-                return [], f"Error accessing files: {e}"
-                
-        except Exception as e:
-            logger.error(f"FTP connection error to {ip}: {e}")
-            return [], f"FTP connection error: {e}"
-    
-    def _get_fits_files_from_path_smb(self, conn, share_name, target_path):
+    def _get_fits_files_from_path(self, conn, share_name, target_path):
         """Get all FITS files from folders ending in '_sub' within the target path."""
         fits_files = []
         visited_paths = set()  # Prevent infinite loops
@@ -434,125 +324,19 @@ class SmartTelescopeManager:
         logger.debug(f"Scan complete. Found {len(fits_files)} FITS files in _sub folders.")
         return fits_files
     
-    def _get_fits_files_from_path_ftp(self, ftp, target_path):
-        """Get all FITS files from the target path via FTP."""
-        fits_files = []
-        visited_paths = set()  # Prevent infinite loops
-        max_depth = 10  # Limit recursion depth
-        
-        def scan_directory(path="", depth=0):
-            # Prevent infinite recursion
-            if depth > max_depth:
-                logger.debug(f"Maximum depth reached at '{path}', stopping recursion")
-                return
-            
-            # Prevent revisiting the same path
-            if path in visited_paths:
-                return
-            visited_paths.add(path)
-            
-            try:
-                # Change to the directory
-                current_path = path if path else "/"
-                logger.debug(f"Scanning FTP directory: '{current_path}' (depth: {depth})")
-                
-                # Get directory listing
-                if path:
-                    ftp.cwd(path)
-                
-                files = []
-                ftp.retrlines('LIST', files.append)
-                
-                for line in files:
-                    # Parse the line (format varies by FTP server)
-                    parts = line.split()
-                    if len(parts) < 9:
-                        continue
-                    
-                    filename = ' '.join(parts[8:])  # Filename may contain spaces
-                    if filename in ['.', '..']:
-                        continue
-                    
-                    is_directory = line.startswith('d')
-                    
-                    if is_directory:
-                        item_path = f"{path}/{filename}" if path else filename
-                        
-                        # For Dwarf 3, scan all directories for FITS files
-                        if path == target_path or path.startswith(target_path + "/") or not path:
-                            scan_directory(item_path, depth + 1)
-                    else:
-                        # Check if it's a FITS file
-                        if (filename.lower().endswith('.fits') or 
-                            filename.lower().endswith('.fit')):
-                            
-                            logger.debug(f"Found FITS file: {filename} in {path}")
-                            
-                            # Try to get file size
-                            try:
-                                file_size = int(parts[4])
-                            except (ValueError, IndexError):
-                                file_size = 0
-                            
-                            fits_files.append({
-                                "name": filename,
-                                "path": f"{path}/{filename}" if path else filename,
-                                "size": file_size,
-                                "date": " ".join(parts[5:8]),  # Date/time
-                                "folder_name": os.path.basename(path) if path else ""
-                            })
-                
-                # Return to parent directory if we changed it
-                if path:
-                    ftp.cwd('/')
-                    
-            except Exception as e:
-                logger.debug(f"Error scanning FTP directory '{path}': {e}")
-                try:
-                    ftp.cwd('/')  # Return to root on error
-                except:
-                    pass
-        
-        # Start scanning from the target path
-        logger.debug(f"Starting FTP scan for target directory: {target_path}")
-        try:
-            if target_path and target_path != "/":
-                ftp.cwd(target_path)
-                scan_directory(target_path)
-            else:
-                scan_directory()
-        except Exception as e:
-            logger.error(f"Error accessing target path {target_path}: {e}")
-        
-        logger.debug(f"FTP scan complete. Found {len(fits_files)} FITS files.")
-        return fits_files
-    
     def download_file(self, telescope_type, ip, file_info, local_path, username=None, password=None, progress_callback=None):
         """Download a specific file from the telescope."""
         file_name = os.path.basename(file_info['path'])
         logger.info(f"Starting download of {file_name} ({self.format_file_size(file_info['size'])}) from {ip}")
         
+        if not SMB_AVAILABLE:
+            logger.error("SMB protocol not available for download")
+            return False, "SMB protocol not available"
+        
         config = self.supported_telescopes.get(telescope_type)
         if not config:
             logger.error(f"Unsupported telescope type for download: {telescope_type}")
             return False, f"Unsupported telescope type: {telescope_type}"
-        
-        protocol = config['protocol']
-        
-        # Check protocol availability
-        if protocol == 'smb' and not SMB_AVAILABLE:
-            logger.error("SMB protocol not available for download")
-            return False, "SMB protocol not available"
-        
-        if protocol == 'smb':
-            return self._download_file_smb(ip, config, file_info, local_path, username, password, progress_callback)
-        elif protocol == 'ftp':
-            return self._download_file_ftp(ip, config, file_info, local_path, username, password, progress_callback)
-        else:
-            logger.error(f"Unsupported protocol for download: {protocol}")
-            return False, f"Unsupported protocol: {protocol}"
-    
-    def _download_file_smb(self, ip, config, file_info, local_path, username, password, progress_callback):
         
         username = username or config['default_username']
         password = password or config['default_password']
@@ -623,84 +407,8 @@ class SmartTelescopeManager:
                 return False, f"Error downloading file: {e}"
                 
         except Exception as e:
-            file_name = os.path.basename(file_info['path'])
             logger.error(f"Connection error during download of {file_name}: {e}")
             return False, f"Connection error: {e}"
-    
-    def _download_file_ftp(self, ip, config, file_info, local_path, username, password, progress_callback):
-        """Download a file via FTP protocol."""
-        file_name = os.path.basename(file_info['path'])
-        username = username or config['default_username']
-        password = password or config['default_password']
-        
-        try:
-            # Create FTP connection
-            ftp = ftplib.FTP()
-            logger.debug(f"Connecting to {ip} for FTP file download...")
-            ftp.connect(str(ip), 21, timeout=10)
-            
-            if username and password:
-                ftp.login(username, password)
-            else:
-                ftp.login()  # Anonymous login
-            
-            try:
-                # Create local directory if it doesn't exist
-                os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                logger.debug(f"Downloading to local path: {local_path}")
-                
-                # Download the file
-                start_time = time.time()
-                file_size = file_info['size']
-                
-                # Use a wrapper class to handle progress tracking and cancellation
-                class ProgressFileWrapper:
-                    def __init__(self, file_obj, progress_callback, total_size):
-                        self.file_obj = file_obj
-                        self.progress_callback = progress_callback
-                        self.total_size = total_size
-                        self.bytes_written = 0
-                        self.cancelled = False
-                    
-                    def write(self, data):
-                        if self.cancelled:
-                            raise Exception("Download cancelled by user")
-                        
-                        result = self.file_obj.write(data)
-                        self.bytes_written += len(data)
-                        if self.progress_callback:
-                            progress = (self.bytes_written / self.total_size) * 100 if self.total_size > 0 else 0
-                            # Check if callback returns False (cancellation request)
-                            if self.progress_callback(progress) is False:
-                                self.cancelled = True
-                                raise Exception("Download cancelled by user")
-                        return result
-                    
-                    def __getattr__(self, name):
-                        return getattr(self.file_obj, name)
-                
-                with open(local_path, 'wb') as local_file:
-                    # Wrap the file object for progress tracking
-                    wrapped_file = ProgressFileWrapper(local_file, progress_callback, file_size)
-                    
-                    # Download the file via FTP
-                    ftp.retrbinary(f'RETR {file_info["path"]}', wrapped_file.write)
-                
-                download_time = time.time() - start_time
-                download_speed = (file_size / 1024 / 1024) / download_time if download_time > 0 else 0
-                logger.info(f"Successfully downloaded {file_name} via FTP in {download_time:.2f}s ({download_speed:.2f} MB/s)")
-                
-                ftp.quit()
-                return True, None
-                
-            except Exception as e:
-                ftp.quit()
-                logger.error(f"Error downloading {file_name} via FTP: {e}")
-                return False, f"Error downloading file: {e}"
-                
-        except Exception as e:
-            logger.error(f"FTP connection error during download of {file_name}: {e}")
-            return False, f"FTP connection error: {e}"
     
     def format_file_size(self, size_bytes):
         """Format file size in human readable format."""
