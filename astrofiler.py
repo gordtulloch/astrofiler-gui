@@ -13,10 +13,10 @@ logging.basicConfig(
     filemode='a'
 )
 
-# Reduce verbosity of SMB libraries
-logging.getLogger('SMB').setLevel(logging.WARNING)
-logging.getLogger('SMB.SMBConnection').setLevel(logging.WARNING)
-logging.getLogger('SMB.SMBProtocol').setLevel(logging.WARNING)
+# Reduce verbosity of some logging
+#logging.getLogger('SMB').setLevel(logging.WARNING)
+#logging.getLogger('SMB.SMBConnection').setLevel(logging.WARNING)
+#logging.getLogger('SMB.SMBProtocol').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,17 @@ if __name__ == "__main__":
     logger.info("Starting AstroFiler application")
     if (setup_database() == True):  # Initialize the database and table
         app = QApplication(sys.argv)
+        
+        # Create and show main widget
+        logger.info("Creating main widget")
         widget = AstroFilerGUI()
+        logger.info("Main widget created")
+        
+        # Show main window
+        logger.info("Showing main window")
         widget.show()
+        widget.center_on_screen()  # Ensure the main window is centered
+        
         sys.exit(app.exec())
         return_code = 0
     else:   

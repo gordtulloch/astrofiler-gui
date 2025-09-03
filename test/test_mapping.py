@@ -59,7 +59,6 @@ class TestMappingFunctionality:
             card='TELESCOP',
             current='Old Telescope',
             replace='New Telescope',
-            is_default=False
         )
         
         # Verify the mapping was created
@@ -67,7 +66,6 @@ class TestMappingFunctionality:
         assert mapping.card == 'TELESCOP'
         assert mapping.current == 'Old Telescope'
         assert mapping.replace == 'New Telescope'
-        assert mapping.is_default is False
     
     def test_mapping_model_retrieval(self):
         """Test retrieving a Mapping model instance."""
@@ -76,7 +74,6 @@ class TestMappingFunctionality:
             card='INSTRUME',
             current='Old Camera',
             replace='New Camera',
-            is_default=True
         )
         
         # Retrieve the mapping
@@ -86,7 +83,6 @@ class TestMappingFunctionality:
         assert retrieved_mapping.card == 'INSTRUME'
         assert retrieved_mapping.current == 'Old Camera'
         assert retrieved_mapping.replace == 'New Camera'
-        assert retrieved_mapping.is_default is True
     
     def test_mapping_model_update(self):
         """Test updating a Mapping model instance."""
@@ -95,18 +91,15 @@ class TestMappingFunctionality:
             card='OBSERVER',
             current='John Doe',
             replace='Jane Smith',
-            is_default=False
         )
         
         # Update the mapping
         mapping.replace = 'Updated Observer'
-        mapping.is_default = True
         mapping.save()
         
         # Retrieve and verify the update
         updated_mapping = Mapping.get_by_id(mapping.id)
         assert updated_mapping.replace == 'Updated Observer'
-        assert updated_mapping.is_default is True
     
     def test_mapping_model_deletion(self):
         """Test deleting a Mapping model instance."""
@@ -115,7 +108,6 @@ class TestMappingFunctionality:
             card='NOTES',
             current='Old Note',
             replace='New Note',
-            is_default=False
         )
         mapping_id = mapping.id
         
@@ -128,25 +120,19 @@ class TestMappingFunctionality:
     
     def test_mapping_null_values(self):
         """Test mapping with null/empty values."""
-        # Create mapping with null current value (for default mappings)
         mapping = Mapping.create(
             card='TELESCOP',
             current=None,
-            replace='Default Telescope',
-            is_default=True
         )
         
         # Verify null values are handled correctly
         assert mapping.current is None
-        assert mapping.replace == 'Default Telescope'
-        assert mapping.is_default is True
         
         # Create mapping with empty replace value
         mapping2 = Mapping.create(
             card='INSTRUME',
             current='Remove This',
             replace=None,
-            is_default=False
         )
         
         assert mapping2.current == 'Remove This'
@@ -155,9 +141,6 @@ class TestMappingFunctionality:
     def test_mapping_query_by_card(self):
         """Test querying mappings by card type."""
         # Create multiple mappings
-        Mapping.create(card='TELESCOP', current='Tel1', replace='Telescope 1', is_default=False)
-        Mapping.create(card='TELESCOP', current='Tel2', replace='Telescope 2', is_default=False)
-        Mapping.create(card='INSTRUME', current='Cam1', replace='Camera 1', is_default=False)
         
         # Query by card type
         telescope_mappings = Mapping.select().where(Mapping.card == 'TELESCOP')
@@ -176,9 +159,6 @@ class TestMappingFunctionality:
         """Test bulk operations on mappings."""
         # Create multiple mappings
         mappings_data = [
-            {'card': 'TELESCOP', 'current': 'T1', 'replace': 'Telescope 1', 'is_default': False},
-            {'card': 'TELESCOP', 'current': 'T2', 'replace': 'Telescope 2', 'is_default': False},
-            {'card': 'INSTRUME', 'current': 'C1', 'replace': 'Camera 1', 'is_default': False},
         ]
         
         for data in mappings_data:
@@ -219,7 +199,6 @@ class TestMappingFunctionality:
             card='TELESCOP',
             current='Old Telescope',
             replace='New Telescope',
-            is_default=False
         )
         
         # Simulate applying the mapping
