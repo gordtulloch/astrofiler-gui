@@ -18,7 +18,7 @@ Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/
 
 ### � **Smart Telescope Integration**
 - **SEESTAR Support**: Direct connection to SEESTAR smart telescopes via SMB/CIFS protocol
-- **DWARF Support**: Direct connection to DWARF smart telescopes via FTP protocol
+- **DWARF Support**: Direct connection to DWARF smart telescopes via FTP protocol (experimental)
 - **Network Discovery**: Automatic scanning of local network to locate telescopes
 - **Remote File Access**: Browse and download FITS files directly from telescope storage
 - **Selective Download**: Filter and download only from "_sub" folders for targeted data retrieval
