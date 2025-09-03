@@ -13,6 +13,7 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 **Current Status**: Release V1.1.0
 
 Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)
+Seee discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic/975026-astrofiler-11-astronomical-image-management-system-released/)
 
 ## ✨ Features
 
