@@ -12,6 +12,8 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 
 **Current Status**: Release V1.1.0
 
+Getting started guide [here(https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)]
+
 ## ✨ Features
 
 ### � **Smart Telescope Integration**
