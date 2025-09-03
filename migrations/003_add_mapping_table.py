@@ -43,7 +43,6 @@ def migrate(migrator, database, fake=False, **kwargs):
         card = pw.CharField(max_length=20)  # TELESCOP, INSTRUME, OBSERVER, NOTES
         current = pw.CharField(max_length=255, null=True)  # Current value (can be blank)
         replace = pw.CharField(max_length=255, null=True)  # Replacement value (can be blank)
-        is_default = pw.BooleanField(default=False)  # Default checkbox
         
         class Meta:
             table_name = "mapping"

@@ -8,14 +8,19 @@
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
 [![AstroPy](https://img.shields.io/badge/astronomy-AstroPy-orange.svg)](https://www.astropy.org/)
 
-AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki.
+AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki. Astrofiler is a tool to manage FITS files (currently, XISF files and other non-FITS images are coming in the next version!) using FITS header data. FITS Headers are embedded with the image when created as metadata. Astrofiler reads this information to rename the file and file it appropriately in the Repository.
 
 **Current Status**: Release V1.1.0
+
+Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)
+
+See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic/975026-astrofiler-11-astronomical-image-management-system-released/)
 
 ## ✨ Features
 
 ### � **Smart Telescope Integration**
 - **SEESTAR Support**: Direct connection to SEESTAR smart telescopes via SMB/CIFS protocol
+- **DWARF Support**: Direct connection to DWARF smart telescopes via FTP protocol (experimental)
 - **Network Discovery**: Automatic scanning of local network to locate telescopes
 - **Remote File Access**: Browse and download FITS files directly from telescope storage
 - **Selective Download**: Filter and download only from "_sub" folders for targeted data retrieval
@@ -77,7 +82,7 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 ### Network Requirements (for Smart Telescope Features)
 - **SMB/CIFS Protocol**: Port 445 access to telescope network
 - **Local Network**: Telescope and computer on same network segment
-- **Supported Telescopes**: SEESTAR (guest authentication)
+- **Supported Telescopes**: SEESTAR, DWARF 3 (experimental)
 
 ### Key Dependencies
 - **PySide6**: Modern Qt6-based GUI framework
@@ -88,7 +93,6 @@ AstroFiler is a powerful application designed for astronomers and astrophotograp
 - **Pillow**: Image processing for thumbnails and previews
 
 ### Optional Dependencies
-- **Siril CLI**: Required for master calibration frame creation
 - **Git**: Required for auto-update functionality
 
 ## 🚀 Quick Installation
