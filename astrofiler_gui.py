@@ -1324,11 +1324,9 @@ class TelescopeDownloadWorker(QThread):
             logger.info("Download complete!")
             self.progress_percent_updated.emit(100)
             
-            # Step 5: Clean up temp directory
-            try:
-                os.rmdir(temp_dir)
-            except:
-                pass
+            # Step 5: Clean up temp directory (skipped - temp_dir not defined in this context)
+            # This was previously trying to remove a non-existent temp_dir
+            pass
             
             # Step 6: Show final status
             if not self._stop_requested:
@@ -4064,6 +4062,41 @@ class ConfigTab(QWidget):
         
         tools_layout.addRow("FITS Viewer:", fits_viewer_layout)
         
+        # Google Cloud settings group
+        google_cloud_group = QGroupBox("Google Cloud Sync")
+        google_cloud_layout = QFormLayout(google_cloud_group)
+        
+        # Google Cloud Repository Path
+        self.google_repo_path_field = QLineEdit()
+        self.google_repo_path_field.setPlaceholderText("gs://bucket-name/path or repository URL")
+        self.google_repo_path_field.setToolTip("Google Cloud Storage bucket path (e.g., gs://my-bucket/astrofiler/)")
+        
+        # Google Cloud Authentication Info with file picker
+        google_auth_layout = QHBoxLayout()
+        self.google_auth_info_field = QLineEdit()
+        self.google_auth_info_field.setPlaceholderText("Service account key path or authentication string")
+        self.google_auth_info_field.setToolTip("Path to service account JSON file or other authentication info")
+        self.google_auth_button = QPushButton("Browse...")
+        self.google_auth_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.google_auth_button.clicked.connect(self.browse_google_auth_file)
+        google_auth_layout.addWidget(self.google_auth_info_field)
+        google_auth_layout.addWidget(self.google_auth_button)
+        
+        # Google Cloud Debug Flag
+        self.google_debug_field = QCheckBox()
+        self.google_debug_field.setChecked(True)  # Default to debug mode
+        self.google_debug_field.setToolTip("When enabled, only reports what would be synced without actually uploading")
+        
+        # Google Cloud Sync to Local Flag
+        self.google_sync_to_local_field = QCheckBox()
+        self.google_sync_to_local_field.setChecked(False)  # Default to upload only
+        self.google_sync_to_local_field.setToolTip("When enabled, downloads missing files from GCS to local repository and registers FITS files")
+        
+        google_cloud_layout.addRow("Repository Path:", self.google_repo_path_field)
+        google_cloud_layout.addRow("Authentication Info:", google_auth_layout)
+        google_cloud_layout.addRow("Debug Mode:", self.google_debug_field)
+        google_cloud_layout.addRow("Sync to Local Disk:", self.google_sync_to_local_field)
+        
         # Action buttons
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Settings")
@@ -4084,6 +4117,7 @@ class ConfigTab(QWidget):
         layout.addWidget(general_group)
         layout.addWidget(display_group)
         layout.addWidget(tools_group)
+        layout.addWidget(google_cloud_group)
         layout.addStretch()
         layout.addLayout(button_layout)
         
@@ -4128,7 +4162,11 @@ class ConfigTab(QWidget):
                 'theme': self.theme.currentText(),
                 'font_size': str(self.font_size.value()),
                 'grid_size': str(self.grid_size.value()),
-                'fits_viewer_path': self.fits_viewer_path.text().strip()
+                'fits_viewer_path': self.fits_viewer_path.text().strip(),
+                'google_repo_path': self.google_repo_path_field.text().strip(),
+                'google_auth_info': self.google_auth_info_field.text().strip(),
+                'google_debug': str(self.google_debug_field.isChecked()),
+                'google_sync_to_local': str(self.google_sync_to_local_field.isChecked())
             }
             
             # Write to the astrofiler.ini file
@@ -4181,6 +4219,23 @@ class ConfigTab(QWidget):
             if config.has_option('DEFAULT', 'fits_viewer_path'):
                 fits_viewer_path = config.get('DEFAULT', 'fits_viewer_path')
                 self.fits_viewer_path.setText(fits_viewer_path)
+            
+            # Load Google Cloud settings
+            if config.has_option('DEFAULT', 'google_repo_path'):
+                google_repo_path = config.get('DEFAULT', 'google_repo_path')
+                self.google_repo_path_field.setText(google_repo_path)
+            
+            if config.has_option('DEFAULT', 'google_auth_info'):
+                google_auth_info = config.get('DEFAULT', 'google_auth_info')
+                self.google_auth_info_field.setText(google_auth_info)
+            
+            if config.has_option('DEFAULT', 'google_debug'):
+                google_debug = config.getboolean('DEFAULT', 'google_debug')
+                self.google_debug_field.setChecked(google_debug)
+            
+            if config.has_option('DEFAULT', 'google_sync_to_local'):
+                google_sync_to_local = config.getboolean('DEFAULT', 'google_sync_to_local')
+                self.google_sync_to_local_field.setChecked(google_sync_to_local)
                 
             logger.debug("Settings loaded from astrofiler.ini!")
             
@@ -4199,6 +4254,10 @@ class ConfigTab(QWidget):
         self.font_size.setValue(10)
         self.grid_size.setValue(64)
         self.fits_viewer_path.setText("")
+        self.google_repo_path_field.setText("")
+        self.google_auth_info_field.setText("")
+        self.google_debug_field.setChecked(True)
+        self.google_sync_to_local_field.setChecked(False)
     
     def browse_source_path(self):
         """Open directory dialog for source path"""
@@ -4230,6 +4289,17 @@ class ConfigTab(QWidget):
         )
         if file_path:
             self.fits_viewer_path.setText(file_path)
+    
+    def browse_google_auth_file(self):
+        """Open file dialog for Google Cloud service account key file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Google Cloud Service Account Key File",
+            self.google_auth_info_field.text() or os.path.expanduser("~"),
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if file_path:
+            self.google_auth_info_field.setText(file_path)
     
     def on_theme_changed(self, theme_name):
         """Handle theme changes"""
@@ -5556,6 +5626,10 @@ class AstroFilerGUI(QMainWindow):
         download_action = tools_menu.addAction('&Download from Telescope...')
         download_action.triggered.connect(self.open_download_dialog)
         
+        # Google Sync
+        google_sync_action = tools_menu.addAction('&Google Sync')
+        google_sync_action.triggered.connect(self.sync_with_google_cloud)
+        
         tools_menu.addSeparator()
         
         # Configuration
@@ -5656,6 +5730,112 @@ class AstroFilerGUI(QMainWindow):
                 self.images_tab.open_mappings_dialog()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not open mappings dialog: {e}")
+
+    def sync_with_google_cloud(self):
+        """Sync with Google Cloud repository using configuration settings"""
+        try:
+            from astrofiler_cloud import sync_with_google_cloud_repo, DEBUG, validate_google_cloud_config
+            import logging
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt
+            
+            logger = logging.getLogger(__name__)
+            logger.info("Starting Google Cloud sync operation")
+            
+            # Get configuration from config tab
+            config_tab = self.config_tab
+            gcs_repo_path = getattr(config_tab, 'google_repo_path_field', None)
+            auth_info = getattr(config_tab, 'google_auth_info_field', None)
+            debug = getattr(config_tab, 'google_debug_field', None)
+            sync_to_local = getattr(config_tab, 'google_sync_to_local_field', None)
+            local_repo_path = getattr(config_tab, 'repo_path', None)
+            
+            # Extract values from field objects if they exist
+            gcs_repo_path_value = gcs_repo_path.text() if gcs_repo_path and hasattr(gcs_repo_path, 'text') else ''
+            auth_info_value = auth_info.text() if auth_info and hasattr(auth_info, 'text') else ''
+            debug_value = debug.isChecked() if debug and hasattr(debug, 'isChecked') else DEBUG
+            sync_to_local_value = sync_to_local.isChecked() if sync_to_local and hasattr(sync_to_local, 'isChecked') else False
+            local_repo_path_value = local_repo_path.text() if local_repo_path and hasattr(local_repo_path, 'text') else ''
+            
+            # Validate local repository path
+            if not local_repo_path_value:
+                QMessageBox.warning(self, "Configuration Error", "Local repository path is not configured. Please set it in the Configuration tab.")
+                return
+            
+            # Parse auth_info if it's a string (simple approach - could be JSON)
+            auth_dict = {}
+            if auth_info_value:
+                try:
+                    # Simple key=value parsing for now
+                    auth_dict = {'auth_string': auth_info_value}
+                except:
+                    auth_dict = {}
+            
+            # Validate configuration
+            is_valid, error_msg = validate_google_cloud_config(gcs_repo_path_value, auth_dict)
+            if not is_valid:
+                QMessageBox.warning(self, "Configuration Error", f"Google Cloud configuration is invalid:\n{error_msg}")
+                return
+            
+            # Create and configure progress dialog
+            progress_dialog = QProgressDialog("Preparing Google Cloud sync...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Google Cloud Sync")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.setValue(0)
+            progress_dialog.show()
+            
+            # Define progress callback function
+            def update_progress(current, total, operation_type, message):
+                """Progress callback for Google Cloud sync operations"""
+                logger.info(f"Google Sync Progress: [{operation_type}] {current}/{total} - {message}")
+                
+                if progress_dialog and not progress_dialog.wasCanceled():
+                    # Calculate percentage (protect against division by zero)
+                    if total > 0:
+                        percentage = min(100, int((current / total) * 100))
+                    else:
+                        percentage = 0
+                        
+                    # Update the dialog
+                    progress_dialog.setValue(percentage)
+                    progress_dialog.setLabelText(f"{operation_type.capitalize()}: {message}")
+                    
+                # Process events to keep UI responsive
+                QApplication.processEvents()
+                
+                # Return False if canceled to abort operation
+                return not progress_dialog.wasCanceled()
+            
+            # Perform sync with progress tracking
+            sync_with_google_cloud_repo(
+                gcs_repo_path_value, 
+                auth_dict, 
+                local_repo_path_value, 
+                sync_to_local_value, 
+                debug_value,
+                progress_callback=update_progress
+            )
+            
+            # Close progress dialog if it's still open
+            if progress_dialog:
+                progress_dialog.close()
+            
+            if debug_value:
+                QMessageBox.information(self, "Google Sync", "Debug mode sync completed. Check log for details.")
+            else:
+                QMessageBox.information(self, "Google Sync", "Google Cloud sync completed successfully!")
+                
+        except ImportError:
+            QMessageBox.warning(self, "Error", "Google Cloud sync module not available")
+        except Exception as e:
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Google Cloud sync error: {str(e)}")
+            logger.error(traceback.format_exc())
+            QMessageBox.warning(self, "Error", f"Could not sync with Google Cloud: {e}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not sync with Google Cloud: {e}")
 
     def load_repo(self):
         """Load repository via Images tab"""

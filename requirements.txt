@@ -7,3 +7,4 @@ pytz
 PySide6
 Pillow
 pysmb
+google-cloud-storage
