@@ -107,9 +107,9 @@ class ImagesTab(QWidget):
         sort_label = QLabel("Sort by:")
         sort_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Object", "Date"])
+        self.sort_combo.addItems(["Object", "Date", "Filter"])
         self.sort_combo.setCurrentText("Object")  # Set default to Object
-        self.sort_combo.setToolTip("Choose how to organize the file tree:\n• Object: Group by astronomical object, then by date\n• Date: Group by observation date, then by object")
+        self.sort_combo.setToolTip("Choose how to organize the file tree:\n• Object: Group by astronomical object, then by date\n• Date: Group by observation date, then by object\n• Filter: Group by filter, then by object and date")
         self.sort_combo.setMinimumWidth(80)
         self.sort_combo.setMaximumHeight(28)
         self.sort_combo.setStyleSheet("QComboBox { padding: 3px; }")
@@ -483,18 +483,119 @@ class ImagesTab(QWidget):
             
             if sort_by == "Object":
                 self._load_fits_data_by_object_paginated(frame_filter)
-            else:  # Date
+            elif sort_by == "Date":
                 self._load_fits_data_by_date_paginated(frame_filter)
-            
-            # Update pagination controls
-            self.update_pagination_controls()
-            
-            logger.debug(f"FITS data loaded and organized by {sort_by} with filter: {frame_filter}, page {self.current_page + 1}")
-                
+            elif sort_by == "Filter":
+                self._load_fits_data_by_filter_paginated(frame_filter)
+            else:
+                self._load_fits_data_by_object_paginated(frame_filter)
         except Exception as e:
             logger.error(f"Error loading FITS data: {e}")
             if "no such table" not in str(e).lower():
                 QMessageBox.warning(self, "Error", f"Failed to load FITS data: {e}")
+
+    def _load_fits_data_by_filter_paginated(self, frame_filter="Light Frames Only"):
+        """Load FITS file data grouped by filter with pagination of top-level filters."""
+        all_files = self._get_fits_files_query(frame_filter, include_search=True).order_by(
+            FitsFileModel.fitsFileFilter, FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate
+        )
+
+        # Group files by filter first
+        all_filters_dict = {}
+        for fits_file in all_files:
+            filter_name = fits_file.fitsFileFilter or "Unknown"
+            object_name = fits_file.fitsFileObject or "Unknown"
+            date_str = str(fits_file.fitsFileDate)[:10] if fits_file.fitsFileDate else "Unknown Date"
+
+            if filter_name not in all_filters_dict:
+                all_filters_dict[filter_name] = {}
+            if object_name not in all_filters_dict[filter_name]:
+                all_filters_dict[filter_name][object_name] = {}
+            if date_str not in all_filters_dict[filter_name][object_name]:
+                all_filters_dict[filter_name][object_name][date_str] = []
+
+            all_filters_dict[filter_name][object_name][date_str].append(fits_file)
+
+        # Get sorted list of filter names for pagination
+        sorted_filters = sorted(all_filters_dict.keys())
+        self.total_items = len(sorted_filters)
+
+        # Apply pagination to filter list
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        filters_for_page = sorted_filters[start_idx:end_idx]
+
+        # Create tree items only for filters on current page
+        for filter_name in filters_for_page:
+            objects_dict = all_filters_dict[filter_name]
+            # Create parent item for the filter
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, filter_name)  # Filter in Object column
+            parent_item.setText(1, f"({sum(len(files) for obj in objects_dict.values() for files in obj.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each object (sorted alphabetically)
+            for object_name in sorted(objects_dict.keys()):
+                dates_dict = objects_dict[object_name]
+                object_item = QTreeWidgetItem()
+                object_item.setText(0, object_name)  # Object name in Object column
+                object_item.setText(1, f"({sum(len(files) for files in dates_dict.values())} files)")  # File count in Type column
+                object_item.setText(2, "")  # Empty other columns for object
+                object_item.setText(3, "")
+                object_item.setText(4, "")
+                object_item.setText(5, "")
+                object_item.setText(6, "")
+                object_item.setText(7, "")
+                object_item.setText(8, "")
+
+                # Add sub-parent items for each date (sorted by date)
+                for date_str in sorted(dates_dict.keys(), reverse=True):
+                    files = dates_dict[date_str]
+                    date_item = QTreeWidgetItem()
+                    date_item.setText(0, date_str)  # Date in Object column
+                    date_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                    date_item.setText(2, "")  # Empty other columns for date
+                    date_item.setText(3, "")
+                    date_item.setText(4, "")
+                    date_item.setText(5, "")
+                    date_item.setText(6, "")
+                    date_item.setText(7, "")
+                    date_item.setText(8, "")
+
+                    # Add child items for each file
+                    for fits_file in files:
+                        self._add_file_item(date_item, fits_file)
+
+                    # Add date item to object
+                    object_item.addChild(date_item)
+                    date_item.setExpanded(False)
+
+                # Add object item to filter parent
+                parent_item.addChild(object_item)
+                object_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+            parent_item.setExpanded(False)
+
+        total_files_on_page = sum(len(files) for filter_name in filters_for_page 
+                                 for obj in all_filters_dict[filter_name].values() 
+                                 for files in obj.values())
+        logger.debug(f"Loaded {len(filters_for_page)} filters with {total_files_on_page} total files (sorted by filter, page {self.current_page + 1})")
+        # Update pagination controls
+        self.update_pagination_controls()
 
     def _get_fits_files_query(self, frame_filter, include_search=True):
         """Get the appropriate database query based on the frame filter selection and search term."""
