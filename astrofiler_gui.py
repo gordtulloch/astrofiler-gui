@@ -1,9 +1,10 @@
 import sys
 import os
-import shutil
 import configparser
 import datetime
 from datetime import datetime
+import time
+from astropy.io import fits
 
 import logging
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (QApplication, QLabel, QPushButton, QVBoxLayout,
                                QDialog, QDialogButtonBox, QGridLayout, QAbstractItemView,
                                QMainWindow, QMenuBar, QStackedWidget, QStatusBar, QToolBar)
 from PySide6.QtGui import QPixmap, QFont, QTextCursor,QDesktopServices, QIcon
+
 from astrofiler_file import fitsProcessing
 from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Mapping as MappingModel
 from astrofiler_smart import smart_telescope_manager
@@ -238,9 +240,6 @@ class ImagesTab(QWidget):
     
     def load_repo(self):
         """Load the repository by running registerFitsImages with progress dialog."""
-        from PySide6.QtWidgets import QProgressDialog, QMessageBox
-        from PySide6.QtCore import Qt
-        import time
         
         # Show warning dialog first
         warning_msg = ("This function creates folders, renames files, and moves them into the folder structure.\n\n"
@@ -351,9 +350,7 @@ class ImagesTab(QWidget):
 
     def sync_repo(self):
         """Sync the repository by running registerFitsImages with moveFiles=False and progress dialog."""
-        from PySide6.QtWidgets import QProgressDialog, QMessageBox
-        from PySide6.QtCore import Qt
-        
+      
         # Show warning dialog first
         warning_msg = ("Sync Repo reloads the repository database with data from files in the specified Repository directory and does not change any data.\n\n"
                       "If you want to move files from Incoming to the Repository use Load Repo.\n\n"
@@ -903,7 +900,6 @@ class ImagesTab(QWidget):
         date_str = str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "N/A"
         if date_str != "N/A" and "T" in date_str:
             try:
-                from datetime import datetime
                 dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                 date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
             except:
@@ -1069,7 +1065,6 @@ class TelescopeDownloadWorker(QThread):
     def _modify_fits_headers(self, fits_path, folder_name):
         """Modify FITS headers based on folder name."""
         try:
-            from astropy.io import fits
             
             with fits.open(fits_path, mode='update') as hdul:
                 header = hdul[0].header
@@ -1807,7 +1802,7 @@ class SessionsTab(QWidget):
                 # Get all unique filters used in light frames
                 filters = set([lf.fitsFileFilter for lf in light_files if lf.fitsFileFilter])
                 logging.info(f"Filters used in light frames: {filters}")
-                from astrofiler_db import fitsSession as FitsSessionModel, fitsFile as FitsFileModel
+                # GORD from astrofiler_db import fitsSession as FitsSessionModel, fitsFile as FitsFileModel
                 for filter_name in filters:
                     # Find flat session(s) matching this filter and other session parameters
                     flat_sessions = FitsSessionModel.select().where(
@@ -2119,9 +2114,7 @@ class SessionsTab(QWidget):
 
     def update_sessions(self):
         """Update light sessions by running createLightSessions method with progress dialog."""
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt
-        
+       
         progress_dialog = None
         was_cancelled = False
         
@@ -2199,8 +2192,6 @@ class SessionsTab(QWidget):
 
     def update_calibration_sessions(self):
         """Update calibration Sessions by running createCalibrationSessions method with progress dialog."""
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt
         
         progress_dialog = None
         was_cancelled = False
@@ -2408,7 +2399,7 @@ class SessionsTab(QWidget):
             deleted_sessions = FitsSessionModel.delete().execute()
             
             # Also clear the session assignments from FITS files
-            from astrofiler_db import fitsFile as FitsFileModel
+            #from astrofiler_db import fitsFile as FitsFileModel
             FitsFileModel.update(fitsFileSession=None).execute()
             
             logger.info(f"Deleted {deleted_sessions} session records from database and cleared session assignments")
@@ -2435,8 +2426,6 @@ class SessionsTab(QWidget):
 
     def link_sessions(self):
         """Link calibration sessions to light sessions with progress dialog."""
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt
         
         progress_dialog = None
         was_cancelled = False
@@ -2508,8 +2497,6 @@ class SessionsTab(QWidget):
 
     def regenerate_sessions(self):
         """Regenerate all sessions: Clear → Update Lights → Update Calibrations → Link Sessions"""
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt
         
         # Confirm regeneration
         reply = QMessageBox.question(
@@ -2564,7 +2551,7 @@ class SessionsTab(QWidget):
                 operation_results['cleared_sessions'] = deleted_sessions
                 
                 # Also clear the session assignments from FITS files
-                from astrofiler_db import fitsFile as FitsFileModel
+                #from astrofiler_db import fitsFile as FitsFileModel
                 FitsFileModel.update(fitsFileSession=None).execute()
                 
                 logger.info(f"Regenerate Sessions: Cleared {deleted_sessions} existing sessions")
@@ -3015,9 +3002,7 @@ class MappingsDialog(QDialog):
                 return
             
             # Create progress dialog
-            from PySide6.QtWidgets import QProgressDialog
-            from PySide6.QtCore import Qt
-            
+           
             progress = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
             progress.setWindowTitle("Applying Mapping")
             progress.setWindowModality(Qt.WindowModal)
@@ -3102,7 +3087,6 @@ class MappingsDialog(QDialog):
                             # Update FITS header if requested
                             if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
                                 try:
-                                    from astropy.io import fits
                                     with fits.open(fits_file.fitsFileName, mode='update') as hdul:
                                         hdul[0].header[mapping_to_apply['card']] = mapping_to_apply['replace']
                                         hdul[0].header.comments[mapping_to_apply['card']] = 'Updated via Astrofiler mapping'
@@ -3225,8 +3209,6 @@ class MappingsDialog(QDialog):
             total_updates = 0
             
             # Create progress dialog
-            from PySide6.QtWidgets import QProgressDialog
-            from PySide6.QtCore import Qt
             
             progress = QProgressDialog("Updating database records...", "Cancel", 0, len(mappings), self)
             progress.setWindowTitle("Applying Mappings")
@@ -3265,7 +3247,6 @@ class MappingsDialog(QDialog):
                             # Update FITS header if requested
                             if update_files and fits_file.fitsFileName and os.path.exists(fits_file.fitsFileName):
                                 try:
-                                    from astropy.io import fits
                                     with fits.open(fits_file.fitsFileName, mode='update') as hdul:
                                         hdul[0].header[mapping['card']] = mapping['replace']
                                         hdul[0].header.comments[mapping['card']] = 'Updated via Astrofiler mapping'
@@ -3296,9 +3277,7 @@ class MappingsDialog(QDialog):
                 repo_folder += os.sep
             
             # Create progress dialog
-            from PySide6.QtWidgets import QProgressDialog
-            from PySide6.QtCore import Qt
-            
+           
             progress = QProgressDialog("Scanning files and folders...", "Cancel", 0, 100, self)
             progress.setWindowTitle("Renaming Files and Folders")
             progress.setWindowModality(Qt.WindowModal)
@@ -3912,7 +3891,7 @@ class MergeTab(QWidget):
             # Update Sessions that reference the old object name
             Sessions_updated = 0
             try:
-                from astrofiler_db import fitsSession as FitsSessionModel
+                #from astrofiler_db import fitsSession as FitsSessionModel
                 Sessions = FitsSessionModel.select().where(FitsSessionModel.fitsSessionObjectName == from_object)
                 for Session in Sessions:
                     try:
@@ -4561,11 +4540,8 @@ class DuplicatesTab(QWidget):
     
     def refresh_duplicates(self):
         """Refresh the list of duplicate files"""
-        from astrofiler_db import fitsFile
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QApplication
-        import time
+        #from astrofiler_db import fitsFile
+
         
         self.duplicates_tree.clear()
         duplicate_groups = []
@@ -4618,7 +4594,7 @@ class DuplicatesTab(QWidget):
                     QApplication.processEvents()  # Keep UI responsive
                     
                 # Get all files with this hash
-                files_with_hash = fitsFile.select().where(fitsFile.fitsFileHash == hash_value)
+                files_with_hash = FitsFileModel.select().where(FitsFileModel.fitsFileHash == hash_value)
                 
                 if files_with_hash.count() > 1:
                     # Create a parent item for this duplicate group
