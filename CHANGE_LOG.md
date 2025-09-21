@@ -18,6 +18,8 @@
 - **Multiple sessions checkout**: New batch checkout feature allows checking out multiple light sessions simultaneously into organized directory structure
 - **Improved progress bar display**: Session creation progress now shows filename only instead of full file path for better readability
 - **Restored mapping dialog bottom checkboxes**: "Apply to Database" and "Update Files on Disk" checkboxes preserved while removing individual row Default checkboxes
+- **Repository folder reorganization for mappings**: New "Reorganize repository folders" checkbox automatically moves files to correct folder structure when telescope/instrument mappings are applied
+- **Filter sorting in Images tab**: Added "Filter" as a sort option to group files by filter type, then by object for better organization of filtered datasets
 
 - **Enhanced filter chart display**: Filter pie chart now groups filters with less than 1% of total time into "Other (<1%)" category for cleaner visualization
 - **Fixed filter chart size**: Corrected pie chart display scaling to properly reduce size by 24% and prevent stretching back to full container size

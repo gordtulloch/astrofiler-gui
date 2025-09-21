@@ -672,9 +672,10 @@ class fitsProcessing:
     def createLightSessions(self, progress_callback=None):
         sessionsCreated=[]
         
-        # Query for all fits files that are not assigned to a session
+        # Query for all fits files that are not assigned to a session, sort by object, date, filter
         unassigned_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession.is_null(True), FitsFileModel.fitsFileType.contains("Light"))
-        
+        unassigned_files = unassigned_files.order_by(FitsFileModel.fitsFileObject, FitsFileModel.fitsFileDate, FitsFileModel.fitsFileFilter)
+
         # How many unassigned_files are there?
         logger.info("createSessions found "+str(len(unassigned_files))+" unassigned files to session")
 
