@@ -1,5 +1,26 @@
 # AstroFiler Change Log
 
+## Version 1.1.2 (Current Development)
+
+### Bug Fixes
+- Fixed missing accept_mappings method in MappingsDialog
+
+### UI Changes
+- Removed Download from Telescope from Tools menu and added Download button to Images view
+- Moved Field Mappings to Tools menu and removed Images menu
+- Removed Load from Incoming from Images menu and added Load New button to Images view
+- Moved Regenerate button to front of search controls in Images view
+
+### New Features  
+- Menu reorganization: Removed Stats menu and added Refresh button to Statistics view
+- Menu reorganization: Moved Duplicates and Merge Objects to Tools menu
+- UI Package Refactor: Complete modular restructure with separate widget files
+- Menu-driven navigation replacing tab interface
+- Download Dialog: Moved telescope download functionality to separate module
+- Improved code organization and maintainability
+- Faster application load times through selective imports
+- Removed all legacy tab classes from main file
+
 ## Version 1.1.0 - August 23, 2025
 
 ### Changes in new version
