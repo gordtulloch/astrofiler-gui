@@ -26,7 +26,7 @@ from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionM
 from astrofiler_smart import smart_telescope_manager
 
 # Global version variable
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
