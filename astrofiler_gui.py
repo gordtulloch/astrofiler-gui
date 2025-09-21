@@ -4,6 +4,7 @@ import configparser
 import datetime
 from datetime import datetime
 import time
+import shutil
 from astropy.io import fits
 
 import logging
@@ -26,7 +27,7 @@ from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionM
 from astrofiler_smart import smart_telescope_manager
 
 # Global version variable
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
@@ -109,9 +110,9 @@ class ImagesTab(QWidget):
         sort_label = QLabel("Sort by:")
         sort_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Object", "Date"])
+        self.sort_combo.addItems(["Object", "Date", "Filter"])
         self.sort_combo.setCurrentText("Object")  # Set default to Object
-        self.sort_combo.setToolTip("Choose how to organize the file tree:\n• Object: Group by astronomical object, then by date\n• Date: Group by observation date, then by object")
+        self.sort_combo.setToolTip("Choose how to organize the file tree:\n• Object: Group by astronomical object, then by date\n• Date: Group by observation date, then by object\n• Filter: Group by filter type, then by object")
         self.sort_combo.setMinimumWidth(80)
         self.sort_combo.setMaximumHeight(28)
         self.sort_combo.setStyleSheet("QComboBox { padding: 3px; }")
@@ -480,8 +481,10 @@ class ImagesTab(QWidget):
             
             if sort_by == "Object":
                 self._load_fits_data_by_object_paginated(frame_filter)
-            else:  # Date
+            elif sort_by == "Date":
                 self._load_fits_data_by_date_paginated(frame_filter)
+            else:  # Filter
+                self._load_fits_data_by_filter_paginated(frame_filter)
             
             # Update pagination controls
             self.update_pagination_controls()
@@ -709,6 +712,111 @@ class ImagesTab(QWidget):
         total_files_on_page = sum(len(files) for date_str in dates_for_page 
                                  for files in all_dates_dict[date_str].values())
         logger.debug(f"Loaded {len(dates_for_page)} dates with {total_files_on_page} total files (sorted by date, page {self.current_page + 1})")
+
+    def _load_fits_data_by_filter_paginated(self, frame_filter="Light Frames Only"):
+        """Load FITS file data grouped by filter type with pagination of top-level filters."""
+        # Get all files matching filter and search criteria
+        all_files = self._get_fits_files_query(frame_filter, include_search=True).order_by(
+            FitsFileModel.fitsFileFilter, FitsFileModel.fitsFileObject
+        )
+
+        # Group files by filter first
+        all_filters_dict = {}
+        for fits_file in all_files:
+            filter_name = fits_file.fitsFileFilter or "No Filter"
+            
+            # For calibration frames without filters, use frame type
+            if not fits_file.fitsFileFilter and fits_file.fitsFileType:
+                frame_type = fits_file.fitsFileType.upper()
+                if "DARK" in frame_type or "BIAS" in frame_type:
+                    filter_name = "No Filter (Calibration)"
+                elif "FLAT" in frame_type:
+                    filter_name = "OSC/No Filter"
+            
+            object_name = fits_file.fitsFileObject or "Unknown"
+            
+            # For calibration frames, use frame type as object if no object is set
+            if frame_filter in ["Calibration Frames Only", "All Frames"] and (not fits_file.fitsFileObject or fits_file.fitsFileObject == "Unknown"):
+                frame_type = fits_file.fitsFileType or "Unknown"
+                if "DARK" in frame_type.upper():
+                    object_name = "Dark Frames"
+                elif "FLAT" in frame_type.upper():
+                    object_name = "Flat Frames"
+                elif "BIAS" in frame_type.upper():
+                    object_name = "Bias Frames"
+                else:
+                    object_name = f"{frame_type} Frames" if frame_type != "Unknown" else "Unknown"
+            
+            if filter_name not in all_filters_dict:
+                all_filters_dict[filter_name] = {}
+            if object_name not in all_filters_dict[filter_name]:
+                all_filters_dict[filter_name][object_name] = []
+
+            all_filters_dict[filter_name][object_name].append(fits_file)
+
+        # Get sorted list of filter names for pagination
+        sorted_filters = sorted(all_filters_dict.keys())
+        self.total_items = len(sorted_filters)
+        
+        # Apply pagination to filter list
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        filters_for_page = sorted_filters[start_idx:end_idx]
+
+        # Create tree items only for filters on current page
+        for filter_name in filters_for_page:
+            objects_dict = all_filters_dict[filter_name]
+            # Create parent item for the filter
+            parent_item = QTreeWidgetItem()
+            parent_item.setText(0, filter_name)  # Filter name in first column
+            parent_item.setText(1, f"({sum(len(files) for files in objects_dict.values())} files)")  # File count in Type column
+            parent_item.setText(2, "")  # Empty other columns for parent
+            parent_item.setText(3, "")
+            parent_item.setText(4, "")
+            parent_item.setText(5, "")
+            parent_item.setText(6, "")
+            parent_item.setText(7, "")
+            parent_item.setText(8, "")
+
+            # Make parent item bold and slightly different color
+            font = parent_item.font(0)
+            font.setBold(True)
+            for col in range(9):
+                parent_item.setFont(col, font)
+
+            # Add sub-parent items for each object (sorted alphabetically)
+            for object_name in sorted(objects_dict.keys()):
+                files = objects_dict[object_name]
+                object_item = QTreeWidgetItem()
+                object_item.setText(0, object_name)  # Object name in first column
+                object_item.setText(1, f"({len(files)} files)")  # File count in Type column
+                object_item.setText(2, "")  # Empty other columns for object
+                object_item.setText(3, "")
+                object_item.setText(4, "")
+                object_item.setText(5, "")
+                object_item.setText(6, "")
+                object_item.setText(7, "")
+                object_item.setText(8, "")
+
+                # Add child items for each file
+                for fits_file in files:
+                    self._add_file_item(object_item, fits_file)
+
+                # Add object item to parent
+                parent_item.addChild(object_item)
+
+                # Keep the object item collapsed by default
+                object_item.setExpanded(False)
+
+            # Add parent item to tree
+            self.file_tree.addTopLevelItem(parent_item)
+
+            # Keep the parent item collapsed by default
+            parent_item.setExpanded(False)
+
+        total_files_on_page = sum(len(files) for filter_name in filters_for_page 
+                                 for files in all_filters_dict[filter_name].values())
+        logger.debug(f"Loaded {len(filters_for_page)} filters with {total_files_on_page} total files (sorted by filter, page {self.current_page + 1})")
 
     def _load_fits_data_by_object(self, frame_filter="Light Frames Only"):
         """Load FITS file data grouped by object name, then by date."""
@@ -2786,6 +2894,13 @@ class MappingsDialog(QDialog):
         self.apply_to_database_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
         checkbox_layout.addWidget(self.apply_to_database_checkbox)
         
+        # Reorganize files checkbox
+        self.reorganize_files_checkbox = QCheckBox("Reorganize repository folders")
+        self.reorganize_files_checkbox.setChecked(False)
+        self.reorganize_files_checkbox.setToolTip("Move files to correct folder structure when telescope/instrument mappings are applied")
+        self.reorganize_files_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
+        checkbox_layout.addWidget(self.reorganize_files_checkbox)
+        
         bottom_layout.addLayout(checkbox_layout)
         
         # Dialog buttons
@@ -3257,6 +3372,12 @@ class MappingsDialog(QDialog):
             progress.setValue(len(mappings))
             progress.close()
             
+            # Apply file reorganization if requested
+            if self.reorganize_files_checkbox.isChecked():
+                telescope_instrument_mappings = [m for m in mappings if m['card'] in ['TELESCOP', 'INSTRUME']]
+                if telescope_instrument_mappings:
+                    self.reorganize_repository_files(telescope_instrument_mappings)
+            
             if total_updates > 0:
                 QMessageBox.information(self, "Database Updated", 
                                       f"Successfully updated {total_updates} database records.")
@@ -3265,6 +3386,183 @@ class MappingsDialog(QDialog):
             logger.error(f"Error applying database mappings: {e}")
             QMessageBox.critical(self, "Error", f"Error applying database mappings: {e}")
     
+    def reorganize_repository_files(self, mappings):
+        """Reorganize files in repository based on telescope/instrument mappings"""
+        try:
+            import configparser
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            repo_folder = config.get('DEFAULT', 'repo', fallback='.')
+            if not repo_folder.endswith('/') and not repo_folder.endswith('\\'):
+                repo_folder += os.sep
+            
+            # Create progress dialog
+            progress = QProgressDialog("Reorganizing repository files...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Reorganizing Files")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            moved_files = 0
+            removed_folders = 0
+            errors = []
+            
+            # Process each mapping that affects folder structure
+            for mapping_idx, mapping in enumerate(mappings):
+                if progress.wasCanceled():
+                    break
+                
+                if not mapping['current'] or not mapping['replace']:
+                    continue
+                
+                card = mapping['card']
+                current_value = mapping['current']
+                replace_value = mapping['replace']
+                
+                progress.setLabelText(f"Processing {card} mapping: '{current_value}' → '{replace_value}'")
+                progress.setValue(int((mapping_idx / len(mappings)) * 50))
+                QApplication.processEvents()
+                
+                # Get all files that were updated with this mapping
+                field_name = 'fitsFileTelescop' if card == 'TELESCOP' else 'fitsFileInstrument'
+                updated_files = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == replace_value)
+                
+                for file_idx, fits_file in enumerate(updated_files):
+                    if progress.wasCanceled():
+                        break
+                    
+                    # Update progress
+                    total_files = len(list(updated_files))
+                    file_progress = 50 + int((file_idx / max(total_files, 1)) * 50)
+                    progress.setValue(file_progress)
+                    QApplication.processEvents()
+                    
+                    if not fits_file.fitsFileName or not os.path.exists(fits_file.fitsFileName):
+                        continue
+                    
+                    # Calculate new path based on updated metadata
+                    try:
+                        new_path = self.calculate_new_file_path(fits_file, repo_folder)
+                        if new_path and new_path != fits_file.fitsFileName:
+                            # Create directory structure if needed
+                            new_dir = os.path.dirname(new_path)
+                            if not os.path.exists(new_dir):
+                                os.makedirs(new_dir, exist_ok=True)
+                            
+                            # Move the file
+                            if not os.path.exists(new_path):
+                                shutil.move(fits_file.fitsFileName, new_path)
+                                
+                                # Update database record
+                                fits_file.fitsFileName = new_path
+                                fits_file.save()
+                                
+                                moved_files += 1
+                                logger.info(f"Moved file: {fits_file.fitsFileName} → {new_path}")
+                            else:
+                                error_msg = f"Cannot move {fits_file.fitsFileName} - target exists: {new_path}"
+                                errors.append(error_msg)
+                                logger.warning(error_msg)
+                                
+                    except Exception as e:
+                        error_msg = f"Error moving file {fits_file.fitsFileName}: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(error_msg)
+            
+            # Clean up empty directories
+            progress.setLabelText("Cleaning up empty directories...")
+            progress.setValue(90)
+            QApplication.processEvents()
+            
+            removed_folders = self.cleanup_empty_directories(repo_folder)
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Show results
+            result_message = f"Repository reorganization completed:\n\n"
+            result_message += f"• Files moved: {moved_files}\n"
+            result_message += f"• Empty folders removed: {removed_folders}\n"
+            
+            if errors:
+                result_message += f"\n{len(errors)} errors encountered:\n"
+                result_message += "\n".join(errors[:5])  # Show first 5 errors
+                if len(errors) > 5:
+                    result_message += f"\n... and {len(errors) - 5} more errors (see log for details)"
+                
+                QMessageBox.warning(self, "Reorganization Completed with Errors", result_message)
+            else:
+                QMessageBox.information(self, "Reorganization Successful", result_message)
+            
+        except Exception as e:
+            logger.error(f"Error reorganizing repository files: {e}")
+            QMessageBox.critical(self, "Error", f"Error reorganizing repository files: {e}")
+    
+    def calculate_new_file_path(self, fits_file, repo_folder):
+        """Calculate the new file path based on the file's metadata"""
+        try:
+            # Parse the current filename to extract metadata
+            filename = os.path.basename(fits_file.fitsFileName)
+            
+            # We need to reconstruct the path based on the database values
+            # Path format: Light/{OBJECT}/{TELESCOPE}/{INSTRUMENT}/{DATE}/
+            # or Calibrate/{TYPE}/{TELESCOPE}/{INSTRUMENT}/{EXPOSURE or FILTER}/{DATE}/
+            
+            # Extract date from filename or use current date
+            if fits_file.fitsFileDate:
+                from datetime import datetime
+                date_obj = datetime.fromisoformat(str(fits_file.fitsFileDate))
+                fits_date = date_obj.strftime("%Y%m%d")
+            else:
+                fits_date = "unknown"
+            
+            # Clean values for folder names
+            telescope = fits_file.fitsFileTelescop.replace(" ", "_").replace("\\", "_") if fits_file.fitsFileTelescop else "Unknown"
+            instrument = fits_file.fitsFileInstrument.replace(" ", "_") if fits_file.fitsFileInstrument else "Unknown"
+            
+            # Determine file type and construct path
+            if fits_file.fitsFileType and "LIGHT" in fits_file.fitsFileType.upper():
+                object_name = fits_file.fitsFileObject if fits_file.fitsFileObject else "Unknown"
+                new_path = os.path.join(repo_folder, "Light", object_name, telescope, instrument, fits_date, filename)
+            elif fits_file.fitsFileType and "DARK" in fits_file.fitsFileType.upper():
+                exposure = str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "unknown"
+                new_path = os.path.join(repo_folder, "Calibrate", "Dark", telescope, instrument, exposure, fits_date, filename)
+            elif fits_file.fitsFileType and "FLAT" in fits_file.fitsFileType.upper():
+                filter_name = fits_file.fitsFileFilter if fits_file.fitsFileFilter else "OSC"
+                new_path = os.path.join(repo_folder, "Calibrate", "Flat", telescope, instrument, filter_name, fits_date, filename)
+            elif fits_file.fitsFileType and "BIAS" in fits_file.fitsFileType.upper():
+                new_path = os.path.join(repo_folder, "Calibrate", "Bias", telescope, instrument, fits_date, filename)
+            else:
+                # Unknown type, return None
+                return None
+            
+            return new_path
+            
+        except Exception as e:
+            logger.error(f"Error calculating new path for {fits_file.fitsFileName}: {e}")
+            return None
+    
+    def cleanup_empty_directories(self, repo_folder):
+        """Remove empty directories from the repository"""
+        removed_count = 0
+        try:
+            # Walk the directory tree bottom-up to remove empty directories
+            for root, dirs, files in os.walk(repo_folder, topdown=False):
+                for dirname in dirs:
+                    dir_path = os.path.join(root, dirname)
+                    try:
+                        # Only remove if directory is empty
+                        if not os.listdir(dir_path):
+                            os.rmdir(dir_path)
+                            removed_count += 1
+                            logger.info(f"Removed empty directory: {dir_path}")
+                    except OSError:
+                        # Directory not empty or other error, skip
+                        pass
+        except Exception as e:
+            logger.error(f"Error cleaning up empty directories: {e}")
+        
+        return removed_count
+
     def apply_file_folder_mappings(self, mappings):
         """Apply mappings to filenames and folder names on disk"""
         try:
