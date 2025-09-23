@@ -174,6 +174,12 @@ class ImagesWidget(QWidget):
             # Get sort method from combo box
             sort_method = self.sort_combo.currentText()
             
+            # Show/hide Filter column based on sort method
+            if sort_method == "Filter":
+                self.file_tree.setColumnHidden(4, True)  # Hide Filter column when sorting by filter
+            else:
+                self.file_tree.setColumnHidden(4, False)  # Show Filter column for other sort methods
+            
             # Load data based on sort method
             if sort_method == "Object":
                 self._load_fits_data_by_object_paginated()
