@@ -1,7 +1,8 @@
 import os
 import sys
 import logging
-from datetime import datetime
+import datetime
+from datetime import datetime as dt
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QTreeWidget, QTreeWidgetItem, QAbstractItemView,
@@ -36,7 +37,7 @@ class SessionsWidget(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager", "Filter"])
+        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager", "Filter", "Images"])
         
         # Enable multi-selection
         self.sessions_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -47,6 +48,7 @@ class SessionsWidget(QWidget):
         self.sessions_tree.setColumnWidth(2, 150)  # Telescope
         self.sessions_tree.setColumnWidth(3, 150)  # Imager
         self.sessions_tree.setColumnWidth(4, 100)  # Filter
+        self.sessions_tree.setColumnWidth(5, 80)   # Images
         
         # Enable context menu
         self.sessions_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -275,7 +277,7 @@ class SessionsWidget(QWidget):
                 return  # User cancelled
             
             # Create main checkout directory
-            checkout_dir = os.path.join(dest_dir, f"Sessions_Checkout_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            checkout_dir = os.path.join(dest_dir, f"Sessions_Checkout_{dt.now().strftime('%Y%m%d_%H%M%S')}")
             os.makedirs(checkout_dir, exist_ok=True)
             
             # Calculate total work for progress tracking
@@ -568,6 +570,13 @@ class SessionsWidget(QWidget):
             # Create hierarchical tree structure - sort objects alphabetically
             for object_name in sorted(sessions_by_object.keys()):
                 object_sessions = sessions_by_object[object_name]
+                
+                # Calculate total image count for this object across all sessions
+                total_images = 0
+                for session in object_sessions:
+                    session_image_count = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId).count()
+                    total_images += session_image_count
+                
                 # Create parent item for each object
                 parent_item = QTreeWidgetItem()
                 parent_item.setText(0, object_name)
@@ -575,6 +584,7 @@ class SessionsWidget(QWidget):
                 parent_item.setText(2, "")  # No telescope for parent
                 parent_item.setText(3, "")  # No imager for parent
                 parent_item.setText(4, "")  # No filter for parent
+                parent_item.setText(5, str(total_images))  # Total images for this object
                 
                 # Style parent item differently
                 font = parent_item.font(0)
@@ -588,12 +598,16 @@ class SessionsWidget(QWidget):
                 
                 # Add child items for each session
                 for session in sorted_sessions:
+                    # Get the image count for this specific session
+                    session_image_count = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId).count()
+                    
                     child_item = QTreeWidgetItem()
                     child_item.setText(0, "")  # Empty object name for child
                     child_item.setText(1, str(session.fitsSessionDate) if session.fitsSessionDate else "Unknown Date")
                     child_item.setText(2, session.fitsSessionTelescope or "Unknown")
                     child_item.setText(3, session.fitsSessionImager or "Unknown")
                     child_item.setText(4, session.fitsSessionFilter or "Unknown")
+                    child_item.setText(5, str(session_image_count))  # Image count for this session
                     parent_item.addChild(child_item)
                 
                 # Only add parent item if it has children
@@ -752,7 +766,9 @@ class SessionsWidget(QWidget):
                     if total > 0:
                         progress = int((current / total) * 100)
                         progress_dialog.setValue(progress)
-                        progress_dialog.setLabelText(f"Light sessions {current}/{total}: {description}")
+                        # Extract filename from full path in description
+                        filename = os.path.basename(description) if description else ""
+                        progress_dialog.setLabelText(f"Light sessions {current}/{total}: {filename}")
                     QApplication.processEvents()
                     return True
                 
@@ -798,7 +814,14 @@ class SessionsWidget(QWidget):
                     if total > 0:
                         progress = int((current / total) * 100)
                         progress_dialog.setValue(progress)
-                        progress_dialog.setLabelText(f"Calibration sessions {current}/{total}: {description}")
+                        # Extract filename from description (format: "Type: /path/to/file")
+                        if ": " in description:
+                            file_type, file_path = description.split(": ", 1)
+                            filename = os.path.basename(file_path)
+                            display_text = f"{file_type}: {filename}"
+                        else:
+                            display_text = os.path.basename(description) if description else ""
+                        progress_dialog.setLabelText(f"Calibration sessions {current}/{total}: {display_text}")
                     QApplication.processEvents()
                     return True
                 
@@ -844,7 +867,9 @@ class SessionsWidget(QWidget):
                     if total > 0:
                         progress = int((current / total) * 100)
                         progress_dialog.setValue(progress)
-                        progress_dialog.setLabelText(f"Linking {current}/{total}: {description}")
+                        # For linking, description should be object names, but handle file paths just in case
+                        display_text = os.path.basename(description) if description and os.path.sep in description else description
+                        progress_dialog.setLabelText(f"Linking {current}/{total}: {display_text}")
                     QApplication.processEvents()
                     return True
                 

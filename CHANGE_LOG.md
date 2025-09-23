@@ -16,6 +16,9 @@
 - Moved Field Mappings to Tools menu and removed Images menu
 - Removed Load from Incoming from Images menu and added Load New button to Images view
 - Moved Regenerate button to front of search controls in Images view
+- Hidden Filter column in Images view when sorted by Filter (since filter is shown as expandable section)
+- Improved session regeneration progress display to show only filename instead of full path
+- Added Images column to Sessions view showing the number of images in each session and total per object
 
 ### New Features  
 - Menu reorganization: Removed Stats menu and added Refresh button to Statistics view
