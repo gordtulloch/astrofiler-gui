@@ -96,7 +96,132 @@ class TelescopeDownloadWorker(QThread):
             logger.info(f"Connected to SeeStar at {ip}")
             self.progress_percent_updated.emit(10)
             
-            # ...existing code for steps 2-6...
+            # Step 2: Get list of FITS files (20% of progress)
+            if self._stop_requested:
+                return
+            
+            self.progress_updated.emit("Scanning for FITS files...")
+            logger.info("Scanning for FITS files...")
+            self.progress_percent_updated.emit(20)
+            
+            fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
+            
+            if self._stop_requested:
+                return
+            
+            if error:
+                self.error_occurred.emit(f"Failed to get file list: {error}")
+                logger.error(f"Failed to get file list: {error}")
+                return
+            
+            if not fits_files:
+                self.download_completed.emit("No FITS files found on telescope")
+                logger.info("No FITS files found on telescope")
+                return
+            
+            self.progress_updated.emit(f"Found {len(fits_files)} FITS files")
+            logger.info(f"Found {len(fits_files)} FITS files")
+            self.progress_percent_updated.emit(30)
+            
+            # Step 3: Download files (30% to 90% of progress)
+            if self._stop_requested:
+                return
+            
+            downloaded_files = 0
+            failed_files = []
+            deleted_files = 0
+            registered_files = 0
+            
+            for i, file_info in enumerate(fits_files):
+                if self._stop_requested:
+                    break
+                
+                file_name = file_info['name']
+                self.progress_updated.emit(f"Processing {file_name} ({i+1}/{len(fits_files)})...")
+                
+                # Calculate progress (30% to 90% for downloads)
+                download_progress = 30 + int((i / len(fits_files)) * 60)
+                self.progress_percent_updated.emit(download_progress)
+                
+                # Create local file path maintaining folder structure
+                folder_name = file_info.get('folder_name', 'unknown')
+                local_dir = os.path.join(self.target_directory, folder_name)
+                local_path = os.path.join(local_dir, file_name)
+                
+                # Download the file
+                success, error = smart_telescope_manager.download_file(
+                    self.telescope_type, ip, file_info, local_path,
+                    progress_callback=lambda progress: not self._stop_requested
+                )
+                
+                if self._stop_requested:
+                    break
+                
+                if success:
+                    downloaded_files += 1
+                    logger.info(f"Downloaded {file_name}")
+                    
+                    # Modify FITS headers based on folder name
+                    self._modify_fits_headers(local_path, folder_name)
+                    
+                    # Register the downloaded FITS file in the database
+                    try:
+                        processor = fitsProcessing()
+                        root_dir = os.path.dirname(local_path)
+                        file_name_only = os.path.basename(local_path)
+                        
+                        # Register the file (moveFiles=True to move from download location to repository)
+                        registered_id = processor.registerFitsImage(root_dir, file_name_only, moveFiles=True)
+                        
+                        if registered_id:
+                            registered_files += 1
+                            logger.info(f"Successfully registered {file_name} in database with ID {registered_id}")
+                        else:
+                            logger.warning(f"Failed to register {file_name} in database")
+                            
+                    except Exception as e:
+                        logger.error(f"Error registering {file_name} in database: {e}")
+                    
+                    # Delete file from telescope if requested
+                    if self.delete_files:
+                        delete_success, delete_error = smart_telescope_manager.delete_file(
+                            self.telescope_type, ip, file_info
+                        )
+                        if delete_success:
+                            deleted_files += 1
+                            logger.info(f"Deleted {file_name} from telescope")
+                        else:
+                            logger.warning(f"Failed to delete {file_name}: {delete_error}")
+                else:
+                    failed_files.append(f"{file_name}: {error}")
+                    logger.error(f"Failed to download {file_name}: {error}")
+            
+            # Step 4: Complete (90% to 100%)
+            if self._stop_requested:
+                self.progress_updated.emit("Download cancelled")
+                return
+            
+            self.progress_percent_updated.emit(95)
+            
+            # Step 5: Generate completion message
+            completion_message = f"Download completed!\n\n"
+            completion_message += f"Downloaded: {downloaded_files} files\n"
+            completion_message += f"Registered in database: {registered_files} files\n"
+            
+            if failed_files:
+                completion_message += f"Failed: {len(failed_files)} files\n"
+                completion_message += "Failed files:\n" + "\n".join(failed_files[:5])
+                if len(failed_files) > 5:
+                    completion_message += f"\n... and {len(failed_files) - 5} more"
+            
+            if self.delete_files:
+                completion_message += f"\nDeleted from telescope: {deleted_files} files"
+            
+            completion_message += f"\n\nFiles processed and moved to repository structure"
+            
+            self.progress_percent_updated.emit(100)
+            self.download_completed.emit(completion_message)
+            logger.info(f"Download process completed: {downloaded_files} downloaded, {registered_files} registered, {len(failed_files)} failed")
             
         except Exception as e:
             if not self._stop_requested:
@@ -250,9 +375,77 @@ class SmartTelescopeDownloadDialog(QDialog):
             QMessageBox.warning(self, "Warning", "Please specify a target directory.")
             return
         
-        # Create and start worker thread
+        # Create progress dialog
+        self.progress_dialog = QProgressDialog("Initializing download...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Downloading from Smart Telescope")
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.show()
+        
+        # Create and configure worker thread
         self.worker = TelescopeDownloadWorker(telescope_type, hostname, network, target_directory, delete_files)
+        
+        # Connect worker signals to handlers
+        self.worker.progress_updated.connect(self.on_progress_updated)
+        self.worker.progress_percent_updated.connect(self.on_progress_percent_updated)
+        self.worker.download_completed.connect(self.on_download_completed)
+        self.worker.error_occurred.connect(self.on_error_occurred)
+        
+        # Connect progress dialog cancel to worker stop
+        self.progress_dialog.canceled.connect(self.on_download_cancelled)
+        
+        # Start the worker thread
         self.worker.start()
+        logger.info(f"Started download from {telescope_type} to {target_directory}")
+    
+    def on_progress_updated(self, message):
+        """Handle progress text updates from worker thread."""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog is not None:
+            self.progress_dialog.setLabelText(message)
+            QApplication.processEvents()
+    
+    def on_progress_percent_updated(self, percent):
+        """Handle progress percentage updates from worker thread."""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog is not None:
+            self.progress_dialog.setValue(percent)
+            QApplication.processEvents()
+    
+    def on_download_completed(self, message):
+        """Handle download completion from worker thread."""
+        logger.info(f"Download completed: {message}")
+        
+        # Close progress dialog
+        self.close_progress_dialog()
+        
+        # Show completion message
+        QMessageBox.information(self, "Download Complete", message)
+        
+        # Close the download dialog
+        self.accept()
+    
+    def on_error_occurred(self, error_message):
+        """Handle errors from worker thread."""
+        logger.error(f"Download error: {error_message}")
+        
+        # Close progress dialog
+        self.close_progress_dialog()
+        
+        # Show error message
+        QMessageBox.critical(self, "Download Error", error_message)
+    
+    def on_download_cancelled(self):
+        """Handle download cancellation."""
+        logger.info("Download cancelled by user")
+        
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.stop()
+            if not self.worker.wait(3000):
+                self.worker.terminate()
+                self.worker.wait(1000)
+        
+        # Close progress dialog
+        self.close_progress_dialog()
     
     def closeEvent(self, event):
         """Handle dialog close event to ensure worker thread is stopped."""
