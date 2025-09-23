@@ -4,6 +4,12 @@
 
 ### Bug Fixes
 - Fixed missing accept_mappings method in MappingsDialog
+- Fixed Regenerate option in Images view to properly call registerFitsImages method
+- Fixed missing progress dialogs in Regenerate and Load New functions in Images view
+- Fixed Images view not loading data from database - implemented complete load_fits_data method with pagination
+- Fixed Sync Repository to clear database before synchronizing with existing files
+- Fixed Regenerate Sessions button to implement complete workflow: clear sessions → create light sessions → create calibration sessions → link sessions
+- Fixed Smart Telescope Download dialog to properly connect signals and implement complete download workflow
 
 ### UI Changes
 - Removed Download from Telescope from Tools menu and added Download button to Images view
@@ -14,12 +20,15 @@
 ### New Features  
 - Menu reorganization: Removed Stats menu and added Refresh button to Statistics view
 - Menu reorganization: Moved Duplicates and Merge Objects to Tools menu
+- Enhanced Smart Telescope Download to automatically register downloaded FITS files in database and move them to repository structure
 - UI Package Refactor: Complete modular restructure with separate widget files
 - Menu-driven navigation replacing tab interface
 - Download Dialog: Moved telescope download functionality to separate module
 - Improved code organization and maintainability
 - Faster application load times through selective imports
 - Removed all legacy tab classes from main file
+- Context menu functionality in Images view with View and Delete options for FITS files
+- Double-click to view FITS files with external viewer
 
 ## Version 1.1.0 - August 23, 2025
 
