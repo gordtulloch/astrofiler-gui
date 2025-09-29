@@ -99,7 +99,14 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 
 AstroFiler includes automated installation scripts for all major platforms:
 
-### Windows
+### Windows - Easy Setup
+Download SETUP.ZIP, unzip it, and run it. It will download everything needed and install it, putting an icon on your desktop.
+
+You will need to install and run Git for updates however. Download git, and from the astrofiler-gui folder run
+
+git pull origin main
+
+### Windows - Install Script
 Install Git - There are also a few ways to install Git on Windows. The most official build is available for download on the Git website. Just go to https://git-scm.com/download/win and the download will start automatically. Note that this is a project called Git for Windows, which is separate from Git itself; for more information on it, go to https://gitforwindows.org.
 
 Once git is installed, you can open a powershell command line (run as Admin) and enter:
