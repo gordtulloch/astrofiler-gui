@@ -23,6 +23,20 @@ from astrofiler_db import fitsFile as FitsFileModel, fitsSession as fitsSessionM
 import logging
 logger = logging.getLogger(__name__)
 
+def normalize_file_path(file_path):
+    """
+    Normalize file paths to use forward slashes consistently.
+    
+    Args:
+        file_path: File path string that may contain backslashes
+        
+    Returns:
+        Normalized path with forward slashes
+    """
+    if file_path:
+        return file_path.replace('\\', '/')
+    return file_path
+
 def dwarfFixHeader(hdr, root, file):
     """
     Fix FITS headers for DWARF telescope files based on folder structure and filenames.
@@ -147,9 +161,9 @@ def dwarfFixHeader(hdr, root, file):
                 
                 # Set INSTRUME based on camera folder
                 if cam_folder == "cam_0":
-                    hdr['INSTRUME'] = 'WIDE'
-                elif cam_folder == "cam_1":
                     hdr['INSTRUME'] = 'TELE'
+                elif cam_folder == "cam_1":
+                    hdr['INSTRUME'] = 'WIDE'
                 else:
                     logger.warning(f"Unknown camera folder: {cam_folder}")
                 
@@ -555,6 +569,7 @@ class fitsProcessing:
                     logger.info("File successfully moved to repo - "+newPath+newName)
                 else:
                     logger.warning("File already exists in repo, no changes - "+newPath+newName)
+                    return "DUPLICATE"  # Special return value for duplicate files
             else:
                 if not moveFiles:
                     logger.warning("Warning: File not moved to repo is "+str(os.path.join(root, file)))
@@ -600,6 +615,7 @@ class fitsProcessing:
         # Second pass: process files with progress tracking
         successful_files = 0
         failed_files = 0
+        duplicate_files = 0
         cancelled_by_user = False
         
         logger.info(f"Starting second pass to process {total_files} FITS files")
@@ -643,7 +659,11 @@ class fitsProcessing:
                         logger.error(f"Exception registering file {file}: {str(e)}")
                         newFitsFileId=None
 
-                    if newFitsFileId is not None:
+                    if newFitsFileId == "DUPLICATE":
+                        # File was skipped because it's a duplicate
+                        duplicate_files += 1
+                        logger.info(f"Skipped duplicate file: {file}")
+                    elif newFitsFileId is not None:
                         # Add the file to the list of registered files
                         registeredFiles.append(newFitsFileId)
                         successful_files += 1
@@ -659,12 +679,12 @@ class fitsProcessing:
                 break
         
         total_time = datetime.now() - start_time
-        logger.info(f"Processing complete! Found {total_files} files, successfully registered {successful_files} files, failed {failed_files} files in {total_time}")
+        logger.info(f"Processing complete! Found {total_files} files, successfully registered {successful_files} files, skipped {duplicate_files} duplicates, failed {failed_files} files in {total_time}")
         
         if cancelled_by_user:
             logger.info("Processing was cancelled by user")
         
-        return registeredFiles
+        return registeredFiles, duplicate_files
 
     #################################################################################################################
     ## createLightSessions - this function creates sessions for all Light files not currently assigned to one    ##
@@ -919,13 +939,13 @@ class fitsProcessing:
                 telescope="Unknown"
 
             if "OBJECT" in hdr:
-                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"].upper(),
+                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=normalize_file_path(fileName),fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"].upper(),
                             fitsFileObject=hdr["OBJECT"],fitsFileExpTime=exposure,fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=telescope,
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", None),
                             fitsFileHash=fileHash,fitsFileSession=None)
             else:
-                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=fileName,fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"].upper(),
+                newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=normalize_file_path(fileName),fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"].upper(),
                             fitsFileExpTime=exposure,fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=telescope,
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", "OSC"),
@@ -1442,7 +1462,7 @@ class fitsProcessing:
             # Create database entry
             fits_file = FitsFileModel.create(
                 fitsFileId=master_id,
-                fitsFileName=master_path,
+                fitsFileName=normalize_file_path(master_path),
                 fitsFileDate=file_date,
                 fitsFileCalibrated=1,  # Masters are considered calibrated
                 fitsFileType=cal_type.upper(),

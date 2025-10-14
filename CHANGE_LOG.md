@@ -2,6 +2,40 @@
 
 ## Version 1.1.2 (Current Development)
 
+### New Features
+- **Duplicate File Reporting**: Enhanced import system to track and report duplicate files during Load New and Sync operations
+- **Smart Telescope Integration**: Complete support for DWARF 3 telescopes via FTP protocol alongside existing SeeStar SMB support
+- **StellarMate Support**: Added StellarMate telescope integration with SMB protocol using `stellarmate.local` hostname and `stellarmate`/`smate` credentials
+- **DWARF FITS Header Processing**: Comprehensive DWARF folder structure parsing for `DWARF_RAW_*`, `CALI_FRAME`, and `DWARF_DARK` folders with automatic header correction
+- **Automatic Session Regeneration**: Sessions database automatically rebuilds after file imports via "Load New" or telescope downloads
+- **Enhanced File Processing**: DWARF telescope files processed with proper instrument mapping (cam_0→TELE, cam_1→WIDE) and metadata extraction
+
+### Smart Telescope Enhancements
+- **Dual Protocol Support**: SMB for SeeStar/StellarMate, FTP for DWARF telescopes with automatic protocol selection
+- **DWARF File Structure Validation**: Validates DWARF folder structure (`CALI_FRAME`, `DWARF_DARK`, `DWARF_RAW_*`) before scanning
+- **Telescope-Specific Processing**: Different scanning and processing logic for each telescope type
+- **Network Discovery**: Enhanced hostname resolution with telescope-specific patterns and default hostnames
+- **Download Progress**: Dynamic protocol indicators (SMB vs FTP) in download progress messages
+
+### UI/UX Improvements  
+- **Mapping Dialog Defaults**: All checkboxes now enabled by default ("Update FITS headers", "Apply to database", "Reorganize folders")
+- **Mapping Persistence**: Fixed mappings not loading properly in dialog - saved values now correctly populate combo boxes
+- **Post-Download Refresh**: All UI components automatically refresh after successful telescope downloads or file imports
+- **Session Auto-Update**: No manual "Regenerate" required - sessions update automatically when new files are added
+
+### Technical Improvements
+- **Startup Performance**: Removed unnecessary file path normalization migration for faster application startup
+- **Duplicate File Detection & Reporting**: Enhanced file import system to track and report duplicate files separately from failed imports
+  - `registerFitsImage()` now returns "DUPLICATE" for files already in database (detected by SHA-256 hash)
+  - `registerFitsImages()` returns tuple (registered_files, duplicate_count) for comprehensive reporting
+  - Success messages in UI now show "Processed X files, skipped Y duplicates" when duplicates are found
+  - Command-line tools enhanced with duplicate reporting for batch operations
+  - Backward compatibility maintained for existing code while providing enhanced information
+- **DWARF FITS Processing**: Complete implementation of `dwarfFixHeader()` with folder structure parsing and header population
+- **Smart Telescope Manager**: Enhanced with FTP support, folder validation, and telescope-specific configuration
+- **File Registration**: Downloaded files automatically registered in database with proper metadata and folder organization
+- **Progress Tracking**: Enhanced progress dialogs with granular updates and metadata extraction feedback
+
 ### Bug Fixes
 - Fixed missing accept_mappings method in MappingsDialog
 - Fixed Regenerate option in Images view to properly call registerFitsImages method

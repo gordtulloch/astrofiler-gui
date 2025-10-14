@@ -10,6 +10,7 @@ import os
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import ftplib
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -37,6 +38,20 @@ class SmartTelescopeManager:
                 'default_password': 'guest',
                 'share_name': 'EMMC Images',
                 'fits_path': 'MyWorks'
+            },
+            'StellarMate': {
+                'default_hostname': 'stellarmate.local',
+                'default_username': 'stellarmate',
+                'default_password': 'smate',
+                'share_name': 'Pictures',
+                'fits_path': ''  # Start scanning from root
+            },
+            'DWARF 3': {
+                'default_hostname': '192.168.88.1',
+                'default_username': None,  # No authentication for FTP
+                'default_password': None,  # No authentication for FTP
+                'protocol': 'ftp',
+                'fits_path': 'Astronomy'  # DWARF stores FITS files in /Astronomy
             }
         }
     
@@ -79,6 +94,16 @@ class SmartTelescopeManager:
         except:
             return False
     
+    def check_ftp_port(self, ip, timeout=2):
+        """Check if FTP port (21) is open on the given IP."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(timeout)
+                result = sock.connect_ex((str(ip), 21))
+                return result == 0
+        except:
+            return False
+    
     def get_hostname(self, ip):
         """Try to get the hostname for the given IP address."""
         try:
@@ -94,6 +119,8 @@ class SmartTelescopeManager:
         
         if telescope_type == 'SeeStar':
             return 'seestar' in hostname.lower()
+        elif telescope_type == 'StellarMate':
+            return 'stellarmate' in hostname.lower()
         
         return False
     
@@ -123,8 +150,17 @@ class SmartTelescopeManager:
                             logger.warning(f"Hostname {hostname} doesn't match expected SeeStar pattern")
                             return None, f"Hostname {hostname} doesn't match expected SeeStar pattern"
                     
+                    # For StellarMate, trust the mDNS hostname and skip reverse DNS
+                    elif telescope_type == 'StellarMate':
+                        if 'stellarmate' in hostname.lower() or hostname.upper().startswith('STELLARMATE'):
+                            logger.info(f"Found {telescope_type} telescope at {ip} (mDNS hostname: {hostname})")
+                            return ip, None
+                        else:
+                            logger.warning(f"Hostname {hostname} doesn't match expected StellarMate pattern")
+                            return None, f"Hostname {hostname} doesn't match expected StellarMate pattern"
+                    
                     # For other telescope types, check if the provided hostname matches
-                    if self.is_target_device(hostname, telescope_type):
+                    elif self.is_target_device(hostname, telescope_type):
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
                 
@@ -137,6 +173,18 @@ class SmartTelescopeManager:
         # For SeeStar, try the default mDNS hostname first before network scanning
         if telescope_type == 'SeeStar':
             default_hostname = self.supported_telescopes['SeeStar']['default_hostname']
+            logger.info(f"Trying default mDNS hostname: {default_hostname}")
+            try:
+                ip = socket.gethostbyname(default_hostname)
+                if self.check_smb_port(ip):
+                    logger.info(f"Found {telescope_type} telescope at {ip} via mDNS ({default_hostname})")
+                    return ip, None
+            except Exception as e:
+                logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
+        
+        # For StellarMate, try the default mDNS hostname first before network scanning
+        elif telescope_type == 'StellarMate':
+            default_hostname = self.supported_telescopes['StellarMate']['default_hostname']
             logger.info(f"Trying default mDNS hostname: {default_hostname}")
             try:
                 ip = socket.gethostbyname(default_hostname)
@@ -181,36 +229,48 @@ class SmartTelescopeManager:
     
     def _scan_ip_for_telescope(self, ip, telescope_type):
         """Scan a single IP for the target telescope type."""
-        if self.check_smb_port(ip):
-            # For SeeStar, skip reverse DNS lookups due to firmware changes
-            # Only rely on SMB port availability and network position
-            if telescope_type == 'SeeStar':
-                # SeeStar devices typically respond on SMB port 445
-                # Since reverse DNS is disabled, we'll consider any SMB-enabled device
-                # in the expected IP range as a potential SeeStar
-                # User will need to verify via the hostname field in the GUI
-                logger.debug(f"Found SMB service at {ip} - potential {telescope_type} device")
+        config = self.supported_telescopes.get(telescope_type, {})
+        
+        if config.get('protocol') == 'ftp':
+            # For DWARF telescopes using FTP
+            if self.check_ftp_port(ip):
+                logger.debug(f"Found FTP service at {ip} - potential {telescope_type} device")
                 return str(ip)
-            else:
-                # For other telescope types, still use reverse DNS if needed
-                hostname = self.get_hostname(ip)
-                if self.is_target_device(hostname, telescope_type):
+        else:
+            # For SMB-based telescopes (SeeStar, StellarMate)
+            if self.check_smb_port(ip):
+                if telescope_type in ['SeeStar', 'StellarMate']:
+                    logger.debug(f"Found SMB service at {ip} - potential {telescope_type} device")
                     return str(ip)
+                else:
+                    # For other telescope types, still use reverse DNS if needed
+                    hostname = self.get_hostname(ip)
+                    if self.is_target_device(hostname, telescope_type):
+                        return str(ip)
         return None
     
     def get_fits_files(self, telescope_type, ip, username=None, password=None):
         """Get all FITS files from the telescope."""
         logger.info(f"Starting FITS file discovery on {telescope_type} at {ip}")
         
-        if not SMB_AVAILABLE:
-            logger.error("SMB protocol not available")
-            return [], "SMB protocol not available"
-        
         config = self.supported_telescopes.get(telescope_type)
         if not config:
             logger.error(f"Unsupported telescope type: {telescope_type}")
             return [], f"Unsupported telescope type: {telescope_type}"
         
+        # Check protocol type
+        if config.get('protocol') == 'ftp':
+            return self._get_fits_files_ftp(telescope_type, ip, username, password)
+        else:
+            return self._get_fits_files_smb(telescope_type, ip, username, password)
+    
+    def _get_fits_files_smb(self, telescope_type, ip, username=None, password=None):
+        """Get FITS files via SMB protocol (SeeStar)."""
+        if not SMB_AVAILABLE:
+            logger.error("SMB protocol not available")
+            return [], "SMB protocol not available"
+        
+        config = self.supported_telescopes.get(telescope_type)
         username = username or config['default_username']
         password = password or config['default_password']
         share_name = config['share_name']
@@ -236,7 +296,7 @@ class SmartTelescopeManager:
                 # Get FITS files from the specified path
                 logger.debug(f"Scanning for FITS files in {share_name}/{fits_path}")
                 start_time = time.time()
-                fits_files = self._get_fits_files_from_path(conn, share_name, fits_path)
+                fits_files = self._get_fits_files_from_path_smb(conn, share_name, fits_path, telescope_type)
                 scan_time = time.time() - start_time
                 
                 conn.close()
@@ -252,7 +312,45 @@ class SmartTelescopeManager:
             logger.error(f"Connection error to {ip}: {e}")
             return [], f"Connection error: {e}"
     
-    def _get_fits_files_from_path(self, conn, share_name, target_path):
+    def _get_fits_files_ftp(self, telescope_type, ip, username=None, password=None):
+        """Get FITS files via FTP protocol (DWARF)."""
+        logger.info(f"Using FTP connection for {telescope_type}")
+        
+        try:
+            # Create FTP connection (no authentication for DWARF)
+            ftp = ftplib.FTP()
+            logger.debug(f"Attempting FTP connection to {ip}:21...")
+            ftp.connect(ip, 21, timeout=10)
+            
+            # Anonymous login (no username/password for DWARF)
+            ftp.login()
+            logger.info(f"Successfully connected to FTP service at {ip}")
+            
+            try:
+                # Check for DWARF folder structure
+                if not self._validate_dwarf_structure(ftp):
+                    ftp.quit()
+                    return [], "DWARF folder structure not recognized"
+                
+                # Get FITS files from DWARF structure
+                start_time = time.time()
+                fits_files = self._get_fits_files_from_dwarf_ftp(ftp)
+                scan_time = time.time() - start_time
+                
+                ftp.quit()
+                logger.info(f"Found {len(fits_files)} FITS files in {scan_time:.2f} seconds")
+                return fits_files, None
+                
+            except Exception as e:
+                ftp.quit()
+                logger.error(f"Error accessing files on {ip}: {e}")
+                return [], f"Error accessing files: {e}"
+                
+        except Exception as e:
+            logger.error(f"FTP connection error to {ip}: {e}")
+            return [], f"FTP connection error: {e}"
+    
+    def _get_fits_files_from_path_smb(self, conn, share_name, target_path, telescope_type):
         """Get all FITS files from folders ending in '_sub' within the target path."""
         fits_files = []
         visited_paths = set()  # Prevent infinite loops
@@ -324,20 +422,228 @@ class SmartTelescopeManager:
         logger.debug(f"Scan complete. Found {len(fits_files)} FITS files in _sub folders.")
         return fits_files
     
+    def _validate_dwarf_structure(self, ftp):
+        """Validate that FTP root contains required DWARF folder structure."""
+        try:
+            files = ftp.nlst('/')
+            required_folders = ['CALI_FRAME', 'DWARF_DARK']
+            dwarf_raw_folders = [f for f in files if f.startswith('DWARF_RAW')]
+            
+            has_required = all(folder in files for folder in required_folders)
+            has_dwarf_raw = len(dwarf_raw_folders) > 0
+            
+            if has_required and has_dwarf_raw:
+                logger.info(f"Valid DWARF structure found: {required_folders} + {len(dwarf_raw_folders)} DWARF_RAW folders")
+                return True
+            else:
+                logger.warning(f"DWARF folder structure not recognized. Found: {files}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error validating DWARF structure: {e}")
+            return False
+    
+    def _get_fits_files_from_dwarf_ftp(self, ftp):
+        """Get FITS files from DWARF telescope via FTP."""
+        fits_files = []
+        
+        try:
+            # Scan root directory for DWARF_RAW folders (light files)
+            files = ftp.nlst('/')
+            dwarf_raw_folders = [f for f in files if f.startswith('DWARF_RAW')]
+            
+            for folder in dwarf_raw_folders:
+                logger.debug(f"Scanning DWARF_RAW folder: {folder}")
+                self._scan_dwarf_raw_folder(ftp, folder, fits_files)
+            
+            # Scan calibration folders
+            if 'CALI_FRAME' in files:
+                logger.debug("Scanning CALI_FRAME folder")
+                self._scan_dwarf_cali_folder(ftp, 'CALI_FRAME', fits_files)
+            
+            if 'DWARF_DARK' in files:
+                logger.debug("Scanning DWARF_DARK folder")
+                self._scan_dwarf_dark_folder(ftp, 'DWARF_DARK', fits_files)
+            
+        except Exception as e:
+            logger.error(f"Error scanning DWARF FTP structure: {e}")
+        
+        return fits_files
+    
+    def _scan_dwarf_raw_folder(self, ftp, folder_name, fits_files):
+        """Scan a DWARF_RAW folder for light frame FITS files."""
+        try:
+            # Parse folder name to extract metadata
+            # Expected format: DWARF_RAW_(INSTRUMEN)_(OBJECT)_EXP_(EXPTIME)_GAIN_(GAIN)_(DATE-OBS)
+            folder_parts = folder_name.split("_")
+            object_name = "Unknown"
+            instrument = "Unknown"
+            exptime = "Unknown"
+            gain = "Unknown"
+            
+            if len(folder_parts) >= 8:
+                try:
+                    instrument = folder_parts[2]  # INSTRUMEN
+                    object_name = folder_parts[3]  # OBJECT  
+                    exptime = folder_parts[5]  # EXPTIME (after EXP)
+                    gain = folder_parts[7]  # GAIN (after GAIN)
+                except IndexError:
+                    logger.warning(f"Could not parse DWARF_RAW folder name: {folder_name}")
+            
+            ftp.cwd('/')
+            ftp.cwd(folder_name)
+            files = ftp.nlst('.')
+            
+            for file in files:
+                if file.startswith('failed_'):
+                    logger.debug(f"Ignoring failed image: {file}")
+                    continue
+                    
+                if file.lower().endswith('.fits') or file.lower().endswith('.fit'):
+                    file_path = f"{folder_name}/{file}"
+                    try:
+                        size = ftp.size(file)
+                    except:
+                        size = 0
+                    
+                    fits_files.append({
+                        "name": file,
+                        "path": file_path,
+                        "size": size,
+                        "date": "Unknown",
+                        "share_name": "ftp_root",
+                        "folder_name": folder_name,
+                        "telescope_type": "DWARF 3",
+                        "file_type": "light",
+                        "object": object_name,
+                        "instrument": instrument,
+                        "exptime": exptime,
+                        "gain": gain
+                    })
+                    logger.debug(f"Found DWARF light file: {file_path} (Object: {object_name}, Instrument: {instrument})")
+                    
+        except Exception as e:
+            logger.error(f"Error scanning DWARF_RAW folder {folder_name}: {e}")
+    
+    def _scan_dwarf_cali_folder(self, ftp, folder_name, fits_files):
+        """Scan CALI_FRAME folder for calibration master frames."""
+        try:
+            ftp.cwd('/')
+            ftp.cwd(folder_name)
+            
+            # Look for bias, dark, flat folders
+            cali_types = ['bias', 'dark', 'flat']
+            folders = ftp.nlst('.')
+            
+            for cali_type in cali_types:
+                if cali_type in folders:
+                    self._scan_dwarf_cali_type_folder(ftp, f"{folder_name}/{cali_type}", cali_type, fits_files)
+                    
+        except Exception as e:
+            logger.error(f"Error scanning CALI_FRAME folder: {e}")
+    
+    def _scan_dwarf_cali_type_folder(self, ftp, folder_path, cali_type, fits_files):
+        """Scan a calibration type folder (bias/dark/flat) for cam_0 and cam_1 subfolders."""
+        try:
+            ftp.cwd('/')
+            ftp.cwd(folder_path)
+            folders = ftp.nlst('.')
+            
+            # Look for cam_0 (TELE) and cam_1 (WIDE) folders
+            for cam_folder in ['cam_0', 'cam_1']:
+                if cam_folder in folders:
+                    instrument = 'TELE' if cam_folder == 'cam_0' else 'WIDE'
+                    self._scan_dwarf_cam_folder(ftp, f"{folder_path}/{cam_folder}", cali_type, instrument, fits_files)
+                    
+        except Exception as e:
+            logger.error(f"Error scanning calibration type folder {folder_path}: {e}")
+    
+    def _scan_dwarf_cam_folder(self, ftp, folder_path, cali_type, instrument, fits_files):
+        """Scan a camera folder for FITS files."""
+        try:
+            ftp.cwd('/')
+            ftp.cwd(folder_path)
+            files = ftp.nlst('.')
+            
+            for file in files:
+                if file.lower().endswith('.fits') or file.lower().endswith('.fit'):
+                    try:
+                        size = ftp.size(file)
+                    except:
+                        size = 0
+                    
+                    fits_files.append({
+                        "name": file,
+                        "path": f"{folder_path}/{file}",
+                        "size": size,
+                        "date": "Unknown",
+                        "share_name": "ftp_root",
+                        "folder_name": os.path.basename(folder_path),
+                        "telescope_type": "DWARF 3",
+                        "file_type": f"master_{cali_type}",
+                        "instrument": instrument,
+                        "calibration_type": cali_type
+                    })
+                    logger.debug(f"Found DWARF {cali_type} master file: {folder_path}/{file}")
+                    
+        except Exception as e:
+            logger.error(f"Error scanning camera folder {folder_path}: {e}")
+    
+    def _scan_dwarf_dark_folder(self, ftp, folder_name, fits_files):
+        """Scan DWARF_DARK folder for dark library files."""
+        try:
+            ftp.cwd('/')
+            ftp.cwd(folder_name)
+            files = ftp.nlst('.')
+            
+            for file in files:
+                if file.startswith('tele_') and (file.lower().endswith('.fits') or file.lower().endswith('.fit')):
+                    try:
+                        size = ftp.size(file)
+                    except:
+                        size = 0
+                    
+                    fits_files.append({
+                        "name": file,
+                        "path": f"{folder_name}/{file}",
+                        "size": size,
+                        "date": "Unknown",
+                        "share_name": "ftp_root",
+                        "folder_name": folder_name,
+                        "telescope_type": "DWARF 3",
+                        "file_type": "dark_library",
+                        "instrument": "TELE"
+                    })
+                    logger.debug(f"Found DWARF dark library file: {folder_name}/{file}")
+                    
+        except Exception as e:
+            logger.error(f"Error scanning DWARF_DARK folder: {e}")
+    
     def download_file(self, telescope_type, ip, file_info, local_path, username=None, password=None, progress_callback=None):
         """Download a specific file from the telescope."""
         file_name = os.path.basename(file_info['path'])
         logger.info(f"Starting download of {file_name} ({self.format_file_size(file_info['size'])}) from {ip}")
-        
-        if not SMB_AVAILABLE:
-            logger.error("SMB protocol not available for download")
-            return False, "SMB protocol not available"
         
         config = self.supported_telescopes.get(telescope_type)
         if not config:
             logger.error(f"Unsupported telescope type for download: {telescope_type}")
             return False, f"Unsupported telescope type: {telescope_type}"
         
+        # Check protocol type
+        if config.get('protocol') == 'ftp':
+            return self._download_file_ftp(telescope_type, ip, file_info, local_path, progress_callback)
+        else:
+            return self._download_file_smb(telescope_type, ip, file_info, local_path, username, password, progress_callback)
+    
+    def _download_file_smb(self, telescope_type, ip, file_info, local_path, username=None, password=None, progress_callback=None):
+        """Download file via SMB protocol."""
+        file_name = os.path.basename(file_info['path'])
+        
+        if not SMB_AVAILABLE:
+            logger.error("SMB protocol not available for download")
+            return False, "SMB protocol not available"
+        
+        config = self.supported_telescopes.get(telescope_type)
         username = username or config['default_username']
         password = password or config['default_password']
         
@@ -409,6 +715,50 @@ class SmartTelescopeManager:
         except Exception as e:
             logger.error(f"Connection error during download of {file_name}: {e}")
             return False, f"Connection error: {e}"
+    
+    def _download_file_ftp(self, telescope_type, ip, file_info, local_path, progress_callback=None):
+        """Download file via FTP protocol."""
+        file_name = os.path.basename(file_info['path'])
+        
+        try:
+            # Create FTP connection
+            ftp = ftplib.FTP()
+            logger.debug(f"Connecting to {ip} for FTP file download...")
+            ftp.connect(ip, 21, timeout=10)
+            ftp.login()  # Anonymous login for DWARF
+            
+            try:
+                # Create local directory if it doesn't exist
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                logger.debug(f"Downloading to local path: {local_path}")
+                
+                # Download the file
+                start_time = time.time()
+                
+                with open(local_path, 'wb') as local_file:
+                    def progress_wrapper(data):
+                        if progress_callback:
+                            # Simple progress tracking for FTP (not as detailed as SMB)
+                            progress_callback(50)  # Basic progress indication
+                        local_file.write(data)
+                    
+                    ftp.retrbinary(f'RETR {file_info["path"]}', progress_wrapper)
+                
+                download_time = time.time() - start_time
+                download_speed = (file_info['size'] / 1024 / 1024) / download_time if download_time > 0 else 0
+                logger.info(f"Successfully downloaded {file_name} in {download_time:.2f}s ({download_speed:.2f} MB/s)")
+                
+                ftp.quit()
+                return True, None
+                
+            except Exception as e:
+                ftp.quit()
+                logger.error(f"Error downloading {file_name}: {e}")
+                return False, f"Error downloading file: {e}"
+                
+        except Exception as e:
+            logger.error(f"FTP connection error during download of {file_name}: {e}")
+            return False, f"FTP connection error: {e}"
     
     def format_file_size(self, size_bytes):
         """Format file size in human readable format."""

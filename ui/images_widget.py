@@ -707,8 +707,17 @@ class ImagesWidget(QWidget):
             # Create and run the FITS processing
             fits_processor = fitsProcessing()
             logger.debug("Starting registerFitsImages with progress callback")
-            registered_files = fits_processor.registerFitsImages(moveFiles=True, progress_callback=update_progress)
-            logger.debug(f"registerFitsImages completed, registered {len(registered_files)} files")
+            result = fits_processor.registerFitsImages(moveFiles=True, progress_callback=update_progress)
+            
+            # Handle the new tuple return format (registered_files, duplicate_count)
+            if isinstance(result, tuple):
+                registered_files, duplicate_count = result
+            else:
+                # Backward compatibility for old return format
+                registered_files = result
+                duplicate_count = 0
+                
+            logger.debug(f"registerFitsImages completed, registered {len(registered_files)} files, duplicates {duplicate_count}")
             
             # Close progress dialog
             if progress_dialog:
@@ -719,11 +728,38 @@ class ImagesWidget(QWidget):
                 QMessageBox.information(self, "Cancelled", "Repository loading was cancelled by user.")
                 logger.debug("Operation was cancelled by user")
             elif len(registered_files) == 0:
-                QMessageBox.information(self, "No Files", "No FITS files found to process in the source directory.")
+                if duplicate_count > 0:
+                    QMessageBox.information(self, "No New Files", f"No new FITS files were processed. {duplicate_count} duplicate files were skipped.")
+                else:
+                    QMessageBox.information(self, "No Files", "No FITS files found to process in the source directory.")
                 logger.info("No FITS files found to process")
             else:
-                QMessageBox.information(self, "Success", f"Repository loading completed successfully! Processed {len(registered_files)} files.")
+                if duplicate_count > 0:
+                    QMessageBox.information(self, "Success", f"Repository loading completed successfully! Processed {len(registered_files)} files, skipped {duplicate_count} duplicates.")
+                else:
+                    QMessageBox.information(self, "Success", f"Repository loading completed successfully! Processed {len(registered_files)} files.")
                 self.load_fits_data()  # Refresh the display
+                
+                # Auto-regenerate sessions after new files are loaded
+                try:
+                    from .sessions_widget import SessionsWidget
+                    # Get the main window and sessions widget
+                    main_window = self.parent()
+                    while main_window and not hasattr(main_window, 'sessions_widget'):
+                        main_window = main_window.parent()
+                    
+                    if main_window and hasattr(main_window, 'sessions_widget'):
+                        logger.info("Auto-regenerating sessions after Load New...")
+                        if hasattr(main_window.sessions_widget, 'auto_regenerate_sessions'):
+                            main_window.sessions_widget.auto_regenerate_sessions()
+                        else:
+                            logger.warning("auto_regenerate_sessions method not found on sessions widget")
+                    else:
+                        logger.warning("Could not find main window or sessions widget for auto-regeneration")
+                        
+                except Exception as e:
+                    logger.error(f"Error auto-regenerating sessions after Load New: {e}")
+                
                 logger.info("Operation completed successfully")
                 
         except ImportError:
@@ -813,7 +849,15 @@ class ImagesWidget(QWidget):
             
             # Create and run the FITS processing
             fits_processor = fitsProcessing()
-            registered_files = fits_processor.registerFitsImages(moveFiles=False, progress_callback=update_progress)
+            result = fits_processor.registerFitsImages(moveFiles=False, progress_callback=update_progress)
+            
+            # Handle the new tuple return format (registered_files, duplicate_count)
+            if isinstance(result, tuple):
+                registered_files, duplicate_count = result
+            else:
+                # Backward compatibility for old return format
+                registered_files = result
+                duplicate_count = 0
             
             # Close progress dialog
             if progress_dialog:
@@ -824,10 +868,16 @@ class ImagesWidget(QWidget):
                 QMessageBox.information(self, "Cancelled", "Repository synchronization was cancelled by user.")
                 logger.info("Repository synchronization was cancelled by user")
             elif len(registered_files) == 0:
-                QMessageBox.information(self, "No Files", "No FITS files found to process in the repository directory.")
+                if duplicate_count > 0:
+                    QMessageBox.information(self, "No New Files", f"No new FITS files were processed. {duplicate_count} duplicate files were skipped.")
+                else:
+                    QMessageBox.information(self, "No Files", "No FITS files found to process in the repository directory.")
                 logger.info("No FITS files found to process")
             else:
-                QMessageBox.information(self, "Success", f"Repository synchronization completed successfully! Processed {len(registered_files)} files.")
+                if duplicate_count > 0:
+                    QMessageBox.information(self, "Success", f"Repository synchronization completed successfully! Processed {len(registered_files)} files, skipped {duplicate_count} duplicates.")
+                else:
+                    QMessageBox.information(self, "Success", f"Repository synchronization completed successfully! Processed {len(registered_files)} files.")
                 self.load_fits_data()  # Refresh the display
                 logger.info("Repository synchronization completed successfully")
                 
@@ -868,7 +918,14 @@ class ImagesWidget(QWidget):
         try:
             from .mappings_dialog import MappingsDialog
             dialog = MappingsDialog(self)
-            dialog.exec()
+            result = dialog.exec()
+            
+            # Refresh the Images view after the dialog closes
+            # This ensures any applied mappings are reflected in the display
+            if result == QDialog.DialogCode.Accepted or result == QDialog.DialogCode.Rejected:
+                logger.debug("Refreshing Images view after mappings dialog closed")
+                self.load_fits_data()
+                
         except ImportError:
             QMessageBox.information(self, "Mappings", "Mappings dialog will be implemented.")
         except Exception as e:

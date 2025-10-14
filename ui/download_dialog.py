@@ -74,8 +74,9 @@ class TelescopeDownloadWorker(QThread):
             if self._stop_requested:
                 return
             
-            self.progress_updated.emit("Scanning network for SeeStar telescope (mDNS only)...")
-            logger.info("Scanning network for SeeStar telescope (mDNS only)...")
+            protocol_info = "SMB" if self.telescope_type in ["SeeStar", "StellarMate"] else "FTP"
+            self.progress_updated.emit(f"Scanning network for {self.telescope_type} telescope ({protocol_info})...")
+            logger.info(f"Scanning network for {self.telescope_type} telescope ({protocol_info})...")
             self.progress_percent_updated.emit(5)
             
             ip, error = smart_telescope_manager.find_telescope(
@@ -92,8 +93,8 @@ class TelescopeDownloadWorker(QThread):
                 logger.error(f"Failed to find telescope: {error}")
                 return
             
-            self.progress_updated.emit(f"Connected to SeeStar at {ip}")
-            logger.info(f"Connected to SeeStar at {ip}")
+            self.progress_updated.emit(f"Connected to {self.telescope_type} at {ip}")
+            logger.info(f"Connected to {self.telescope_type} at {ip}")
             self.progress_percent_updated.emit(10)
             
             # Step 2: Get list of FITS files (20% of progress)
@@ -248,8 +249,10 @@ class SmartTelescopeDownloadDialog(QDialog):
         
         self.telescope_list = QListWidget()
         self.telescope_list.addItem("SeeStar")
+        self.telescope_list.addItem("StellarMate")
+        self.telescope_list.addItem("DWARF 3")
         self.telescope_list.setCurrentRow(0)
-        self.telescope_list.setMaximumHeight(80)
+        self.telescope_list.setMaximumHeight(100)
         
         telescope_layout.addRow("Telescope Type:", self.telescope_list)
         
@@ -353,6 +356,10 @@ class SmartTelescopeDownloadDialog(QDialog):
             telescope_type = current_telescope.text()
             if telescope_type == "SeeStar":
                 self.hostname_edit.setText("seestar.local")
+            elif telescope_type == "StellarMate":
+                self.hostname_edit.setText("stellarmate.local")
+            elif telescope_type == "DWARF 3":
+                self.hostname_edit.setText("dwarf.local")
     
     def start_download(self):
         """Start the download process."""

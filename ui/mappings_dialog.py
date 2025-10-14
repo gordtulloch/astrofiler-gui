@@ -63,7 +63,7 @@ class MappingsDialog(QDialog):
         
         # Update files checkbox
         self.update_files_checkbox = QCheckBox("Update FITS headers on disk")
-        self.update_files_checkbox.setChecked(False)
+        self.update_files_checkbox.setChecked(True)
         self.update_files_checkbox.setToolTip("Also update the FITS headers in the actual files on disk")
         self.update_files_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
         checkbox_layout.addWidget(self.update_files_checkbox)
@@ -77,7 +77,7 @@ class MappingsDialog(QDialog):
         
         # Reorganize files checkbox
         self.reorganize_files_checkbox = QCheckBox("Reorganize repository folders")
-        self.reorganize_files_checkbox.setChecked(False)
+        self.reorganize_files_checkbox.setChecked(True)
         self.reorganize_files_checkbox.setToolTip("Move files to correct folder structure when telescope/instrument mappings are applied")
         self.reorganize_files_checkbox.setStyleSheet("QCheckBox { font-size: 10px; }")
         checkbox_layout.addWidget(self.reorganize_files_checkbox)
@@ -213,9 +213,18 @@ class MappingsDialog(QDialog):
         row_widget.card_combo = card_combo
         row_widget.current_combo = current_combo
         row_widget.replace_combo = replace_combo
+        row_widget.apply_button = apply_button
         
         # Update current and replace values for initial card
         self.update_current_values(row_widget)
+        
+        # Ensure the saved values are available in the combo boxes
+        if current and current not in [current_combo.itemText(i) for i in range(current_combo.count())]:
+            current_combo.addItem(current)
+        if replace and replace not in [replace_combo.itemText(i) for i in range(replace_combo.count())]:
+            replace_combo.addItem(replace)
+            
+        # Set the saved values
         current_combo.setCurrentText(current)
         replace_combo.setCurrentText(replace)
         
@@ -315,106 +324,6 @@ class MappingsDialog(QDialog):
             logger.error(f"Error getting current values for {card}: {e}")
             return [""]
     
-    def add_mapping_row(self, card="TELESCOP", current="", replace="", is_default=False):
-        """Add a new mapping row to the dialog"""
-        row_widget = QWidget()
-        row_layout = QGridLayout(row_widget)
-        row_layout.setSpacing(5)
-        row_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Set column stretch factors for consistent alignment
-        row_layout.setColumnStretch(1, 2)  # Card combo
-        row_layout.setColumnStretch(3, 3)  # Current combo
-        row_layout.setColumnStretch(5, 3)  # Replace combo
-        
-        # Card dropdown
-        card_combo = QComboBox()
-        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES","FILTER"])
-        card_combo.setCurrentText(card)
-        card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
-        
-        # Current dropdown
-        current_combo = QComboBox()
-        current_combo.setEditable(True)
-        
-        # Replace dropdown
-        replace_combo = QComboBox()
-        replace_combo.setEditable(True)
-        
-        # Apply button
-        apply_button = QPushButton("✓")
-        apply_button.setMaximumWidth(30)
-        apply_button.setToolTip("Apply this mapping immediately")
-        apply_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #44ff44;
-                border: 1px solid #555;
-                border-radius: 3px;
-                font-size: 10px;
-                padding: 2px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                color: #66ff66;
-                border: 1px solid #44ff44;
-            }
-            QPushButton:pressed {
-                background-color: #1d1d1d;
-                color: #22ff22;
-            }
-        """)
-        apply_button.clicked.connect(lambda: self.apply_single_mapping(row_widget))
-        
-        # Delete button
-        delete_button = QPushButton("🗑")
-        delete_button.setMaximumWidth(30)
-        delete_button.setToolTip("Delete this mapping")
-        delete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ff4444;
-                border: 1px solid #555;
-                border-radius: 3px;
-                font-size: 10px;
-                padding: 2px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                color: #ff6666;
-                border: 1px solid #ff4444;
-            }
-            QPushButton:pressed {
-                background-color: #1d1d1d;
-                color: #ff2222;
-            }
-        """)
-        delete_button.clicked.connect(lambda: self.delete_mapping_row(row_widget))
-        
-        # Add to layout
-        row_layout.addWidget(QLabel("Card:"), 0, 0)
-        row_layout.addWidget(card_combo, 0, 1)
-        row_layout.addWidget(QLabel("Current:"), 0, 2)
-        row_layout.addWidget(current_combo, 0, 3)
-        row_layout.addWidget(QLabel("Replace:"), 0, 4)
-        row_layout.addWidget(replace_combo, 0, 5)
-        row_layout.addWidget(apply_button, 0, 6)
-        row_layout.addWidget(delete_button, 0, 7)
-        
-        # Store references
-        row_widget.card_combo = card_combo
-        row_widget.current_combo = current_combo
-        row_widget.replace_combo = replace_combo
-        
-        # Update current and replace values for initial card
-        self.update_current_values(row_widget)
-        current_combo.setCurrentText(current)
-        replace_combo.setCurrentText(replace)
-        
-        # Add to scroll layout (insert before the stretch)
-        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, row_widget)
-        self.mapping_rows.append(row_widget)
-    
     def update_current_values(self, row_widget):
         """Update the current and replace dropdowns based on the selected card"""
         card = row_widget.card_combo.currentText()
@@ -431,33 +340,6 @@ class MappingsDialog(QDialog):
         # Update replace combo with existing mappings
         replace_combo.clear()
         replace_combo.addItems(current_values)
-    
-    def accept_mappings(self):
-        """Save mappings and close dialog"""
-        try:
-            # Collect all mappings
-            mappings = []
-            for row_widget in self.mapping_rows:
-                card = row_widget.card_combo.currentText()
-                current = row_widget.current_combo.currentText()
-                replace = row_widget.replace_combo.currentText()
-                
-                if card and replace:  # Only save if both card and replace are provided
-                    mappings.append({
-                        'card': card,
-                        'current': current,
-                        'replace': replace
-                    })
-            
-            # Show success message
-            QMessageBox.information(self, "Success", f"Saved {len(mappings)} mapping(s).")
-            
-            # Accept the dialog
-            self.accept()
-            
-        except Exception as e:
-            logger.error(f"Error saving mappings: {e}")
-            QMessageBox.critical(self, "Error", f"Error saving mappings: {e}")
     
     def apply_single_mapping(self, row_widget):
         """Apply a single mapping immediately"""
@@ -516,6 +398,7 @@ class MappingsDialog(QDialog):
                     # Update existing mapping
                     existing_mapping.replace = replace if replace else None
                     existing_mapping.save()
+                    logger.info(f"Updated existing mapping: {card} '{current}' -> '{replace}'")
                 except MappingModel.DoesNotExist:
                     # Create new mapping
                     MappingModel.create(
@@ -523,6 +406,7 @@ class MappingsDialog(QDialog):
                         current=current if current else None,
                         replace=replace if replace else None
                     )
+                    logger.info(f"Created new mapping: {card} '{current}' -> '{replace}'")
                 
                 # Step 2: Apply to database records (50%)
                 progress.setLabelText(f"Applying {card} mapping to database records...")
@@ -610,7 +494,7 @@ class MappingsDialog(QDialog):
                                         files_moved += 1
                                         
                                         # Update database with new file path
-                                        fits_file.fitsFileName = new_file_path
+                                        fits_file.fitsFileName = new_file_path.replace('\\', '/')
                                         fits_file.save()
                                         
                                         logger.info(f"Moved file: {old_file_path} -> {new_file_path}")
@@ -633,12 +517,11 @@ class MappingsDialog(QDialog):
                 except ImportError:
                     pass  # Function might not be available in older versions
                 
-                # Update the current values dropdowns to reflect changes
-                progress.setLabelText("Updating user interface...")
+                # Keep the applied mapping values visible in the UI
+                # Don't update dropdowns as this would reset the form to defaults
+                progress.setLabelText("Finalizing...")
                 progress.setValue(98)
                 QApplication.processEvents()
-                
-                self.update_current_values(row_widget)
                 
                 progress.setLabelText("Complete!")
                 progress.setValue(100)
@@ -649,9 +532,30 @@ class MappingsDialog(QDialog):
                 
                 progress.close()
                 
+                # Update the apply button to show it's been applied
+                if hasattr(row_widget, 'apply_button'):
+                    row_widget.apply_button.setText("✓")
+                    row_widget.apply_button.setToolTip("Mapping applied and saved to database")
+                    row_widget.apply_button.setStyleSheet("""
+                        QPushButton {
+                            background-color: #2d4d2d;
+                            color: #88ff88;
+                            border: 1px solid #44aa44;
+                            border-radius: 3px;
+                            font-size: 10px;
+                            padding: 2px;
+                            font-weight: bold;
+                        }
+                        QPushButton:hover {
+                            background-color: #3d5d3d;
+                            color: #99ff99;
+                            border: 1px solid #55bb55;
+                        }
+                    """)
+                
                 # Show success message
                 if total_updates > 0:
-                    message = f"Successfully applied mapping and updated {total_updates} database records."
+                    message = f"Successfully saved mapping to database and updated {total_updates} database records."
                     if update_files and files_moved > 0:
                         message += f"\nMoved {files_moved} files to new folder structure."
                     elif update_files:
@@ -666,7 +570,7 @@ class MappingsDialog(QDialog):
                     QMessageBox.information(
                         self, 
                         "Mapping Applied", 
-                        "Mapping saved successfully. No matching records found to update."
+                        "Mapping saved to database successfully. No matching records found to update."
                     )
                 
             except Exception as e:

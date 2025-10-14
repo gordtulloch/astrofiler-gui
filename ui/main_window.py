@@ -2,7 +2,7 @@ import os
 import logging
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QMainWindow, 
-                               QStackedWidget, QStatusBar, QMessageBox)
+                               QStackedWidget, QStatusBar, QMessageBox, QDialog)
 from PySide6.QtGui import QAction
 
 from .images_widget import ImagesWidget
@@ -95,6 +95,11 @@ class AstroFilerGUI(QMainWindow):
         self.duplicates_widget = DuplicatesWidget()
         self.log_widget = LogWidget()
         self.about_widget = AboutWidget()
+        
+        # Set up widget connections for refreshing
+        # Allow merge widget to refresh images view after operations
+        if hasattr(self.merge_widget, 'set_images_widget'):
+            self.merge_widget.set_images_widget(self.images_widget)
         
         # Add views to stacked widget
         self.stacked_widget.addWidget(self.images_widget)      # Index 0 - Default view
@@ -230,7 +235,29 @@ class AstroFilerGUI(QMainWindow):
         """Open the telescope download dialog"""
         try:
             dialog = SmartTelescopeDownloadDialog(self)
-            dialog.exec()
+            result = dialog.exec()
+            
+            # If dialog was accepted (files were downloaded), refresh the UI
+            if result == QDialog.Accepted:
+                logger.info("Download completed, refreshing UI components...")
+                
+                # Refresh the images widget if it has a refresh method
+                if hasattr(self.images_widget, 'load_fits_data'):
+                    self.images_widget.load_fits_data()
+                
+                # Auto-regenerate sessions after new files are imported
+                if hasattr(self, 'sessions_widget') and hasattr(self.sessions_widget, 'auto_regenerate_sessions'):
+                    logger.info("Auto-regenerating sessions after download...")
+                    self.sessions_widget.auto_regenerate_sessions()
+                elif hasattr(self, 'sessions_widget') and hasattr(self.sessions_widget, 'load_sessions_data'):
+                    self.sessions_widget.load_sessions_data()
+                
+                # Refresh the stats widget if it exists
+                if hasattr(self, 'stats_widget') and hasattr(self.stats_widget, 'force_refresh_stats'):
+                    self.stats_widget.force_refresh_stats()
+                
+                logger.info("UI refresh completed after download")
+                
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not open download dialog: {e}")
 
