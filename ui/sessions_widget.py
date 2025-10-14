@@ -718,6 +718,16 @@ class SessionsWidget(QWidget):
             if reply != QMessageBox.Yes:
                 return
             
+            # Call the actual regeneration method
+            self._do_regenerate_sessions()
+            
+        except Exception as e:
+            logger.error(f"Error in regenerate_sessions: {e}")
+            QMessageBox.critical(self, "Error", f"Session regeneration failed: {e}")
+    
+    def _do_regenerate_sessions(self):
+        """Internal method that performs the actual session regeneration without confirmation dialog"""
+        try:
             logger.info("Starting complete session regeneration")
             
             # Step 1: Clear all existing sessions
@@ -738,6 +748,198 @@ class SessionsWidget(QWidget):
                 logger.error(f"Error clearing sessions: {e}")
                 QMessageBox.critical(self, "Error", f"Failed to clear existing sessions: {e}")
                 return
+            
+            # Step 2: Create light sessions
+            logger.info("Step 2: Creating light sessions")
+            light_sessions = []
+            try:
+                progress_dialog = QProgressDialog("Creating light sessions...", "Cancel", 0, 100, self)
+                progress_dialog.setWindowTitle("Regenerating Sessions - Step 2/4")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)
+                progress_dialog.setValue(0)
+                progress_dialog.show()
+                QApplication.processEvents()
+                
+                processor = fitsProcessing()
+                
+                # Track if operation was cancelled
+                was_cancelled = False
+                
+                def light_progress_callback(current, total, description):
+                    nonlocal was_cancelled
+                    if was_cancelled:
+                        return False
+                    if progress_dialog.wasCanceled():
+                        was_cancelled = True
+                        return False
+                    if total > 0:
+                        progress = int((current / total) * 100)
+                        progress_dialog.setValue(progress)
+                        # Extract filename from full path in description
+                        filename = os.path.basename(description) if description else ""
+                        progress_dialog.setLabelText(f"Light sessions {current}/{total}: {filename}")
+                    QApplication.processEvents()
+                    return True
+                
+                light_sessions = processor.createLightSessions(light_progress_callback)
+                progress_dialog.close()
+                
+                if was_cancelled:
+                    logger.info("Session regeneration cancelled during light sessions creation")
+                    QMessageBox.information(self, "Cancelled", "Session regeneration was cancelled.")
+                    return
+                    
+                logger.info(f"Created {len(light_sessions)} light sessions")
+                
+            except Exception as e:
+                if 'progress_dialog' in locals():
+                    progress_dialog.close()
+                logger.error(f"Error creating light sessions: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to create light sessions: {e}")
+                return
+            
+            # Step 3: Create calibration sessions
+            logger.info("Step 3: Creating calibration sessions")
+            cal_sessions = []
+            try:
+                progress_dialog = QProgressDialog("Creating calibration sessions...", "Cancel", 0, 100, self)
+                progress_dialog.setWindowTitle("Regenerating Sessions - Step 3/4")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)
+                progress_dialog.setValue(0)
+                progress_dialog.show()
+                QApplication.processEvents()
+                
+                # Track if operation was cancelled
+                was_cancelled = False
+                
+                def cal_progress_callback(current, total, description):
+                    nonlocal was_cancelled
+                    if was_cancelled:
+                        return False
+                    if progress_dialog.wasCanceled():
+                        was_cancelled = True
+                        return False
+                    if total > 0:
+                        progress = int((current / total) * 100)
+                        progress_dialog.setValue(progress)
+                        # Extract filename from description (format: "Type: /path/to/file")
+                        if ": " in description:
+                            file_type, file_path = description.split(": ", 1)
+                            filename = os.path.basename(file_path)
+                            display_text = f"{file_type}: {filename}"
+                        else:
+                            display_text = os.path.basename(description) if description else ""
+                        progress_dialog.setLabelText(f"Calibration sessions {current}/{total}: {display_text}")
+                    QApplication.processEvents()
+                    return True
+                
+                cal_sessions = processor.createCalibrationSessions(cal_progress_callback)
+                progress_dialog.close()
+                
+                if was_cancelled:
+                    logger.info("Session regeneration cancelled during calibration sessions creation")
+                    QMessageBox.information(self, "Cancelled", "Session regeneration was cancelled.")
+                    return
+                    
+                logger.info(f"Created {len(cal_sessions)} calibration sessions")
+                
+            except Exception as e:
+                if 'progress_dialog' in locals():
+                    progress_dialog.close()
+                logger.error(f"Error creating calibration sessions: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to create calibration sessions: {e}")
+                return
+            
+            # Step 4: Link sessions
+            logger.info("Step 4: Linking sessions")
+            linked_sessions = []
+            try:
+                progress_dialog = QProgressDialog("Linking sessions...", "Cancel", 0, 100, self)
+                progress_dialog.setWindowTitle("Regenerating Sessions - Step 4/4")
+                progress_dialog.setWindowModality(Qt.WindowModal)
+                progress_dialog.setMinimumDuration(0)
+                progress_dialog.setValue(0)
+                progress_dialog.show()
+                QApplication.processEvents()
+                
+                # Track if operation was cancelled
+                was_cancelled = False
+                
+                def link_progress_callback(current, total, description):
+                    nonlocal was_cancelled
+                    if was_cancelled:
+                        return False
+                    if progress_dialog.wasCanceled():
+                        was_cancelled = True
+                        return False
+                    if total > 0:
+                        progress = int((current / total) * 100)
+                        progress_dialog.setValue(progress)
+                        # For linking, description should be object names, but handle file paths just in case
+                        display_text = os.path.basename(description) if description and os.path.sep in description else description
+                        progress_dialog.setLabelText(f"Linking {current}/{total}: {display_text}")
+                    QApplication.processEvents()
+                    return True
+                
+                linked_sessions = processor.linkSessions(link_progress_callback)
+                progress_dialog.close()
+                
+                if was_cancelled:
+                    logger.info("Session regeneration cancelled during linking")
+                    QMessageBox.information(self, "Cancelled", "Session regeneration was cancelled.")
+                    return
+                    
+                logger.info(f"Linked {len(linked_sessions)} sessions")
+                
+            except Exception as e:
+                if 'progress_dialog' in locals():
+                    progress_dialog.close()
+                logger.error(f"Error linking sessions: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to link sessions: {e}")
+                return
+            
+            # Final step: Refresh the display
+            self.load_sessions_data()
+            
+            # Show completion message
+            total_light = len(light_sessions) if 'light_sessions' in locals() else 0
+            total_cal = len(cal_sessions) if 'cal_sessions' in locals() else 0
+            total_linked = len(linked_sessions) if 'linked_sessions' in locals() else 0
+            
+            logger.info(f"Session regeneration complete: {total_light} light, {total_cal} calibration, {total_linked} linked")
+            
+        except Exception as e:
+            logger.error(f"Unexpected error during session regeneration: {e}")
+            QMessageBox.critical(self, "Error", f"Unexpected error during session regeneration: {e}")
+    
+    def auto_regenerate_sessions(self):
+        """Auto-regenerate sessions without user confirmation (for use after file imports)"""
+        try:
+            logger.info("Auto-regenerating sessions after file import")
+            
+            # Create a progress dialog for auto-regeneration
+            progress_dialog = QProgressDialog("Auto-regenerating sessions...", None, 0, 100, self)
+            progress_dialog.setWindowTitle("Updating Sessions")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            progress_dialog.setValue(0)
+            progress_dialog.show()
+            QApplication.processEvents()
+            
+            # Call the internal regeneration method
+            self._do_regenerate_sessions()
+            
+            # Close the progress dialog
+            progress_dialog.close()
+            
+            logger.info("Auto-regeneration completed")
+            
+        except Exception as e:
+            logger.error(f"Error in auto_regenerate_sessions: {e}")
+            if 'progress_dialog' in locals():
+                progress_dialog.close()
             
             # Step 2: Create light sessions
             logger.info("Step 2: Creating light sessions")
