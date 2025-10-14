@@ -1,11 +1,17 @@
 QWidget {
-    background-color: #2b2b2b;
+    background-color: #2d2d2d;
     color: #ffffff;
-    font-family: 'Segoe UI', Arial, sans-serif;
+    border: none;
 }
 
+/* Main Window and Central Widget - No Borders */
 QMainWindow {
-    background-color: #2b2b2b;
+    background-color: #1e1e1e;
+    border: none;
+}
+
+QMainWindow::central {
+    border: none;
 }
 
 QTabWidget::pane {
@@ -160,4 +166,131 @@ QSplitter::handle:vertical {
 
 QLabel {
     color: #ffffff;
+}
+
+/* Dialog and Message Box Styling - Remove Internal Borders */
+QDialog {
+    background-color: #2d2d2d;
+    border: 2px solid #555555;
+    border-radius: 5px;
+    color: #ffffff;
+}
+
+QDialog QLabel {
+    border: none;
+    background-color: transparent;
+    color: #ffffff;
+    padding: 5px;
+}
+
+QDialog QPushButton {
+    background-color: #404040;
+    border: 1px solid #666666;
+    border-radius: 3px;
+    color: #ffffff;
+    padding: 6px 12px;
+    min-width: 60px;
+}
+
+QMessageBox {
+    background-color: #2d2d2d;
+    border: 2px solid #555555;
+    border-radius: 5px;
+    color: #ffffff;
+    padding: 10px;
+}
+
+QMessageBox QLabel {
+    color: #ffffff;
+    background-color: transparent;
+    border: none;
+    padding: 5px;
+}
+
+QMessageBox QPushButton {
+    background-color: #404040;
+    border: 1px solid #666666;
+    border-radius: 3px;
+    color: #ffffff;
+    padding: 6px 12px;
+    min-width: 60px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #505050;
+    border-color: #888888;
+}
+
+QMessageBox QPushButton:pressed {
+    background-color: #353535;
+}
+
+/* Progress Dialog Styling */
+QProgressDialog {
+    background-color: #2d2d2d;
+    border: 2px solid #555555;
+    border-radius: 5px;
+    color: #ffffff;
+}
+
+QProgressDialog QLabel {
+    color: #ffffff;
+    background-color: transparent;
+    border: none;
+}
+
+QProgressDialog QProgressBar {
+    border: 1px solid #555555;
+    border-radius: 3px;
+    background-color: #404040;
+    text-align: center;
+    color: #ffffff;
+}
+
+QProgressDialog QProgressBar::chunk {
+    background-color: #0078d4;
+    border-radius: 2px;
+}
+
+/* Stacked Widget - No Internal Borders */
+QStackedWidget {
+    border: none;
+    background-color: #2d2d2d;
+}
+
+/* Text Edit with minimal borders only on focus */
+QTextEdit {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    border: 1px solid #444444;
+    border-radius: 3px;
+    padding: 5px;
+    selection-background-color: #0078d4;
+}
+
+QTextEdit:focus {
+    border-color: #0078d4;
+}
+
+/* Tree Widget - Minimal borders */
+QTreeWidget {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    border: 1px solid #444444;
+    border-radius: 3px;
+    selection-background-color: #0078d4;
+}
+
+/* Status Bar - No borders */
+QStatusBar {
+    background-color: #2d2d2d;
+    color: #ffffff;
+    border: none;
+}
+
+/* Menu Bar - No borders */
+QMenuBar {
+    background-color: #2d2d2d;
+    color: #ffffff;
+    border: none;
 }
