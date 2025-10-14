@@ -1,9 +1,33 @@
 import sys
+import os
+from datetime import datetime
 from PySide6.QtWidgets import QApplication
-from astrofiler_gui import AstroFilerGUI
+from ui.main_window import AstroFilerGUI
 from astrofiler_db import setup_database
 import logging
 
+def rotate_log_file():
+    """Rotate log file if it's larger than 5MB"""
+    log_file = 'astrofiler.log'
+    max_size = 5 * 1024 * 1024  # 5 MB in bytes
+    
+    try:
+        if os.path.exists(log_file):
+            file_size = os.path.getsize(log_file)
+            if file_size > max_size:
+                # Create backup filename with current date
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                backup_file = f'astrofiler_{timestamp}.log'
+                
+                # Rename current log to backup
+                os.rename(log_file, backup_file)
+                print(f"Log file rotated: {log_file} -> {backup_file} (size: {file_size:,} bytes)")
+                
+    except Exception as e:
+        print(f"Error rotating log file: {e}")
+
+# Rotate log file if needed before setting up logging
+rotate_log_file()
 
 # Set up logging
 logging.basicConfig(
@@ -14,24 +38,20 @@ logging.basicConfig(
 )
 
 # Reduce verbosity of some logging
-#logging.getLogger('SMB').setLevel(logging.WARNING)
-#logging.getLogger('SMB.SMBConnection').setLevel(logging.WARNING)
-#logging.getLogger('SMB.SMBProtocol').setLevel(logging.WARNING)
+logging.getLogger('SMB').setLevel(logging.WARNING)
+logging.getLogger('SMB.SMBConnection').setLevel(logging.WARNING)
+logging.getLogger('SMB.SMBProtocol').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
-    logger.info("Starting AstroFiler application")
     if (setup_database() == True):  # Initialize the database and table
         app = QApplication(sys.argv)
         
         # Create and show main widget
-        logger.info("Creating main widget")
         widget = AstroFilerGUI()
-        logger.info("Main widget created")
         
         # Show main window
-        logger.info("Showing main window")
         widget.show()
         widget.center_on_screen()  # Ensure the main window is centered
         
