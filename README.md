@@ -10,7 +10,7 @@
 
 AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki. Astrofiler is a tool to manage FITS files (currently, XISF files and other non-FITS images are coming in the next version!) using FITS header data. FITS Headers are embedded with the image when created as metadata. Astrofiler reads this information to rename the file and file it appropriately in the Repository.
 
-**Current Status**: Release V1.1.0
+**Current Status**: Release V1.1.2
 
 Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)
 
@@ -99,7 +99,14 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 
 AstroFiler includes automated installation scripts for all major platforms:
 
-### Windows
+### Windows - Easy Setup
+Download SETUP.ZIP, unzip it, and run it. It will download everything needed and install it, putting an icon on your desktop.
+
+You will need to install and run Git for updates however. Download git, and from the astrofiler-gui folder run
+
+git pull origin main
+
+### Windows - Install Script
 Install Git - There are also a few ways to install Git on Windows. The most official build is available for download on the Git website. Just go to https://git-scm.com/download/win and the download will start automatically. Note that this is a project called Git for Windows, which is separate from Git itself; for more information on it, go to https://gitforwindows.org.
 
 Once git is installed, you can open a powershell command line (run as Admin) and enter:
