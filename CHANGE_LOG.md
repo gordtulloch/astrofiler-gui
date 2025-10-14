@@ -1,10 +1,73 @@
 # AstroFiler Change Log
 
-## Version 1.2.0 - September 3, 2025
+## Version 1.2.0 - Current Development
 
-### Changes in new version
+### New Features
 - **Google Cloud Sync**: Added complete Google Cloud repository synchronization feature accessible via Tools > Google Sync menu. Includes full Google Cloud Storage integration with actual upload/download functionality, configurable repository path (Google Cloud Storage bucket), authentication via service account key files with browse button, debug mode toggle, and bidirectional sync option. Uses configured Repository Path for synchronization. When "Sync to Local Disk" is enabled, downloads missing files from GCS to local repository and automatically registers FITS files in database. Requires google-cloud-storage library. Configuration settings are saved in astrofiler.ini and accessible through the Configuration tab under Google Cloud Sync section.
 - **Progress tracking for Google Sync**: Added progress tracking capability to Google Cloud Sync operations, providing real-time feedback during file uploads and downloads.
+- **Duplicate File Reporting**: Enhanced import system to track and report duplicate files during Load New and Sync operations
+- **Smart Telescope Integration**: Complete support for DWARF 3 telescopes via FTP protocol alongside existing SeeStar SMB support
+- **StellarMate Support**: Added StellarMate telescope integration with SMB protocol using `stellarmate.local` hostname and `stellarmate`/`smate` credentials
+- **DWARF FITS Header Processing**: Comprehensive DWARF folder structure parsing for `DWARF_RAW_*`, `CALI_FRAME`, and `DWARF_DARK` folders with automatic header correction
+- **Automatic Session Regeneration**: Sessions database automatically rebuilds after file imports via "Load New" or telescope downloads
+- **Enhanced File Processing**: DWARF telescope files processed with proper instrument mapping (cam_0→TELE, cam_1→WIDE) and metadata extraction
+
+### Smart Telescope Enhancements
+- **Dual Protocol Support**: SMB for SeeStar/StellarMate, FTP for DWARF telescopes with automatic protocol selection
+- **DWARF File Structure Validation**: Validates DWARF folder structure (`CALI_FRAME`, `DWARF_DARK`, `DWARF_RAW_*`) before scanning
+- **Telescope-Specific Processing**: Different scanning and processing logic for each telescope type
+- **Network Discovery**: Enhanced hostname resolution with telescope-specific patterns and default hostnames
+- **Download Progress**: Dynamic protocol indicators (SMB vs FTP) in download progress messages
+
+### UI/UX Improvements  
+- **Mapping Dialog Defaults**: All checkboxes now enabled by default ("Update FITS headers", "Apply to database", "Reorganize folders")
+- **Mapping Persistence**: Fixed mappings not loading properly in dialog - saved values now correctly populate combo boxes
+- **Post-Download Refresh**: All UI components automatically refresh after successful telescope downloads or file imports
+- **Session Auto-Update**: No manual "Regenerate" required - sessions update automatically when new files are added
+
+### Technical Improvements
+- **Startup Performance**: Removed unnecessary file path normalization migration for faster application startup
+- **Duplicate File Detection & Reporting**: Enhanced file import system to track and report duplicate files separately from failed imports
+  - `registerFitsImage()` now returns "DUPLICATE" for files already in database (detected by SHA-256 hash)
+  - `registerFitsImages()` returns tuple (registered_files, duplicate_count) for comprehensive reporting
+  - Success messages in UI now show "Processed X files, skipped Y duplicates" when duplicates are found
+  - Command-line tools enhanced with duplicate reporting for batch operations
+  - Backward compatibility maintained for existing code while providing enhanced information
+- **DWARF FITS Processing**: Complete implementation of `dwarfFixHeader()` with folder structure parsing and header population
+- **Smart Telescope Manager**: Enhanced with FTP support, folder validation, and telescope-specific configuration
+- **File Registration**: Downloaded files automatically registered in database with proper metadata and folder organization
+- **Progress Tracking**: Enhanced progress dialogs with granular updates and metadata extraction feedback
+
+### Bug Fixes
+- Fixed missing accept_mappings method in MappingsDialog
+- Fixed Regenerate option in Images view to properly call registerFitsImages method
+- Fixed missing progress dialogs in Regenerate and Load New functions in Images view
+- Fixed Images view not loading data from database - implemented complete load_fits_data method with pagination
+- Fixed Sync Repository to clear database before synchronizing with existing files
+- Fixed Regenerate Sessions button to implement complete workflow: clear sessions → create light sessions → create calibration sessions → link sessions
+- Fixed Smart Telescope Download dialog to properly connect signals and implement complete download workflow
+
+### UI Changes
+- Removed Download from Telescope from Tools menu and added Download button to Images view
+- Moved Field Mappings to Tools menu and removed Images menu
+- Removed Load from Incoming from Images menu and added Load New button to Images view
+- Moved Regenerate button to front of search controls in Images view
+- Hidden Filter column in Images view when sorted by Filter (since filter is shown as expandable section)
+- Improved session regeneration progress display to show only filename instead of full path
+- Added Images column to Sessions view showing the number of images in each session and total per object
+
+### New Features  
+- Menu reorganization: Removed Stats menu and added Refresh button to Statistics view
+- Menu reorganization: Moved Duplicates and Merge Objects to Tools menu
+- Enhanced Smart Telescope Download to automatically register downloaded FITS files in database and move them to repository structure
+- UI Package Refactor: Complete modular restructure with separate widget files
+- Menu-driven navigation replacing tab interface
+- Download Dialog: Moved telescope download functionality to separate module
+- Improved code organization and maintainability
+- Faster application load times through selective imports
+- Removed all legacy tab classes from main file
+- Context menu functionality in Images view with View and Delete options for FITS files
+- Double-click to view FITS files with external viewer
 
 ## Version 1.1.0 - August 23, 2025
 
@@ -24,6 +87,8 @@
 - **Multiple sessions checkout**: New batch checkout feature allows checking out multiple light sessions simultaneously into organized directory structure
 - **Improved progress bar display**: Session creation progress now shows filename only instead of full file path for better readability
 - **Restored mapping dialog bottom checkboxes**: "Apply to Database" and "Update Files on Disk" checkboxes preserved while removing individual row Default checkboxes
+- **Repository folder reorganization for mappings**: New "Reorganize repository folders" checkbox automatically moves files to correct folder structure when telescope/instrument mappings are applied
+- **Filter sorting in Images tab**: Added "Filter" as a sort option to group files by filter type, then by object for better organization of filtered datasets
 
 - **Enhanced filter chart display**: Filter pie chart now groups filters with less than 1% of total time into "Other (<1%)" category for cleaner visualization
 - **Fixed filter chart size**: Corrected pie chart display scaling to properly reduce size by 24% and prevent stretching back to full container size

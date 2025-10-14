@@ -162,18 +162,31 @@ Examples:
         logger.info("Starting file processing...")
         move_files = not args.no_move
         
-        registered_files = processor.registerFitsImages(
+        result = processor.registerFitsImages(
             moveFiles=move_files,
             progress_callback=None  # Disabled for non-interactive use
         )
         
+        # Handle the new tuple return format (registered_files, duplicate_count)
+        if isinstance(result, tuple):
+            registered_files, duplicate_count = result
+        else:
+            # Backward compatibility for old return format
+            registered_files = result
+            duplicate_count = 0
+        
         # Report results
         logger.info(f"=== Processing Complete ===")
         logger.info(f"Files processed: {len(registered_files)}")
+        if duplicate_count > 0:
+            logger.info(f"Duplicate files skipped: {duplicate_count}")
         logger.info(f"Mode: {'Move and register' if move_files else 'Sync only'}")
         
         if len(registered_files) == 0:
-            logger.warning("No FITS files found to process!")
+            if duplicate_count > 0:
+                logger.warning(f"No new FITS files processed! {duplicate_count} duplicate files were skipped.")
+            else:
+                logger.warning("No FITS files found to process!")
             return 1
         else:
             logger.info("Repository load completed successfully!")
