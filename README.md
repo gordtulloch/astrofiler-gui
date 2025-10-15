@@ -32,7 +32,19 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
   - **Post-Processing Only**: Files deleted only after successful local processing and database registration
   - **Error Reporting**: Comprehensive feedback on deletion operations
 
-### �🗂️ **File Management**
+### ☁️ **Cloud Sync Integration**
+- **Google Cloud Storage**: Complete integration with Google Cloud Storage for backup and synchronization
+- **Multiple Sync Profiles**: Choose from Complete, Backup Only, or On Demand sync strategies
+- **Smart Upload Logic**: Only uploads files that don't exist in cloud to avoid duplicates and reduce transfer time
+- **Database Integration**: Tracks cloud URLs for all files, enabling future remote access features
+- **Real-time Progress**: Live progress tracking with file-by-file updates and cancellation support
+- **Comprehensive Error Handling**: User-friendly error messages for authentication, bucket access, and network issues
+- **Directory Structure Preservation**: Maintains your local repository folder structure in cloud storage
+- **Bucket Validation**: Pre-operation checks ensure bucket exists and is accessible
+- **Service Account Authentication**: Secure authentication using Google Cloud service account keys
+- **Configuration Management**: Easy setup through dedicated Cloud Sync configuration interface
+
+### 🗂️ **File Management**
 - **Repository Scanning**: Recursively scan directories for FITS files, rename to a descriptive name, and move into a centralized repository
 - **Batch Processing**: Process multiple files with progress tracking
 - **File Organization**: Automatically organize files based on metadata
@@ -181,6 +193,14 @@ python migrate.py setup
 ```
 
 See [MIGRATIONS.md](MIGRATIONS.md) for detailed migration development guidelines.
+
+## 📚 Documentation
+
+- **[Getting Started Guide](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)** - Quick start guide for new users
+- **[GCS Setup Guide](GCS_SETUP_GUIDE.md)** - Complete guide for setting up Google Cloud Storage integration
+- **[Cloud Sync Configuration](CLOUD_SYNC_CONFIG.md)** - Technical documentation for cloud sync features
+- **[GitHub Wiki](https://github.com/gordtulloch/astrofiler-gui/wiki)** - Comprehensive documentation and guides
+- **[Cloudy Nights Discussion](https://www.cloudynights.com/topic/975026-astrofiler-11-astronomical-image-management-system-released/)** - Community discussion and support
 
 ## 🤝 Contributing
 

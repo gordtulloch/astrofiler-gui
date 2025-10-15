@@ -3,6 +3,17 @@
 ## Version 1.2.0 - Current Development
 
 ### New Features
+- **Cloud Sync System**: Complete cloud synchronization system with Google Cloud Storage integration
+  - **Configuration Interface**: Added Cloud Sync section in Configuration dialog with vendor selection, bucket URL, service account authentication file picker, and sync profile selection (Complete/Backup/On Demand)
+  - **Cloud Sync Dialog**: New Tools → Cloud Sync menu opens dedicated dialog with Analyze and Sync operations, real-time configuration display, and Configure button for easy settings access
+  - **Database Integration**: Added `fitsFileCloudURL` field to track cloud storage locations for all FITS files with automatic migration support
+  - **Cloud File Analysis**: Analyze function downloads complete cloud bucket file listing, compares with local database, and updates cloud URLs for matching files
+  - **Backup Only Sync**: Implemented complete backup sync profile that uploads local files missing from cloud while preserving directory structure and updating database with cloud URLs
+  - **Smart Upload Logic**: Only uploads files that don't exist in cloud, avoiding duplicates and unnecessary transfers
+  - **Comprehensive Error Handling**: User-friendly error messages for bucket not found, access denied, authentication failures, and configuration issues
+  - **Progress Tracking**: Real-time progress dialogs with file-by-file updates, cancellation support, and detailed completion statistics
+  - **Bucket Validation**: Pre-operation validation ensures bucket exists and is accessible before starting sync operations
+- **Google Cloud Documentation**: Added comprehensive setup guide for creating Google Cloud projects, service accounts, and authentication keys
 - **Google Cloud Sync**: Added complete Google Cloud repository synchronization feature accessible via Tools > Google Sync menu. Includes full Google Cloud Storage integration with actual upload/download functionality, configurable repository path (Google Cloud Storage bucket), authentication via service account key files with browse button, debug mode toggle, and bidirectional sync option. Uses configured Repository Path for synchronization. When "Sync to Local Disk" is enabled, downloads missing files from GCS to local repository and automatically registers FITS files in database. Requires google-cloud-storage library. Configuration settings are saved in astrofiler.ini and accessible through the Configuration tab under Google Cloud Sync section.
 - **Progress tracking for Google Sync**: Added progress tracking capability to Google Cloud Sync operations, providing real-time feedback during file uploads and downloads.
 - **Duplicate File Reporting**: Enhanced import system to track and report duplicate files during Load New and Sync operations

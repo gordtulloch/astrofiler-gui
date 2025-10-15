@@ -89,6 +89,66 @@ def _upload_file_to_gcs(client, bucket_name, local_file_path, gcs_object_name):
         logger.error(f"Failed to upload {local_file_path}: {e}")
         raise
 
+def check_file_exists_in_gcs(client, bucket_name, gcs_object_name):
+    """
+    Check if a file exists in Google Cloud Storage.
+    
+    Args:
+        client: GCS client
+        bucket_name (str): Name of the GCS bucket
+        gcs_object_name (str): Object name in GCS
+        
+    Returns:
+        bool: True if file exists, False otherwise
+    """
+    try:
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(gcs_object_name)
+        return blob.exists()
+    except Exception as e:
+        logger.error(f"Failed to check if file exists: gs://{bucket_name}/{gcs_object_name}: {e}")
+        return False
+
+def upload_file_to_backup(bucket_name, auth_info, local_file_path, relative_path):
+    """
+    Upload a single file to cloud backup if it doesn't already exist.
+    
+    Args:
+        bucket_name (str): Name of the GCS bucket
+        auth_info (dict): Authentication information
+        local_file_path (str): Full path to local file
+        relative_path (str): Relative path to maintain directory structure
+        
+    Returns:
+        tuple: (success: bool, cloud_url: str, message: str)
+    """
+    try:
+        logger.info(f"Processing backup for: {relative_path}")
+        
+        # Get authenticated client
+        client = _get_gcs_client(auth_info)
+        
+        # Normalize the path for cloud storage (use forward slashes)
+        gcs_object_name = relative_path.replace('\\', '/')
+        
+        # Check if file already exists
+        if check_file_exists_in_gcs(client, bucket_name, gcs_object_name):
+            # File exists, just build the cloud URL
+            cloud_url = f"gs://{bucket_name}/{gcs_object_name}"
+            logger.info(f"File already exists in cloud: {gcs_object_name}")
+            return True, cloud_url, "File already exists in cloud"
+        
+        # File doesn't exist, upload it
+        logger.info(f"Uploading to cloud: {gcs_object_name}")
+        _upload_file_to_gcs(client, bucket_name, local_file_path, gcs_object_name)
+        cloud_url = f"gs://{bucket_name}/{gcs_object_name}"
+        logger.info(f"Successfully uploaded: {gcs_object_name}")
+        return True, cloud_url, "File uploaded successfully"
+        
+    except Exception as e:
+        logger.error(f"Failed to upload file to backup: {local_file_path}: {e}")
+        return False, "", str(e)
+
 def _download_file_from_gcs(client, bucket_name, gcs_object_name, local_file_path):
     """
     Download a file from Google Cloud Storage, preserving the directory structure.
@@ -168,6 +228,64 @@ def _register_fits_file(file_path):
             
     except Exception as e:
         logger.error(f"Error registering FITS file {file_path}: {e}")
+
+def list_gcs_bucket_files(bucket_name, auth_info, prefix=""):
+    """
+    List all files in a Google Cloud Storage bucket.
+    
+    Args:
+        bucket_name (str): Name of the GCS bucket
+        auth_info (dict): Authentication information
+        prefix (str): Optional prefix to filter files
+        
+    Returns:
+        list: List of dictionaries containing file information
+    """
+    try:
+        logger.info(f"Listing files in bucket: {bucket_name}")
+        
+        # Get authenticated client
+        client = _get_gcs_client(auth_info)
+        bucket = client.bucket(bucket_name)
+        
+        # List all blobs with optional prefix
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        
+        files = []
+        for blob in blobs:
+            # Skip directory markers (objects ending with /)
+            if blob.name.endswith('/'):
+                continue
+                
+            file_info = {
+                'name': blob.name,
+                'size': blob.size,
+                'created': blob.time_created.isoformat() if blob.time_created else None,
+                'updated': blob.updated.isoformat() if blob.updated else None,
+                'md5_hash': blob.md5_hash,
+                'crc32c': blob.crc32c,
+                'content_type': blob.content_type,
+                'url': f"gs://{bucket_name}/{blob.name}",
+                'public_url': blob.public_url if hasattr(blob, 'public_url') else None
+            }
+            files.append(file_info)
+            
+        logger.info(f"Found {len(files)} files in bucket")
+        return files
+        
+    except Exception as e:
+        logger.error(f"Error listing bucket files: {e}")
+        error_msg = str(e)
+        
+        # Provide more specific error messages for common issues
+        if "404" in error_msg and "does not exist" in error_msg:
+            raise Exception(f"Bucket '{bucket_name}' does not exist. Please check the bucket name in your configuration.")
+        elif "403" in error_msg:
+            raise Exception(f"Access denied to bucket '{bucket_name}'. Please check your authentication and permissions.")
+        elif "401" in error_msg:
+            raise Exception(f"Authentication failed. Please check your service account key file.")
+        else:
+            raise Exception(f"Failed to list files in bucket {bucket_name}: {str(e)}")
 
 def sync_with_google_cloud_repo(gcs_repo_path, auth_info, local_repo_path, sync_to_local=False, debug=DEBUG, progress_callback=None):
     """
