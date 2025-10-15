@@ -14,6 +14,7 @@ from .duplicates_widget import DuplicatesWidget
 from .log_widget import LogWidget
 from .about_widget import AboutWidget
 from .download_dialog import SmartTelescopeDownloadDialog
+from .cloud_sync_dialog import CloudSyncDialog
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,12 @@ class AstroFilerGUI(QMainWindow):
         
         tools_menu.addSeparator()
         
+        # Cloud Sync
+        cloud_sync_action = tools_menu.addAction('&Cloud Sync...')
+        cloud_sync_action.triggered.connect(self.open_cloud_sync_dialog)
+        
+        tools_menu.addSeparator()
+        
         # Merge view
         merge_action = tools_menu.addAction('&Merge Objects...')
         merge_action.setShortcut('Ctrl+3')
@@ -271,6 +278,16 @@ class AstroFilerGUI(QMainWindow):
         except Exception as e:
             logger.error(f"Error in open_mappings_dialog: {e}")
             QMessageBox.warning(self, "Error", f"Could not open mappings dialog: {e}")
+
+    def open_cloud_sync_dialog(self):
+        """Open the Cloud Sync dialog"""
+        try:
+            logger.info("Opening Cloud Sync dialog")
+            dialog = CloudSyncDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error in open_cloud_sync_dialog: {e}")
+            QMessageBox.warning(self, "Error", f"Could not open Cloud Sync dialog: {e}")
 
     def load_repo(self):
         """Load repository via Images widget"""
