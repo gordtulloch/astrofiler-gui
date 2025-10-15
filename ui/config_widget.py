@@ -107,6 +107,65 @@ class ConfigWidget(QWidget):
 
         warnings_layout.addRow("Suppress Delete Warnings:", self.suppress_delete_warnings)
 
+        # Cloud Sync settings group
+        cloud_sync_group = QGroupBox("Cloud Sync")
+        cloud_sync_layout = QFormLayout(cloud_sync_group)
+
+        # Cloud Vendor selection
+        self.cloud_vendor = QComboBox()
+        self.cloud_vendor.addItems(["Google Cloud Storage"])
+        self.cloud_vendor.setCurrentText("Google Cloud Storage")
+
+        # Bucket URL
+        self.bucket_url = QLineEdit()
+        self.bucket_url.setPlaceholderText("e.g., astrofiler-repository")
+        self.bucket_url.setText("astrofiler-repository")
+        self.bucket_url.setToolTip(
+            "Google Cloud Storage bucket name.\n\n"
+            "Create a bucket in Google Cloud Console:\n"
+            "1. Go to Cloud Storage → Buckets\n"
+            "2. Click 'Create Bucket'\n"
+            "3. Choose a globally unique name\n"
+            "4. Select location and storage class\n\n"
+            "Bucket names must be globally unique across all of Google Cloud."
+        )
+
+        # Auth File Path with file picker
+        auth_file_layout = QHBoxLayout()
+        self.auth_file_path = QLineEdit()
+        self.auth_file_path.setPlaceholderText("Select authentication file...")
+        self.auth_file_path.setToolTip(
+            "Path to Google Cloud Service Account JSON key file.\n\n"
+            "To create an auth file:\n"
+            "1. Go to Google Cloud Console\n"
+            "2. Create a Service Account\n"
+            "3. Grant 'Storage Object Admin' role\n"
+            "4. Create and download JSON key\n\n"
+            "See GCS_SETUP_GUIDE.md for detailed instructions."
+        )
+        self.auth_file_button = QPushButton("Browse...")
+        self.auth_file_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.auth_file_button.clicked.connect(self.browse_auth_file)
+        auth_file_layout.addWidget(self.auth_file_path)
+        auth_file_layout.addWidget(self.auth_file_button)
+
+        # Sync Profile selection
+        self.sync_profile = QComboBox()
+        self.sync_profile.addItem("Complete Sync", "complete")
+        self.sync_profile.addItem("Backup Only", "backup")
+        self.sync_profile.addItem("On Demand", "ondemand")
+        self.sync_profile.setCurrentIndex(0)  # Default to Complete Sync
+        self.sync_profile.setToolTip(
+            "Complete Sync: All files kept both local and in the Cloud\n"
+            "Backup Only: All files updated to the Cloud but do not download if missing\n"
+            "On Demand: Download files if required"
+        )
+
+        cloud_sync_layout.addRow("Cloud Vendor:", self.cloud_vendor)
+        cloud_sync_layout.addRow("Bucket URL:", self.bucket_url)
+        cloud_sync_layout.addRow("Auth File:", auth_file_layout)
+        cloud_sync_layout.addRow("Sync Profile:", self.sync_profile)
+
         # Action buttons
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Settings")
@@ -122,6 +181,7 @@ class ConfigWidget(QWidget):
         layout.addWidget(display_group)
         layout.addWidget(tools_group)
         layout.addWidget(warnings_group)
+        layout.addWidget(cloud_sync_group)
         layout.addStretch()
         layout.addLayout(button_layout)
 
@@ -162,6 +222,10 @@ class ConfigWidget(QWidget):
             config.set('DEFAULT', 'grid_size', str(self.grid_size.value()))
             config.set('DEFAULT', 'fits_viewer_path', self.fits_viewer_path.text().strip())
             config.set('DEFAULT', 'suppress_delete_warnings', str(self.suppress_delete_warnings.isChecked()))
+            config.set('DEFAULT', 'cloud_vendor', self.cloud_vendor.currentText())
+            config.set('DEFAULT', 'bucket_url', self.bucket_url.text().strip())
+            config.set('DEFAULT', 'auth_file_path', self.auth_file_path.text().strip())
+            config.set('DEFAULT', 'sync_profile', self.sync_profile.currentData())
             
             # Write to the astrofiler.ini file
             with open('astrofiler.ini', 'w') as configfile:
@@ -233,6 +297,29 @@ class ConfigWidget(QWidget):
                 logger.debug("suppress_delete_warnings not found in INI file, setting to False")
                 if hasattr(self, 'suppress_delete_warnings'):
                     self.suppress_delete_warnings.setChecked(False)
+
+            # Load cloud sync settings
+            if config.has_option('DEFAULT', 'cloud_vendor'):
+                cloud_vendor = config.get('DEFAULT', 'cloud_vendor')
+                index = self.cloud_vendor.findText(cloud_vendor)
+                if index >= 0:
+                    self.cloud_vendor.setCurrentIndex(index)
+            
+            if config.has_option('DEFAULT', 'bucket_url'):
+                bucket_url = config.get('DEFAULT', 'bucket_url')
+                self.bucket_url.setText(bucket_url)
+            
+            if config.has_option('DEFAULT', 'auth_file_path'):
+                auth_file_path = config.get('DEFAULT', 'auth_file_path')
+                self.auth_file_path.setText(auth_file_path)
+            
+            if config.has_option('DEFAULT', 'sync_profile'):
+                sync_profile = config.get('DEFAULT', 'sync_profile')
+                # Find the index by data value
+                for i in range(self.sync_profile.count()):
+                    if self.sync_profile.itemData(i) == sync_profile:
+                        self.sync_profile.setCurrentIndex(i)
+                        break
                 
             logger.debug("Settings loaded from astrofiler.ini!")
             
@@ -252,6 +339,10 @@ class ConfigWidget(QWidget):
         self.grid_size.setValue(64)
         self.fits_viewer_path.setText("")
         self.suppress_delete_warnings.setChecked(False)
+        self.cloud_vendor.setCurrentIndex(0)
+        self.bucket_url.setText("astrofiler-repository")
+        self.auth_file_path.setText("")
+        self.sync_profile.setCurrentIndex(0)  # Default to Complete Sync
     
     def browse_source_path(self):
         """Open directory dialog for source path"""
@@ -283,6 +374,28 @@ class ConfigWidget(QWidget):
         )
         if file_path:
             self.fits_viewer_path.setText(file_path)
+
+    def browse_auth_file(self):
+        """Open file dialog for cloud authentication file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Authentication File",
+            self.auth_file_path.text() or os.path.expanduser("~"),
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if file_path:
+            self.auth_file_path.setText(file_path)
+
+    def get_cloud_config(self):
+        """Get cloud configuration in format expected by astrofiler_cloud module"""
+        return {
+            'vendor': self.cloud_vendor.currentText(),
+            'bucket_url': self.bucket_url.text().strip(),
+            'sync_profile': self.sync_profile.currentData(),
+            'auth_info': {
+                'auth_string': self.auth_file_path.text().strip()
+            } if self.auth_file_path.text().strip() else {}
+        }
     
     def on_theme_changed(self, theme_name):
         """Handle theme changes"""

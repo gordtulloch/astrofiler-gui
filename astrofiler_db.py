@@ -35,6 +35,7 @@ class fitsFile(BaseModel):
     fitsFileFilter = pw.TextField(null=True)
     fitsFileHash = pw.TextField(null=True)
     fitsFileSession = pw.TextField(null=True)
+    fitsFileCloudURL = pw.TextField(null=True)
 
 class fitsSession(BaseModel):
     fitsSessionId = pw.TextField(primary_key=True)
