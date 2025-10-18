@@ -1,9 +1,9 @@
 import os
 import logging
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QMainWindow, 
                                QStackedWidget, QStatusBar, QMessageBox, QDialog)
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QDesktopServices
 
 from .images_widget import ImagesWidget
 from .sessions_widget import SessionsWidget
@@ -197,6 +197,12 @@ class AstroFilerGUI(QMainWindow):
         # Help Menu
         help_menu = menubar.addMenu('&Help')
         
+        # Wiki action
+        wiki_action = help_menu.addAction('&Wiki (Online Help)')
+        wiki_action.triggered.connect(self.open_wiki)
+        
+        help_menu.addSeparator()
+        
         about_action = help_menu.addAction('&About AstroFiler')
         about_action.triggered.connect(lambda: self.switch_view(7))
 
@@ -288,6 +294,22 @@ class AstroFilerGUI(QMainWindow):
         except Exception as e:
             logger.error(f"Error in open_cloud_sync_dialog: {e}")
             QMessageBox.warning(self, "Error", f"Could not open Cloud Sync dialog: {e}")
+
+    def open_wiki(self):
+        """Open the AstroFiler Wiki in the default web browser"""
+        try:
+            wiki_url = "https://github.com/gordtulloch/astrofiler-gui/wiki"
+            logger.info(f"Opening AstroFiler Wiki: {wiki_url}")
+            
+            if not QDesktopServices.openUrl(QUrl(wiki_url)):
+                QMessageBox.warning(self, "Error", 
+                                    "Could not open the wiki in your default browser. "
+                                    f"Please manually navigate to: {wiki_url}")
+            else:
+                logger.info("Successfully opened wiki in browser")
+        except Exception as e:
+            logger.error(f"Error opening wiki: {e}")
+            QMessageBox.warning(self, "Error", f"Could not open wiki: {e}")
 
     def load_repo(self):
         """Load repository via Images widget"""
