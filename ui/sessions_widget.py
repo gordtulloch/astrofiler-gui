@@ -32,7 +32,17 @@ class SessionsWidget(QWidget):
         self.regenerate_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.regenerate_button.setToolTip("Clear all sessions and regenerate: Update Lights → Update Calibrations → Link Sessions")
         
+        self.auto_calibration_button = QPushButton("Auto-Calibration")
+        self.auto_calibration_button.setStyleSheet("QPushButton { font-size: 11px; }")
+        self.auto_calibration_button.setToolTip("Analyze sessions and automatically create master calibration frames")
+        
+        self.master_maintenance_button = QPushButton("Master Maintenance")
+        self.master_maintenance_button.setStyleSheet("QPushButton { font-size: 11px; }")
+        self.master_maintenance_button.setToolTip("Validate and maintain master calibration files")
+        
         controls_layout.addWidget(self.regenerate_button)
+        controls_layout.addWidget(self.auto_calibration_button)
+        controls_layout.addWidget(self.master_maintenance_button)
         controls_layout.addStretch()
         
         # Sessions list
@@ -59,6 +69,8 @@ class SessionsWidget(QWidget):
         
         # Connect signals
         self.regenerate_button.clicked.connect(self.regenerate_sessions)
+        self.auto_calibration_button.clicked.connect(self.run_auto_calibration)
+        self.master_maintenance_button.clicked.connect(self.run_master_maintenance)
     
     def show_context_menu(self, position):
         """Show context menu for session items"""
@@ -704,6 +716,294 @@ class SessionsWidget(QWidget):
                 progress_dialog.close()
             logger.error(f"Error linking sessions: {e}")
             QMessageBox.critical(self, "Error", f"Failed to link sessions: {e}")
+
+    def run_auto_calibration(self):
+        """Run the auto-calibration workflow with progress tracking"""
+        try:
+            # Check if auto-calibration is enabled in config
+            from configparser import ConfigParser
+            config = ConfigParser()
+            config.read('astrofiler.ini')
+            
+            auto_calibration_enabled = config.getboolean('Settings', 'enable_auto_calibration', fallback=False)
+            if not auto_calibration_enabled:
+                QMessageBox.information(self, "Auto-Calibration", 
+                    "Auto-calibration is disabled. Please enable it in the Config tab first.")
+                return
+            
+            # Ask for confirmation before proceeding
+            reply = QMessageBox.question(self, "Auto-Calibration Workflow", 
+                                       "This will analyze calibration sessions and automatically create master frames.\n\n"
+                                       "The process includes:\n"
+                                       "• Analyzing calibration sessions\n"
+                                       "• Creating master bias/dark/flat frames\n"
+                                       "• Detecting auto-calibration opportunities\n"
+                                       "• Preparing for light frame calibration\n\n"
+                                       "Are you sure you want to continue?",
+                                       QMessageBox.Yes | QMessageBox.No,
+                                       QMessageBox.No)
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Set up progress tracking
+            was_cancelled = False
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Initializing auto-calibration workflow...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Auto-Calibration Workflow")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.show()
+            QApplication.processEvents()
+            
+            def update_progress(current, total, message):
+                """Progress callback function"""
+                nonlocal was_cancelled
+                
+                # Don't check cancellation if already cancelled
+                if was_cancelled:
+                    return False
+                
+                # Check if dialog was cancelled before updating
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    return False  # Signal to stop processing
+                
+                if progress_dialog:
+                    progress_dialog.setValue(current)
+                    progress_dialog.setLabelText(f"{message}")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
+                    # Check again after processing events
+                    if progress_dialog.wasCanceled():
+                        was_cancelled = True
+                        return False
+                
+                return True  # Continue processing
+            
+            # Create and run the auto-calibration workflow
+            fits_processor = fitsProcessing()
+            results = fits_processor.runAutoCalibrationWorkflow(progress_callback=update_progress)
+            
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
+            # Handle results
+            if was_cancelled:
+                QMessageBox.information(self, "Auto-Calibration", "Auto-calibration workflow was cancelled.")
+            elif results.get("status") == "error":
+                error_message = results.get("message", "Unknown error occurred")
+                QMessageBox.critical(self, "Auto-Calibration Error", f"Auto-calibration failed:\n\n{error_message}")
+            else:
+                # Show success summary
+                sessions_analyzed = results.get("sessions_analyzed", 0)
+                masters_created = results.get("masters_created", 0)
+                opportunities = results.get("calibration_opportunities", 0)
+                light_sessions = results.get("light_frames_calibrated", 0)
+                errors = results.get("errors", [])
+                
+                status_text = results.get("status", "unknown")
+                success_msg = f"Auto-calibration workflow completed ({status_text})!\n\n"
+                success_msg += f"• Sessions analyzed: {sessions_analyzed}\n"
+                success_msg += f"• Master frames created: {masters_created}\n"
+                success_msg += f"• Calibration opportunities found: {opportunities}\n"
+                success_msg += f"• Light sessions ready for calibration: {light_sessions}\n"
+                
+                if errors:
+                    success_msg += f"\n⚠️ Warnings/Errors ({len(errors)}):\n"
+                    for i, error in enumerate(errors[:3]):  # Show first 3 errors
+                        success_msg += f"  {i+1}. {error}\n"
+                    if len(errors) > 3:
+                        success_msg += f"  ... and {len(errors)-3} more issues\n"
+                
+                if status_text == "success":
+                    QMessageBox.information(self, "Auto-Calibration Complete", success_msg)
+                else:
+                    QMessageBox.warning(self, "Auto-Calibration Partial Success", success_msg)
+                
+                # Refresh the sessions display
+                self.load_sessions_data()
+            
+        except Exception as e:
+            logger.error(f"Error running auto-calibration workflow: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to run auto-calibration workflow:\n\n{e}")
+
+    def run_master_maintenance(self):
+        """Run the master maintenance workflow with progress tracking"""
+        try:
+            # Ask for confirmation and options
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QCheckBox, QDialogButtonBox, QLabel
+            
+            class MaintenanceOptionsDialog(QDialog):
+                def __init__(self, parent=None):
+                    super().__init__(parent)
+                    self.setWindowTitle("Master Maintenance Options")
+                    self.setModal(True)
+                    
+                    layout = QVBoxLayout(self)
+                    
+                    # Description
+                    desc_label = QLabel("Master maintenance will validate and repair master calibration files.\n\n"
+                                      "Operations include:")
+                    layout.addWidget(desc_label)
+                    
+                    # Options
+                    self.validate_check = QCheckBox("Validate master file integrity and references")
+                    self.validate_check.setChecked(True)
+                    self.validate_check.setEnabled(False)  # Always required
+                    layout.addWidget(self.validate_check)
+                    
+                    self.repair_check = QCheckBox("Repair broken database associations")
+                    self.repair_check.setChecked(True)
+                    self.repair_check.setEnabled(False)  # Always included
+                    layout.addWidget(self.repair_check)
+                    
+                    self.fix_issues_check = QCheckBox("Automatically fix detected issues")
+                    self.fix_issues_check.setChecked(True)
+                    layout.addWidget(self.fix_issues_check)
+                    
+                    self.cleanup_check = QCheckBox("Clean up old/orphaned master files (moves to quarantine)")
+                    self.cleanup_check.setChecked(False)
+                    layout.addWidget(self.cleanup_check)
+                    
+                    # Warning
+                    warning_label = QLabel("\n⚠️ This operation may modify the database and move files.\n"
+                                         "Consider backing up your data before proceeding.")
+                    warning_label.setStyleSheet("QLabel { color: orange; }")
+                    layout.addWidget(warning_label)
+                    
+                    # Buttons
+                    button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+                    button_box.accepted.connect(self.accept)
+                    button_box.rejected.connect(self.reject)
+                    layout.addWidget(button_box)
+            
+            # Show options dialog
+            options_dialog = MaintenanceOptionsDialog(self)
+            if options_dialog.exec() != QDialog.Accepted:
+                return
+            
+            include_cleanup = options_dialog.cleanup_check.isChecked()
+            fix_issues = options_dialog.fix_issues_check.isChecked()
+            
+            # Set up progress tracking
+            was_cancelled = False
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Initializing master maintenance...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowTitle("Master Maintenance")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.show()
+            QApplication.processEvents()
+            
+            def update_progress(current, total, message):
+                """Progress callback function"""
+                nonlocal was_cancelled
+                
+                # Don't check cancellation if already cancelled
+                if was_cancelled:
+                    return False
+                
+                # Check if dialog was cancelled before updating
+                if progress_dialog and progress_dialog.wasCanceled():
+                    was_cancelled = True
+                    return False  # Signal to stop processing
+                
+                if progress_dialog:
+                    progress_dialog.setValue(current)
+                    progress_dialog.setLabelText(f"{message}")
+                    QApplication.processEvents()  # Keep UI responsive
+                    
+                    # Check again after processing events
+                    if progress_dialog.wasCanceled():
+                        was_cancelled = True
+                        return False
+                
+                return True  # Continue processing
+            
+            # Create and run the master maintenance workflow
+            fits_processor = fitsProcessing()
+            results = fits_processor.runMasterMaintenanceWorkflow(
+                progress_callback=update_progress,
+                include_cleanup=include_cleanup,
+                fix_issues=fix_issues
+            )
+            
+            # Close progress dialog
+            if progress_dialog:
+                progress_dialog.close()
+            
+            # Handle results
+            if was_cancelled:
+                QMessageBox.information(self, "Master Maintenance", "Master maintenance workflow was cancelled.")
+            elif results.get("status") == "error":
+                error_message = results.get("message", "Unknown error occurred")
+                QMessageBox.critical(self, "Master Maintenance Error", f"Master maintenance failed:\n\n{error_message}")
+            else:
+                # Show success summary with detailed results
+                status_text = results.get("status", "unknown")
+                
+                # Build detailed summary
+                summary_lines = []
+                summary_lines.append(f"Master maintenance completed ({status_text})!")
+                
+                if results.get("validation_results"):
+                    v_results = results["validation_results"]
+                    summary_lines.append(f"\n📋 Validation Results:")
+                    summary_lines.append(f"  • Masters checked: {v_results.get('total_masters_checked', 0)}")
+                    summary_lines.append(f"  • Missing files: {len(v_results.get('missing_files', []))}")
+                    summary_lines.append(f"  • Corrupted files: {len(v_results.get('corrupted_files', []))}")
+                    summary_lines.append(f"  • Orphaned files: {len(v_results.get('orphaned_files', []))}")
+                    summary_lines.append(f"  • Database issues: {len(v_results.get('database_issues', []))}")
+                
+                if results.get("repair_results"):
+                    r_results = results["repair_results"]
+                    summary_lines.append(f"\n🔧 Repair Results:")
+                    summary_lines.append(f"  • Sessions processed: {r_results.get('sessions_processed', 0)}")
+                    summary_lines.append(f"  • Masters relinked: {r_results.get('masters_relinked', 0)}")
+                    summary_lines.append(f"  • Broken refs cleared: {r_results.get('broken_refs_cleared', 0)}")
+                
+                if results.get("cleanup_results", {}).get("status") != "skipped":
+                    c_results = results["cleanup_results"]
+                    summary_lines.append(f"\n🧹 Cleanup Results:")
+                    summary_lines.append(f"  • Files processed: {c_results.get('files_processed', 0)}")
+                    summary_lines.append(f"  • Files moved to quarantine: {c_results.get('files_deleted', 0)}")
+                    space_mb = c_results.get('space_reclaimed', 0) / (1024*1024)
+                    summary_lines.append(f"  • Space reclaimed: {space_mb:.1f} MB")
+                
+                summary_lines.append(f"\n📊 Summary:")
+                summary_lines.append(f"  • Total issues found: {results.get('total_issues_found', 0)}")
+                summary_lines.append(f"  • Total fixes applied: {results.get('total_fixes_applied', 0)}")
+                
+                errors = []
+                for result_type in ['validation_results', 'repair_results', 'cleanup_results']:
+                    if results.get(result_type, {}).get('errors'):
+                        errors.extend(results[result_type]['errors'])
+                
+                if errors:
+                    summary_lines.append(f"\n⚠️ Warnings/Errors ({len(errors)}):")
+                    for i, error in enumerate(errors[:3]):  # Show first 3 errors
+                        summary_lines.append(f"  {i+1}. {error}")
+                    if len(errors) > 3:
+                        summary_lines.append(f"  ... and {len(errors)-3} more issues")
+                
+                success_msg = "\n".join(summary_lines)
+                
+                if status_text == "success":
+                    QMessageBox.information(self, "Master Maintenance Complete", success_msg)
+                else:
+                    QMessageBox.warning(self, "Master Maintenance Partial Success", success_msg)
+                
+                # Refresh the sessions display if fixes were applied
+                if results.get('total_fixes_applied', 0) > 0:
+                    self.load_sessions_data()
+            
+        except Exception as e:
+            logger.error(f"Error running master maintenance: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to run master maintenance:\n\n{e}")
 
     def regenerate_sessions(self):
         """Regenerate all sessions: Clear → Update Lights → Update Calibrations → Link Sessions"""

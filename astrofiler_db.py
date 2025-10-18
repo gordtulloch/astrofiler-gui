@@ -36,6 +36,13 @@ class fitsFile(BaseModel):
     fitsFileHash = pw.TextField(null=True)
     fitsFileSession = pw.TextField(null=True)
     fitsFileCloudURL = pw.TextField(null=True)
+    fitsFileSoftDelete = pw.BooleanField(null=True, default=False)
+    fitsFileCalibrationDate = pw.DateTimeField(null=True)
+    fitsFileMasterBias = pw.TextField(null=True)
+    fitsFileMasterDark = pw.TextField(null=True)
+    fitsFileMasterFlat = pw.TextField(null=True)
+    fitsFileOriginalFile = pw.TextField(null=True)
+    fitsFileOriginalCloudURL = pw.TextField(null=True)
 
 class fitsSession(BaseModel):
     fitsSessionId = pw.TextField(primary_key=True)
@@ -56,6 +63,15 @@ class fitsSession(BaseModel):
     fitsBiasMaster = pw.TextField(null=True)
     fitsDarkMaster = pw.TextField(null=True)
     fitsFlatMaster = pw.TextField(null=True)
+    
+    # Auto-calibration tracking fields (Migration 008)
+    is_auto_calibration = pw.BooleanField(null=True, default=False)
+    auto_calibration_dark_session_id = pw.TextField(null=True)
+    auto_calibration_flat_session_id = pw.TextField(null=True)
+    auto_calibration_bias_session_id = pw.TextField(null=True)
+    master_dark_created = pw.BooleanField(null=True, default=False)
+    master_flat_created = pw.BooleanField(null=True, default=False)
+    master_bias_created = pw.BooleanField(null=True, default=False)
 
 class Mapping(BaseModel):
     id = pw.AutoField()

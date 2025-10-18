@@ -12,7 +12,11 @@ This document describes the technical implementation of the Cloud Sync system ad
 - **Cloud Sync Configuration Interface**: Complete UI for configuring cloud storage settings
 - **Cloud Sync Dialog**: New Tools → Cloud Sync menu with Analyze and Sync operations
 - **Database Integration**: Added `fitsFileCloudURL` field to track cloud storage locations
-- **Backup Only Sync**: Fully implemented backup sync profile with smart upload logic
+- **Backup Only Sync**: Fully implemented one-way backup sync profile with smart upload logic
+- **Complete Sync**: Revolutionary bidirectional sync (download missing + upload new files)
+- **Images View Integration**: Local/Cloud status icons showing file storage locations
+- **Command-Line Interface**: Complete automation support with `CloudSync.py` utility
+- **Self-Contained Architecture**: All cloud helper functions integrated in dialog
 - **Comprehensive Error Handling**: User-friendly error messages for all common scenarios
 - **Progress Tracking**: Real-time progress dialogs with cancellation support
 
@@ -23,14 +27,24 @@ This document describes the technical implementation of the Cloud Sync system ad
 - Field stores cloud URLs in format: `gs://bucket-name/path/to/file.fits`
 
 #### New Modules and Functions
-- `astrofiler_cloud.py`: Cloud storage operations
+- `ui/cloud_sync_dialog.py`: Self-contained cloud sync dialog with integrated helper functions
+  - `_get_gcs_client()`: GCS client authentication and initialization
   - `check_file_exists_in_gcs()`: Check file existence without download
   - `upload_file_to_backup()`: Smart upload with duplicate prevention
-  - Enhanced error handling with specific HTTP status code handling
-- `ui/cloud_sync_dialog.py`: Main sync dialog
+  - `list_gcs_bucket_files()`: Complete bucket file listing with metadata
+  - `download_file_from_gcs()`: Download files from cloud storage
   - `validate_bucket_access()`: Pre-operation bucket validation
-  - `perform_backup_sync()`: Complete backup sync implementation
+  - `perform_backup_sync()`: Complete one-way backup sync implementation
+  - `perform_complete_sync()`: Bidirectional sync (download + upload)
   - Real-time progress tracking and user feedback
+- `astrofiler_cloud.py`: Legacy cloud operations (preserved for existing functionality)
+- `commands/CloudSync.py`: Command-line automation utility
+  - Full command-line interface with argument parsing
+  - Support for all sync profiles via command-line flags
+  - Analysis mode for storage reporting
+  - Auto-confirm flags for unattended operation
+  - Comprehensive logging and error handling
+- `commands/cron_cloudsync.bat` / `commands/cron_cloudsync.sh`: Automation scripts
 
 #### Configuration Integration
 - Extended configuration system to include cloud sync settings
@@ -188,6 +202,41 @@ cloud_config = config_widget.get_cloud_config()
 - Consider using environment variables or Google Application Default Credentials in production
 - Regularly rotate service account keys
 - Use the principle of least privilege - only grant necessary permissions
+
+## Command-Line Interface Technical Details
+
+### CloudSync.py Implementation
+The command-line utility provides full automation capabilities:
+
+#### Architecture
+- **Modular Design**: Imports helper functions directly from `ui.cloud_sync_dialog`
+- **Configuration Reuse**: Uses same `astrofiler.ini` configuration as GUI
+- **Database Integration**: Full database operations for file registration and URL tracking
+- **Progress Reporting**: Command-line appropriate progress indicators
+- **Error Handling**: Comprehensive error handling with meaningful exit codes
+
+#### Command-Line Arguments
+```python
+parser.add_argument('-p', '--profile', choices=['backup', 'complete'])
+parser.add_argument('-a', '--analyze', action='store_true')
+parser.add_argument('-y', '--yes', action='store_true')
+parser.add_argument('-v', '--verbose', action='store_true')
+parser.add_argument('-c', '--config', default='astrofiler.ini')
+```
+
+#### Integration Points
+- **Configuration Validation**: Pre-flight checks ensure valid cloud configuration
+- **Bucket Access**: Tests bucket connectivity before operations
+- **Database Operations**: Uses same ORM models as GUI for consistency
+- **Repository Path**: Respects configured repository path settings
+- **Logging**: Creates timestamped log files for monitoring
+
+#### Automation Scripts
+- **Windows**: `cron_cloudsync.bat` with Task Scheduler integration
+- **Linux/macOS**: `cron_cloudsync.sh` with cron integration
+- **Cross-Platform**: Consistent interface across all platforms
+- **Logging**: Automated log file creation with timestamps
+- **Error Handling**: Proper exit codes for automation monitoring
 
 ### Troubleshooting
 - **Authentication Error**: Verify the JSON key file path is correct and the file is readable

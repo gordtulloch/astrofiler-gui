@@ -12,12 +12,19 @@ AstroFiler supports comprehensive cloud synchronization with Google Cloud Storag
 
 ### Key Features
 
-- **Multiple Sync Profiles**: Choose from Complete, Backup Only, or On Demand sync strategies
-- **Smart File Detection**: Only uploads files that don't exist in cloud to avoid duplicates
-- **Database Integration**: Tracks cloud URLs for all files in the database
-- **Real-time Progress**: Live progress tracking with cancellation support
-- **Comprehensive Error Handling**: Clear error messages for common configuration issues
-- **Directory Structure Preservation**: Maintains your local folder structure in the cloud
+- **Multiple Sync Profiles**: 
+  - **Complete Sync**: Revolutionary bidirectional synchronization - downloads missing files from cloud AND uploads files without cloud URLs
+  - **Backup Only**: One-way backup - uploads local files to cloud for safe storage
+  - **On Demand**: Manual file-by-file synchronization (coming soon)
+- **Smart File Detection**: Only uploads files that don't exist in cloud to avoid duplicates and reduce transfer time
+- **Database Integration**: Tracks cloud URLs for all files with `fitsFileCloudURL` field enabling future remote access features
+- **Images View Integration**: Local/Cloud status icons show file storage locations at a glance
+- **Command-Line Automation**: Complete command-line interface (`CloudSync.py`) with automation scripts for cron/Task Scheduler
+- **Analysis Mode**: Analyze cloud storage contents and compare with local database without performing sync
+- **Real-time Progress**: Live progress tracking with file-by-file updates and cancellation support
+- **Comprehensive Error Handling**: Clear error messages for authentication, bucket access, and network configuration issues
+- **Directory Structure Preservation**: Maintains your local repository folder structure in cloud storage
+- **Self-Contained Architecture**: All cloud operations integrated for improved reliability and maintainability
 
 ## Step 1: Create a Google Cloud Project
 
@@ -83,11 +90,11 @@ AstroFiler supports comprehensive cloud synchronization with Google Cloud Storag
 
 2. **Bucket URL**: Enter your bucket name (with or without gs:// prefix):
    ```
-   obsy-repository
+   astrofiler-repository
    ```
    or
    ```
-   gs://obsy-repository
+   gs://astrofiler-repository
    ```
 
 3. **Authentication File**: 
@@ -446,14 +453,87 @@ For organizing different types of data:
 - `gs://my-astrofiler-backup/processed/` - Processed images  
 - `gs://my-astrofiler-backup/database/` - Database backups
 
-### Automation Ideas
+## Command-Line Automation
 
-Future enhancements could include:
-- Scheduled automatic backups
-- Selective file synchronization
-- Compression before upload
-- Integration with other cloud providers
+AstroFiler v1.2.0 includes comprehensive command-line automation capabilities for unattended cloud sync operations.
+
+### CloudSync.py Command-Line Utility
+
+The `CloudSync.py` utility in the `commands/` folder provides full command-line access to all cloud sync features:
+
+```bash
+# Basic sync using configured profile
+python CloudSync.py
+
+# Override sync profile
+python CloudSync.py -p backup    # Backup only
+python CloudSync.py -p complete  # Complete bidirectional sync
+
+# Analysis mode (no sync, just analyze)
+python CloudSync.py -a
+
+# Unattended operation (auto-confirm)
+python CloudSync.py -y -v        # Verbose with auto-confirm
+
+# Custom configuration file
+python CloudSync.py -c /path/to/custom.ini
+```
+
+### Scheduling Cloud Sync Operations
+
+#### Windows Task Scheduler
+
+Use the provided `cron_cloudsync.bat` script or create a custom scheduled task:
+
+1. **Program**: `C:\path\to\astrofiler-gui\.venv\Scripts\python.exe`
+2. **Arguments**: `C:\path\to\astrofiler-gui\commands\CloudSync.py -y -v`
+3. **Start in**: `C:\path\to\astrofiler-gui`
+4. **Schedule**: Daily at 11:00 PM (or after imaging sessions)
+
+#### Linux/macOS Cron
+
+Use the provided `cron_cloudsync.sh` script or add directly to crontab:
+
+```bash
+# Make script executable
+chmod +x /path/to/astrofiler-gui/commands/cron_cloudsync.sh
+
+# Edit crontab
+crontab -e
+
+# Add daily sync at 11 PM
+0 23 * * * /path/to/astrofiler-gui/commands/cron_cloudsync.sh
+
+# Or sync every 4 hours
+0 */4 * * * /path/to/astrofiler-gui/commands/cron_cloudsync.sh
+```
+
+### Logging and Monitoring
+
+All automated operations create timestamped log files in the `logs/` directory:
+- Log format: `logs/cloudsync_YYYYMMDD_HHMMSS.log`
+- Includes detailed operation results and error information
+- Perfect for monitoring automated sync operations
+
+### Example Automation Workflow
+
+1. **After Imaging Session** (manually): `python CloudSync.py -p backup -y`
+2. **Daily Maintenance** (automated): Complete sync to ensure all files are synchronized
+3. **Weekly Analysis** (automated): `python CloudSync.py -a` to generate storage reports
+
+### Integration with Other Automation
+
+The command-line interface makes it easy to integrate cloud sync with other astronomical workflows:
+
+```bash
+# Complete workflow: Load new files then sync to cloud
+python commands/LoadRepo.py -v
+python commands/CloudSync.py -p backup -y -v
+
+# Analysis and reporting
+python commands/CloudSync.py -a > sync_report.txt
+```
 
 ---
 
-*This guide covers Google Cloud Storage integration. Support for other cloud providers may be added in future versions of AstroFiler.*
+*This guide covers Google Cloud Storage integration. The command-line automation features enable seamless integration with existing astronomical data processing workflows.*

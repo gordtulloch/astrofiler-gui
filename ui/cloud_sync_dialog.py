@@ -8,6 +8,225 @@ from PySide6.QtGui import QFont
 
 logger = logging.getLogger(__name__)
 
+
+# Cloud Sync Helper Functions
+def _get_gcs_client(auth_info):
+    """
+    Create and return a Google Cloud Storage client.
+    
+    Args:
+        auth_info (dict): Authentication information
+        
+    Returns:
+        storage.Client: Authenticated GCS client
+    """
+    try:
+        from google.cloud import storage
+        from google.oauth2 import service_account
+        
+        if 'auth_string' in auth_info and auth_info['auth_string']:
+            # Check if it's a file path to a service account key
+            auth_path = auth_info['auth_string']
+            if os.path.exists(auth_path) and auth_path.endswith('.json'):
+                # Use service account key file
+                credentials = service_account.Credentials.from_service_account_file(auth_path)
+                client = storage.Client(credentials=credentials)
+                logger.info(f"Authenticated using service account key: {auth_path}")
+            else:
+                # Try default credentials
+                client = storage.Client()
+                logger.info("Using default Google Cloud credentials")
+        else:
+            # Use default credentials (ADC, environment, etc.)
+            client = storage.Client()
+            logger.info("Using default Google Cloud credentials")
+            
+        return client
+        
+    except ImportError:
+        raise ImportError("Google Cloud Storage library not installed. Run: pip install google-cloud-storage")
+    except Exception as e:
+        raise Exception(f"Failed to authenticate with Google Cloud: {e}")
+
+
+def check_file_exists_in_gcs(client, bucket_name, gcs_object_name):
+    """
+    Check if a file exists in Google Cloud Storage.
+    
+    Args:
+        client: GCS client
+        bucket_name (str): Name of the GCS bucket
+        gcs_object_name (str): Object name in GCS
+        
+    Returns:
+        bool: True if file exists, False otherwise
+    """
+    try:
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(gcs_object_name)
+        return blob.exists()
+    except Exception as e:
+        logger.error(f"Failed to check if file exists: gs://{bucket_name}/{gcs_object_name}: {e}")
+        return False
+
+
+def upload_file_to_backup(bucket_name, auth_info, local_file_path, relative_path):
+    """
+    Upload a single file to cloud backup if it doesn't already exist.
+    
+    Args:
+        bucket_name (str): Name of the GCS bucket
+        auth_info (dict): Authentication information
+        local_file_path (str): Full path to local file
+        relative_path (str): Relative path to maintain directory structure
+        
+    Returns:
+        tuple: (success: bool, cloud_url: str, message: str)
+    """
+    try:
+        logger.info(f"Processing backup for: {relative_path}")
+        
+        # Get authenticated client
+        client = _get_gcs_client(auth_info)
+        
+        # Normalize the path for cloud storage (use forward slashes)
+        gcs_object_name = relative_path.replace('\\', '/')
+        
+        # Check if file already exists
+        if check_file_exists_in_gcs(client, bucket_name, gcs_object_name):
+            # File exists, just build the cloud URL
+            cloud_url = f"gs://{bucket_name}/{gcs_object_name}"
+            logger.info(f"File already exists in cloud: {gcs_object_name}")
+            return True, cloud_url, "File already exists in cloud"
+        
+        # File doesn't exist, upload it
+        logger.info(f"Uploading to cloud: {gcs_object_name}")
+        _upload_file_to_gcs(client, bucket_name, local_file_path, gcs_object_name)
+        cloud_url = f"gs://{bucket_name}/{gcs_object_name}"
+        logger.info(f"Successfully uploaded: {gcs_object_name}")
+        return True, cloud_url, "File uploaded successfully"
+        
+    except Exception as e:
+        logger.error(f"Failed to upload file to backup: {local_file_path}: {e}")
+        return False, "", str(e)
+
+
+def _upload_file_to_gcs(client, bucket_name, local_file_path, gcs_object_name):
+    """
+    Upload a file to Google Cloud Storage, preserving the local directory structure.
+    
+    Args:
+        client: GCS client
+        bucket_name (str): Name of the GCS bucket
+        local_file_path (str): Full path to local file
+        gcs_object_name (str): Object name in GCS (includes directory structure)
+    """
+    try:
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(gcs_object_name)
+        
+        blob.upload_from_filename(local_file_path)
+        logger.debug(f"Successfully uploaded: {local_file_path} -> gs://{bucket_name}/{gcs_object_name}")
+        
+    except Exception as e:
+        logger.error(f"Failed to upload {local_file_path}: {e}")
+        raise
+
+
+def list_gcs_bucket_files(bucket_name, auth_info, prefix=""):
+    """
+    List all files in a Google Cloud Storage bucket.
+    
+    Args:
+        bucket_name (str): Name of the GCS bucket
+        auth_info (dict): Authentication information
+        prefix (str): Optional prefix to filter files
+        
+    Returns:
+        list: List of dictionaries containing file information
+    """
+    try:
+        logger.info(f"Listing files in bucket: {bucket_name}")
+        
+        # Get authenticated client
+        client = _get_gcs_client(auth_info)
+        bucket = client.bucket(bucket_name)
+        
+        # List all blobs with optional prefix
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        
+        files = []
+        for blob in blobs:
+            # Skip directory markers (objects ending with /)
+            if blob.name.endswith('/'):
+                continue
+                
+            file_info = {
+                'name': blob.name,
+                'size': blob.size,
+                'created': blob.time_created.isoformat() if blob.time_created else None,
+                'updated': blob.updated.isoformat() if blob.updated else None,
+                'md5_hash': blob.md5_hash,
+                'crc32c': blob.crc32c,
+                'content_type': blob.content_type,
+                'url': f"gs://{bucket_name}/{blob.name}",
+                'public_url': blob.public_url if hasattr(blob, 'public_url') else None
+            }
+            files.append(file_info)
+            
+        logger.info(f"Found {len(files)} files in bucket")
+        return files
+        
+    except Exception as e:
+        logger.error(f"Error listing bucket files: {e}")
+        error_msg = str(e)
+        
+        # Provide more specific error messages for common issues
+        if "404" in error_msg or "not found" in error_msg.lower():
+            raise Exception(f"Failed to list files in bucket {bucket_name}: 404 GET https://storage.googleapis.com/storage/v1/b/{bucket_name}/o?projection=noAcl&prefix=&prettyPrint=false: The specified bucket does not exist.")
+        elif "403" in error_msg or "access denied" in error_msg.lower():
+            raise Exception(f"Failed to list files in bucket {bucket_name}: Access denied. Check your service account permissions.")
+        elif "401" in error_msg or "unauthorized" in error_msg.lower():
+            raise Exception(f"Failed to list files in bucket {bucket_name}: Authentication failed. Check your service account key file.")
+        else:
+            raise Exception(f"Failed to list files in bucket {bucket_name}: {error_msg}")
+
+
+def download_file_from_gcs(bucket_name, auth_info, gcs_object_name, local_file_path):
+    """
+    Download a file from Google Cloud Storage to local disk.
+    
+    Args:
+        bucket_name (str): Name of the GCS bucket
+        auth_info (dict): Authentication information
+        gcs_object_name (str): Object name in GCS
+        local_file_path (str): Full path where to save the file locally
+        
+    Returns:
+        tuple: (success: bool, message: str)
+    """
+    try:
+        logger.info(f"Downloading from cloud: {gcs_object_name}")
+        
+        # Get authenticated client
+        client = _get_gcs_client(auth_info)
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(gcs_object_name)
+        
+        # Create directory structure if it doesn't exist
+        local_dir = os.path.dirname(local_file_path)
+        if local_dir:
+            os.makedirs(local_dir, exist_ok=True)
+        
+        # Download the file
+        blob.download_to_filename(local_file_path)
+        logger.info(f"Successfully downloaded: gs://{bucket_name}/{gcs_object_name} -> {local_file_path}")
+        return True, "File downloaded successfully"
+        
+    except Exception as e:
+        logger.error(f"Failed to download gs://{bucket_name}/{gcs_object_name}: {e}")
+        return False, str(e)
+
 class CloudSyncDialog(QDialog):
     """Dialog for Cloud Sync operations"""
     
@@ -255,7 +474,7 @@ class CloudSyncDialog(QDialog):
                 bucket_name = bucket_url.rstrip('/')
             
             # Try to list one file to test access
-            from astrofiler_cloud import _get_gcs_client
+
             auth_info = {'auth_string': self.cloud_config['auth_file_path']}
             client = _get_gcs_client(auth_info)
             bucket = client.bucket(bucket_name)
@@ -289,7 +508,6 @@ class CloudSyncDialog(QDialog):
     def perform_cloud_analysis(self):
         """Perform the actual cloud analysis and update database"""
         from astrofiler_db import fitsFile
-        import astrofiler_cloud
         
         try:
             # Show progress dialog
@@ -371,13 +589,11 @@ class CloudSyncDialog(QDialog):
     
     def get_cloud_file_list(self, bucket_name, auth_info):
         """Get list of files from cloud storage"""
-        import astrofiler_cloud
-        
         try:
             logger.info(f"Getting file list from bucket: {bucket_name}")
             
-            # Use the new list function from astrofiler_cloud
-            cloud_files = astrofiler_cloud.list_gcs_bucket_files(bucket_name, auth_info)
+            # Use the list function
+            cloud_files = list_gcs_bucket_files(bucket_name, auth_info)
             
             logger.info(f"Retrieved {len(cloud_files)} files from cloud storage")
             return cloud_files
@@ -490,12 +706,7 @@ class CloudSyncDialog(QDialog):
         if sync_profile == 'backup':
             self.perform_backup_sync()
         elif sync_profile == 'complete':
-            QMessageBox.information(
-                self,
-                "Complete Sync",
-                "Complete sync functionality will be implemented in a future version.\n\n"
-                "This will synchronize files in both directions between local and cloud storage."
-            )
+            self.perform_complete_sync()
         elif sync_profile == 'on demand':
             QMessageBox.information(
                 self,
@@ -514,7 +725,6 @@ class CloudSyncDialog(QDialog):
     def perform_backup_sync(self):
         """Perform backup-only sync: upload local files that don't exist in cloud"""
         from astrofiler_db import fitsFile
-        import astrofiler_cloud
         from PySide6.QtWidgets import QProgressDialog
         from PySide6.QtCore import Qt
         import configparser
@@ -610,7 +820,7 @@ class CloudSyncDialog(QDialog):
                         continue
                     
                     # Upload to backup if needed
-                    success, cloud_url, message = astrofiler_cloud.upload_file_to_backup(
+                    success, cloud_url, message = upload_file_to_backup(
                         bucket_name, auth_info, full_path, relative_path
                     )
                     
@@ -665,6 +875,290 @@ class CloudSyncDialog(QDialog):
                 self,
                 "Backup Sync Error",
                 f"An error occurred during backup sync:\n\n{str(e)}\n\n"
+                f"Please check the logs for more details."
+            )
+    
+    def perform_complete_sync(self):
+        """Perform complete bidirectional sync: download missing files from cloud and upload files without cloud URLs"""
+        from astrofiler_db import fitsFile
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+        import configparser
+        
+        try:
+            # Get repository path from configuration
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            repo_path = config.get('DEFAULT', 'repo', fallback='')
+            
+            if not repo_path or not os.path.exists(repo_path):
+                QMessageBox.critical(
+                    self,
+                    "Configuration Error",
+                    "Repository path is not configured or does not exist.\n\n"
+                    "Please configure your repository path in Tools → Configuration."
+                )
+                return
+            
+            # Confirm operation
+            reply = QMessageBox.question(
+                self,
+                "Complete Sync",
+                f"This will perform bidirectional synchronization:\n\n"
+                f"DOWNLOAD:\n"
+                f"1. Check all files in cloud bucket: {self.cloud_config['bucket_url']}\n"
+                f"2. Download files that exist in cloud but missing locally\n"
+                f"3. Register downloaded files in the database\n\n"
+                f"UPLOAD:\n"
+                f"4. Check all local FITS files in the database\n"
+                f"5. Upload files that don't have cloud URLs (not yet backed up)\n"
+                f"6. Update cloud URLs for all processed files\n\n"
+                f"Repository path: {repo_path}\n\n"
+                f"This operation may take considerable time depending on file count and sizes.\n\n"
+                f"Do you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Setup progress dialog
+            progress = QProgressDialog("Starting complete sync...", "Cancel", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setAutoClose(True)
+            progress.setAutoReset(True)
+            progress.show()
+            
+            # Prepare bucket info
+            bucket_url = self.cloud_config['bucket_url']
+            if bucket_url.startswith('gs://'):
+                bucket_name = bucket_url.replace('gs://', '').rstrip('/')
+            else:
+                bucket_name = bucket_url.rstrip('/')
+            
+            auth_info = {'auth_string': self.cloud_config['auth_file_path']}
+            
+            # Phase 1: Download missing files from cloud
+            progress.setLabelText("Phase 1: Getting cloud file list...")
+            progress.setValue(10)
+            QApplication.processEvents()
+            
+            if progress.wasCanceled():
+                return
+            
+            cloud_files = list_gcs_bucket_files(bucket_name, auth_info)
+            logger.info(f"Found {len(cloud_files)} files in cloud storage")
+            
+            # Download missing files
+            progress.setLabelText("Phase 1: Checking for missing local files...")
+            progress.setValue(20)
+            QApplication.processEvents()
+            
+            downloaded_count = 0
+            registered_count = 0
+            
+            for i, cloud_file in enumerate(cloud_files):
+                if progress.wasCanceled():
+                    break
+                
+                progress.setLabelText(f"Phase 1: Checking {cloud_file['name']}")
+                progress.setValue(20 + int((i / len(cloud_files)) * 30))
+                QApplication.processEvents()
+                
+                # Check if file already exists in database (already processed)
+                from astrofiler_db import fitsFile
+                filename_only = os.path.basename(cloud_file['name'])
+                cloud_url = f"gs://{bucket_name}/{cloud_file['name']}"
+                
+                # Check if file is already in database/repository by multiple methods
+                existing_file = None
+                
+                # Method 1: Check by exact filename
+                try:
+                    existing_file = fitsFile.get(fitsFile.fitsFileName == filename_only)
+                    logger.info(f"File already exists in repository (by filename): {filename_only}")
+                except fitsFile.DoesNotExist:
+                    pass
+                
+                # Method 2: Check by cloud URL (for files downloaded previously)
+                if existing_file is None:
+                    try:
+                        existing_file = fitsFile.get(fitsFile.fitsFileCloudURL == cloud_url)
+                        logger.info(f"File already exists in repository (by cloud URL): {filename_only}")
+                    except fitsFile.DoesNotExist:
+                        pass
+                
+                # Method 3: Check by timestamp pattern (extract date/time from filename)
+                if existing_file is None:
+                    import re
+                    # Extract timestamp pattern like "20240116031554" from filename
+                    timestamp_match = re.search(r'-(\d{14})[s-]', filename_only)
+                    if timestamp_match:
+                        timestamp = timestamp_match.group(1)
+                        try:
+                            # Look for any file with this timestamp
+                            existing_file = fitsFile.get(fitsFile.fitsFileName.contains(timestamp))
+                            logger.info(f"File already exists in repository (by timestamp {timestamp}): {filename_only}")
+                        except (fitsFile.DoesNotExist, fitsFile.MultipleObjectsReturned):
+                            pass
+                
+                if existing_file is None:
+                    try:
+                        # Download to incoming/source folder first
+                        logger.info(f"Downloading missing file: {cloud_file['name']}")
+                        
+                        # Get source folder from configuration
+                        source_path = config.get('DEFAULT', 'source', fallback='')
+                        if not source_path:
+                            logger.error("Source folder not configured. Cannot download files.")
+                            continue
+                            
+                        # Ensure source folder exists
+                        os.makedirs(source_path, exist_ok=True)
+                        
+                        # Download to source folder (incoming)
+                        incoming_file_path = os.path.join(source_path, os.path.basename(cloud_file['name']))
+                        
+                        success, message = download_file_from_gcs(
+                            bucket_name, auth_info, cloud_file['name'], incoming_file_path
+                        )
+                        
+                        if success:
+                            downloaded_count += 1
+                            
+                            # Register the downloaded file (moveFiles=True will move it from incoming to repo)
+                            if incoming_file_path.lower().endswith(('.fits', '.fit', '.fts')):
+                                from astrofiler_file import fitsProcessing
+                                processor = fitsProcessing()
+                                # Split path into directory and filename for registerFitsImage
+                                root_dir = os.path.dirname(incoming_file_path)
+                                filename = os.path.basename(incoming_file_path)
+                                result = processor.registerFitsImage(root_dir, filename, moveFiles=True)
+                                if result:  # Success includes both new registrations and duplicates
+                                    registered_count += 1
+                                    if result == "DUPLICATE":
+                                        # File already exists in repository, delete the downloaded copy
+                                        try:
+                                            os.remove(incoming_file_path)
+                                            logger.info(f"Downloaded file already exists in repository, deleted incoming copy: {cloud_file['name']}")
+                                        except OSError as e:
+                                            logger.warning(f"Failed to delete duplicate file from incoming: {e}")
+                                    else:
+                                        logger.info(f"Downloaded and registered file: {cloud_file['name']}")
+                                else:
+                                    logger.warning(f"Downloaded but failed to register file: {cloud_file['name']}")
+                            else:
+                                logger.info(f"Downloaded non-FITS file: {cloud_file['name']}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to download {cloud_file['name']}: {e}")
+            
+            if progress.wasCanceled():
+                return
+            
+            # Phase 2: Upload local files without cloud URLs (same as backup sync)
+            progress.setLabelText("Phase 2: Getting local files without cloud URLs...")
+            progress.setValue(50)
+            QApplication.processEvents()
+            
+            # Get all FITS files from database that don't have cloud URLs
+            fits_files = list(fitsFile.select().where(
+                (fitsFile.fitsFileName.is_null(False)) &
+                ((fitsFile.fitsFileCloudURL.is_null(True)) | (fitsFile.fitsFileCloudURL == ""))
+            ))
+            
+            logger.info(f"Found {len(fits_files)} local files without cloud URLs")
+            
+            uploaded_count = 0
+            updated_count = 0
+            error_count = 0
+            
+            for i, fits_file in enumerate(fits_files):
+                if progress.wasCanceled():
+                    break
+                
+                try:
+                    progress.setLabelText(f"Phase 2: Processing {os.path.basename(fits_file.fitsFileName)}")
+                    progress.setValue(50 + int((i / len(fits_files)) * 50))
+                    QApplication.processEvents()
+                    
+                    # Get relative path from repository root
+                    full_path = fits_file.fitsFileName
+                    if full_path.startswith(repo_path):
+                        relative_path = os.path.relpath(full_path, repo_path)
+                    else:
+                        # File is outside repo, use just the filename
+                        relative_path = os.path.basename(full_path)
+                    
+                    # Check if local file exists
+                    if not os.path.exists(full_path):
+                        logger.warning(f"Local file not found: {full_path}")
+                        error_count += 1
+                        continue
+                    
+                    # Upload to cloud if needed
+                    success, cloud_url, message = upload_file_to_backup(
+                        bucket_name, auth_info, full_path, relative_path
+                    )
+                    
+                    if success:
+                        # Update the database with cloud URL
+                        fits_file.fitsFileCloudURL = cloud_url
+                        fits_file.save()
+                        updated_count += 1
+                        
+                        if "uploaded" in message.lower():
+                            uploaded_count += 1
+                            logger.info(f"Uploaded: {relative_path}")
+                        else:
+                            logger.info(f"Already exists: {relative_path}")
+                    else:
+                        logger.error(f"Failed to process {relative_path}: {message}")
+                        error_count += 1
+                
+                except Exception as e:
+                    logger.error(f"Error processing file {fits_file.fitsFileName}: {e}")
+                    error_count += 1
+            
+            progress.setValue(100)
+            
+            # Show results
+            if not progress.wasCanceled():
+                QMessageBox.information(
+                    self,
+                    "Complete Sync Finished",
+                    f"Complete bidirectional sync completed!\n\n"
+                    f"DOWNLOAD PHASE:\n"
+                    f"• Cloud files checked: {len(cloud_files)}\n"
+                    f"• Files downloaded: {downloaded_count}\n"
+                    f"• Files registered: {registered_count}\n\n"
+                    f"UPLOAD PHASE:\n"
+                    f"• Local files processed: {len(fits_files)}\n"
+                    f"• Files uploaded: {uploaded_count}\n"
+                    f"• Database records updated: {updated_count}\n"
+                    f"• Errors: {error_count}\n\n"
+                    f"Your local and cloud storage are now synchronized!"
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Complete Sync Cancelled",
+                    f"Complete sync was cancelled by user.\n\n"
+                    f"Partial results:\n"
+                    f"• Files downloaded: {downloaded_count}\n"
+                    f"• Files registered: {registered_count}\n"
+                    f"• Files uploaded: {uploaded_count}\n"
+                    f"• Database records updated: {updated_count}\n"
+                    f"• Errors: {error_count}"
+                )
+        
+        except Exception as e:
+            logger.error(f"Error during complete sync: {e}")
+            QMessageBox.critical(
+                self,
+                "Complete Sync Error",
+                f"An error occurred during complete sync:\n\n{str(e)}\n\n"
                 f"Please check the logs for more details."
             )
     

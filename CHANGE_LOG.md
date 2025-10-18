@@ -3,16 +3,100 @@
 ## Version 1.2.0 - Current Development
 
 ### New Features
-- **Cloud Sync System**: Complete cloud synchronization system with Google Cloud Storage integration
+- **Complete Cloud Sync System**: Revolutionary cloud synchronization with Google Cloud Storage integration
   - **Configuration Interface**: Added Cloud Sync section in Configuration dialog with vendor selection, bucket URL, service account authentication file picker, and sync profile selection (Complete/Backup/On Demand)
   - **Cloud Sync Dialog**: New Tools → Cloud Sync menu opens dedicated dialog with Analyze and Sync operations, real-time configuration display, and Configure button for easy settings access
-  - **Database Integration**: Added `fitsFileCloudURL` field to track cloud storage locations for all FITS files with automatic migration support
+  - **Database Integration**: Added `fitsFileCloudURL` field to track cloud storage locations for all FITS files with automatic migration support (Migration 006)
   - **Cloud File Analysis**: Analyze function downloads complete cloud bucket file listing, compares with local database, and updates cloud URLs for matching files
-  - **Backup Only Sync**: Implemented complete backup sync profile that uploads local files missing from cloud while preserving directory structure and updating database with cloud URLs
+  - **Backup Only Sync Profile**: Complete one-way backup sync that uploads local files missing from cloud while preserving directory structure and updating database with cloud URLs
+  - **Complete Sync Profile**: Revolutionary bidirectional synchronization that downloads missing files from cloud AND uploads files without cloud URLs
+    - Phase 1: Downloads files that exist in cloud but are missing locally
+    - Phase 2: Uploads local files that don't have cloud URLs (not yet backed up)
+    - Automatic FITS file registration for downloaded files
+    - Comprehensive progress tracking with cancellation support
   - **Smart Upload Logic**: Only uploads files that don't exist in cloud, avoiding duplicates and unnecessary transfers
+  - **Images View Integration**: Added Local/Cloud status icon columns showing file storage locations with system-standard drive icons and informative tooltips
+  - **Self-Contained Architecture**: Cloud sync dialog contains all necessary helper functions, eliminating dependencies on external modules
   - **Comprehensive Error Handling**: User-friendly error messages for bucket not found, access denied, authentication failures, and configuration issues
   - **Progress Tracking**: Real-time progress dialogs with file-by-file updates, cancellation support, and detailed completion statistics
   - **Bucket Validation**: Pre-operation validation ensures bucket exists and is accessible before starting sync operations
+
+- **Command-Line Cloud Sync**: Complete automation support for unattended cloud operations
+  - **CloudSync.py**: Comprehensive command-line utility in `commands/` folder supporting all sync profiles
+  - **Profile Override**: Command-line flags to override configured sync profile (`-p backup` or `-p complete`)
+  - **Analysis Mode**: `--analyze` flag for cloud storage analysis without performing sync operations
+  - **Auto-Confirm**: `--yes` flag for unattended operation, perfect for automated scheduling
+  - **Automation Scripts**: Ready-to-use cron and Task Scheduler scripts for Windows (`cron_cloudsync.bat`) and Linux/macOS (`cron_cloudsync.sh`)
+  - **Timestamped Logging**: Automated logging to `logs/cloudsync_YYYYMMDD_HHMMSS.log` files
+  - **Configuration Validation**: Pre-flight validation of bucket access and authentication
+  - **Comprehensive Documentation**: Complete setup and scheduling guide in `commands/README.md`
+- **Auto-Calibration System**: Comprehensive automatic calibration framework for traditional telescopes
+  - **Master Frame Creation**: Enhanced master calibration frame creation with Siril CLI integration, intelligent session grouping, and astronomy-standard FITS headers
+  - **Calibration Session Analysis**: Automated detection of calibration opportunities with session matching by telescope, instrument, binning, temperature (±5°C), and filter criteria
+  - **Master File Storage Structure**: Organized `/Masters` directory with standardized naming conventions and comprehensive metadata tracking
+  - **Configuration Interface**: Complete auto-calibration settings in Configuration dialog including enable/disable toggle, minimum files per master (default: 3), auto-creation triggers (manual/on import/on session creation), master retention policies, and progress tracking options
+  - **Database Integration**: Enhanced schema with 7 new calibration tracking fields via Migration 007: `fitsFileCalibrationStatus`, `fitsFileCalibrationDate`, master frame references, original file tracking, and soft-delete capabilities for cloud cleanup integration
+  - **Enhanced FITS Headers**: Comprehensive master frame headers with `IMAGETYP` (MasterBias/MasterDark/MasterFlat), source file metadata copying, processing history, quality metrics placeholders, and astronomy workflow compatibility
+  - **Intelligent Detection Logic**: Quality assessment scoring system for master creation prioritization based on file count, session consistency, and temporal distribution
+  - **Cloud Integration**: Automatic cleanup of calibration files and uncalibrated light frames after cloud backup with `fitsFileSoftDelete` tracking and Auto-cleanup Backed Files setting
+  - **Progress Tracking Integration**: Comprehensive progress callback system with 5-phase workflow tracking (analysis, master creation, opportunity detection, light calibration, finalization), real-time progress dialogs with cancellation support, and descriptive status messages integrated with existing progress dialog architecture
+  - **UI Integration**: Auto-calibration workflow accessible through Sessions widget with dedicated "Auto-Calibration" button, comprehensive progress tracking, detailed results reporting, and configuration validation
+  - **Master Validation and Cleanup**: Comprehensive master file maintenance system including validateMasterFiles() for integrity checking, repairMasterFileDatabase() for broken reference cleanup, cleanupMasterFileStorage() with quarantine system, and runMasterMaintenanceWorkflow() orchestrator with 3-phase validation, repair, and cleanup operations
+  - **Master Maintenance UI**: Dedicated "Master Maintenance" button in Sessions widget with options dialog for cleanup preferences, detailed progress tracking, comprehensive results reporting with validation/repair/cleanup statistics, and automatic session refresh after fixes
+  - **Quality Assessment System**: Complete frame quality evaluation framework with scipy-based image analysis
+    - **Frame Type Detection**: Automatic detection of light, bias, dark, and flat frames from FITS headers and image statistics
+    - **FWHM Analysis**: Full Width Half Maximum calculation for light frames using stellar source detection, profile analysis, and seeing quality assessment (Excellent/Good/Fair/Poor/Very Poor categories)
+    - **Uniformity Analysis**: Spatial uniformity evaluation for calibration frames including coefficient of variation, quadrant analysis, vignetting detection, and center-to-corner brightness ratios
+    - **Noise Metrics**: Advanced noise characterization with signal-to-noise ratios, read noise estimation, hot pixel detection, and noise uniformity across image regions
+    - **Acquisition Quality**: FITS header-based quality assessment including temperature stability, exposure time validation, binning optimization, and gain setting evaluation
+    - **Overall Scoring**: Comprehensive quality scoring (0-100) with frame-type-specific weighting, quality categories, and intelligent recommendations for improvement
+    - **Batch Processing**: Multi-file quality assessment with progress tracking and comprehensive quality reports for session-level analysis
+    - **Scientific Integration**: Scipy-based algorithms with fallback support for environments without scipy, ensuring robust operation across different installations
+  - **Command-Line Interface**: Complete CLI implementation for batch processing and automation
+    - **AutoCalibration.py**: Comprehensive command-line tool in commands/ folder with full argument parsing, operation modes (analyze/masters/calibrate/quality/all), session filtering, force options, dry-run support, and detailed progress reporting
+    - **Operation Modes**: Flexible workflow control with analyze (opportunity detection), masters (frame creation), calibrate (light processing), quality (assessment with reports), and all (complete workflow) operations
+    - **Batch Processing**: Automated processing capabilities with configuration validation, database connectivity checks, progress callbacks, and comprehensive error handling
+    - **Scheduling Integration**: Complete automation support with Windows batch scripts (cron_autocalibration.bat) and Linux/macOS shell scripts (cron_autocalibration.sh) for Task Scheduler and cron integration
+    - **Advanced Options**: Dry-run mode for preview, session-specific processing, minimum file overrides, quality report generation, log file output, and verbose logging with timestamped entries
+    - **Configuration Management**: Automatic configuration loading from astrofiler.ini, validation of auto-calibration settings, Siril path verification, and database connectivity confirmation
+    - **Error Handling**: Robust error management with graceful fallbacks, detailed error reporting, exit code management, and optional error flag creation for monitoring systems
+    - **Documentation**: Comprehensive help system, usage examples, scheduling setup guides, and integration with existing AstroFiler CLI architecture following established patterns
+  - **Light Frame Calibration**: Complete implementation of automatic light frame calibration system
+    - **Core Functions**: calibrate_light_frame() for single frame processing with bias/dark/flat corrections, exposure time scaling, and comprehensive error handling
+    - **Session Processing**: calibrate_session_lights() for batch processing of all light frames in sessions with progress tracking, skip logic for existing calibrations, and detailed result reporting  
+    - **Master Frame Integration**: get_session_master_frames() for automatic master frame discovery using session auto-calibration field relationships and file system validation
+    - **Calibration Pipeline**: Professional-grade calibration workflow with proper correction order (bias → dark → flat), exposure time scaling for darks, flat field normalization, and negative value clipping
+    - **Metadata Enhancement**: Automatic FITS header updates with calibration timestamps, master frame references, processing steps, noise levels, and quality metrics for full traceability
+    - **Database Integration**: Migration 008 adding session-level auto-calibration tracking fields (is_auto_calibration, master_*_created flags, auto_calibration_*_session_id references) for relationship management
+    - **CLI Integration**: Full calibrate operation support in AutoCalibration.py with dry-run mode, session filtering, progress reporting, and comprehensive error handling for automation workflows
+    - **Quality Assurance**: Built-in validation for master frame availability, light frame detection, output path management, and graceful handling of missing calibration frames
+    - **File Management**: Intelligent output naming with _calibrated suffix, directory creation, FITS format preservation, and data type optimization for reduced file sizes
+
+### Bug Fixes
+
+- **Critical Fix: registerFitsImage Function Call Errors**
+  - **Problem**: Fixed "fitsProcessing.registerFitsImage() missing 1 required positional argument: 'file'" errors occurring during cloud sync operations
+  - **Root Cause**: Multiple locations incorrectly calling registerFitsImage() with single file_path parameter instead of required (root, file, moveFiles) parameters
+  - **Files Fixed**: 
+    - `ui/cloud_sync_dialog.py`: Fixed FITS file registration during cloud downloads with proper path splitting
+    - `commands/CloudSync.py`: Fixed CLI cloud sync file registration with correct parameter handling
+    - `astrofiler_cloud.py`: Fixed incorrect import and function call, now properly instantiates fitsProcessing class
+  - **Solution**: All calls now properly split file paths into directory and filename components using os.path.dirname() and os.path.basename()
+  - **Impact**: Cloud sync operations now properly register downloaded FITS files in database without errors
+  - **Testing**: All fixed files pass syntax validation and cloud functionality imports work correctly
+
+- **Cloud Download Workflow Fix**
+  - **Problem**: Downloaded files were being placed directly into repository structure instead of incoming folder
+  - **Issue**: Cloud sync operations bypassed the proper file workflow causing organizational issues
+  - **Root Cause**: Download operations used repo_path directly instead of source_path for temporary file staging
+  - **Files Fixed**:
+    - `ui/cloud_sync_dialog.py`: Modified to download files to source folder first, then register with moveFiles=True
+    - `commands/CloudSync.py`: Updated CLI cloud sync to use proper incoming folder workflow with configuration loading
+  - **Solution**: 
+    - Downloads now go to configured source folder (D:/REPOSITORY.incoming/) 
+    - Registration uses moveFiles=True to properly organize files into repository structure (K:/00 REPOSITORY/)
+    - Maintains consistency with LoadRepo.py workflow and existing file organization patterns
+  - **Impact**: Cloud downloads now follow proper AstroFiler file management workflow preventing repository organization issues
 - **Google Cloud Documentation**: Added comprehensive setup guide for creating Google Cloud projects, service accounts, and authentication keys
 - **Google Cloud Sync**: Added complete Google Cloud repository synchronization feature accessible via Tools > Google Sync menu. Includes full Google Cloud Storage integration with actual upload/download functionality, configurable repository path (Google Cloud Storage bucket), authentication via service account key files with browse button, debug mode toggle, and bidirectional sync option. Uses configured Repository Path for synchronization. When "Sync to Local Disk" is enabled, downloads missing files from GCS to local repository and automatically registers FITS files in database. Requires google-cloud-storage library. Configuration settings are saved in astrofiler.ini and accessible through the Configuration tab under Google Cloud Sync section.
 - **Progress tracking for Google Sync**: Added progress tracking capability to Google Cloud Sync operations, providing real-time feedback during file uploads and downloads.
@@ -38,6 +122,21 @@
 
 ### Technical Improvements
 - **Startup Performance**: Removed unnecessary file path normalization migration for faster application startup
+- **Cloud Sync Architecture**: Complete code organization with self-contained dialog architecture
+  - Moved all cloud sync helper functions from `astrofiler_cloud.py` to `cloud_sync_dialog.py`
+  - Eliminated circular dependencies and improved maintainability
+  - Preserved existing `astrofiler_cloud.py` functionality for legacy operations
+  - Self-contained dialog with integrated GCS operations, authentication, and error handling
+- **Security Enhancements**: Comprehensive security audit and cleanup
+  - Removed service account credentials from git repository history using `git filter-branch`
+  - Cleaned entire commit history to prevent credential exposure
+  - Updated `.gitignore` to prevent future credential commits
+  - Restored local authentication while maintaining repository security
+- **Database Migrations**: Enhanced migration system with comprehensive field management
+  - Migration 006: Added `fitsFileCloudURL` field with proper NULL handling
+  - Migration 007: Added auto-calibration tracking fields including calibration status, dates, master references, original file paths, and soft-delete capabilities
+  - Automatic migration execution on startup for seamless upgrades
+  - Backward compatibility maintained for existing installations
 - **Duplicate File Detection & Reporting**: Enhanced file import system to track and report duplicate files separately from failed imports
   - `registerFitsImage()` now returns "DUPLICATE" for files already in database (detected by SHA-256 hash)
   - `registerFitsImages()` returns tuple (registered_files, duplicate_count) for comprehensive reporting
@@ -46,10 +145,26 @@
   - Backward compatibility maintained for existing code while providing enhanced information
 - **DWARF FITS Processing**: Complete implementation of `dwarfFixHeader()` with folder structure parsing and header population
 - **Smart Telescope Manager**: Enhanced with FTP support, folder validation, and telescope-specific configuration
+- **Auto-Calibration Architecture**: Comprehensive calibration system infrastructure
+  - Enhanced `_update_master_header()` function with astronomy-standard FITS headers and source file metadata copying
+  - Implemented `detectAutoCalibrationOpportunities()` with intelligent session grouping and quality assessment
+  - Added `designMasterFileStorageStructure()` with comprehensive documentation and storage patterns
+  - Session analysis functions: `checkCalibrationSessionsForMasters()`, `getSessionsNeedingMasters()`, `validateMasterFiles()`
+  - Configuration system integration with 5 new auto-calibration settings and UI controls
+  - Siril CLI path configuration with file browser and validation
 - **File Registration**: Downloaded files automatically registered in database with proper metadata and folder organization
 - **Progress Tracking**: Enhanced progress dialogs with granular updates and metadata extraction feedback
+- **Command-Line Integration**: Comprehensive command-line interface with full GUI feature parity
+  - Reuses GUI helper functions for consistency and maintainability
+  - Cross-platform automation support (Windows, Linux, macOS)
+  - Robust error handling and logging for unattended operation
 
 ### Bug Fixes
+- Fixed log file clearing functionality to avoid permission errors and undefined variable issues
+  - Changed from file deletion to file truncation to prevent "file in use" errors on Windows
+  - Fixed UnboundLocalError where message box styling was applied to undefined variable
+  - Removed duplicate exception handling blocks that caused syntax errors
+  - Improved error handling with properly created message box objects and consistent styling
 - Fixed missing accept_mappings method in MappingsDialog
 - Fixed Regenerate option in Images view to properly call registerFitsImages method
 - Fixed missing progress dialogs in Regenerate and Load New functions in Images view

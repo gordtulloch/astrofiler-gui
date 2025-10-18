@@ -96,6 +96,18 @@ class ConfigWidget(QWidget):
 
         tools_layout.addRow("FITS Viewer:", fits_viewer_layout)
 
+        # Siril CLI Path with file picker
+        siril_cli_layout = QHBoxLayout()
+        self.siril_cli_path = QLineEdit()
+        self.siril_cli_path.setPlaceholderText("Select Siril CLI executable (siril-cli.exe)...")
+        self.siril_cli_button = QPushButton("Browse...")
+        self.siril_cli_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.siril_cli_button.clicked.connect(self.browse_siril_cli)
+        siril_cli_layout.addWidget(self.siril_cli_path)
+        siril_cli_layout.addWidget(self.siril_cli_button)
+
+        tools_layout.addRow("Siril CLI:", siril_cli_layout)
+
         # Suppress Warnings settings group
         warnings_group = QGroupBox("Suppress Warnings")
         warnings_layout = QFormLayout(warnings_group)
@@ -161,10 +173,90 @@ class ConfigWidget(QWidget):
             "On Demand: Download files if required"
         )
 
+        # Auto-cleanup checkbox
+        self.auto_cleanup_backed_files = QCheckBox()
+        self.auto_cleanup_backed_files.setChecked(False)
+        self.auto_cleanup_backed_files.setToolTip(
+            "When enabled, calibration files and uncalibrated light files will be automatically deleted from local storage after they are successfully backed up to the cloud.\n\n"
+            "This helps save local disk space while ensuring files are safely stored in the cloud.\n\n"
+            "Only applies to:\n"
+            "• Calibration files (bias, dark, flat)\n"
+            "• Uncalibrated light frames\n\n"
+            "Master calibration frames and processed/stacked images are never deleted."
+        )
+
         cloud_sync_layout.addRow("Cloud Vendor:", self.cloud_vendor)
         cloud_sync_layout.addRow("Bucket URL:", self.bucket_url)
         cloud_sync_layout.addRow("Auth File:", auth_file_layout)
         cloud_sync_layout.addRow("Sync Profile:", self.sync_profile)
+        cloud_sync_layout.addRow("Auto-cleanup Backed Files:", self.auto_cleanup_backed_files)
+
+        # Auto-Calibration settings group
+        auto_cal_group = QGroupBox("Auto-Calibration")
+        auto_cal_layout = QFormLayout(auto_cal_group)
+
+        # Enable auto-calibration checkbox
+        self.enable_auto_calibration = QCheckBox()
+        self.enable_auto_calibration.setChecked(True)
+        self.enable_auto_calibration.setToolTip(
+            "When enabled, AstroFiler will automatically create master calibration frames "
+            "when sufficient calibration files are available.\n\n"
+            "Master frames are created from bias, dark, and flat calibration sessions "
+            "using Siril CLI for optimal quality and noise reduction."
+        )
+
+        # Minimum files per master
+        self.min_files_per_master = QSpinBox()
+        self.min_files_per_master.setMinimum(2)
+        self.min_files_per_master.setMaximum(100)
+        self.min_files_per_master.setValue(3)
+        self.min_files_per_master.setToolTip(
+            "Minimum number of calibration files required to create a master frame.\n\n"
+            "Higher numbers produce better quality masters but require more files.\n"
+            "Recommended: 3-10 files per master."
+        )
+
+        # Auto-create triggers
+        self.auto_create_triggers = QComboBox()
+        self.auto_create_triggers.addItem("Manual Only", "manual")
+        self.auto_create_triggers.addItem("On Import", "on_import")
+        self.auto_create_triggers.addItem("On Session Creation", "on_session_creation")
+        self.auto_create_triggers.addItem("Import + Session Creation", "on_import,on_session_creation")
+        self.auto_create_triggers.setCurrentIndex(3)  # Default to Import + Session Creation
+        self.auto_create_triggers.setToolTip(
+            "When to automatically trigger master creation:\n\n"
+            "• Manual Only: Masters created only when requested\n"
+            "• On Import: Create masters after importing new calibration files\n"
+            "• On Session Creation: Create masters after session linking\n"
+            "• Import + Session Creation: Both import and session triggers"
+        )
+
+        # Master retention days
+        self.master_retention_days = QSpinBox()
+        self.master_retention_days.setMinimum(0)
+        self.master_retention_days.setMaximum(3650)  # 10 years max
+        self.master_retention_days.setValue(365)
+        self.master_retention_days.setSpecialValueText("Keep Forever")
+        self.master_retention_days.setToolTip(
+            "How long to keep master calibration frames before automatic cleanup.\n\n"
+            "Set to 0 (Keep Forever) to never delete masters automatically.\n"
+            "Recommended: 365 days (1 year) for seasonal equipment changes."
+        )
+
+        # Auto-calibration progress
+        self.auto_calibration_progress = QCheckBox()
+        self.auto_calibration_progress.setChecked(True)
+        self.auto_calibration_progress.setToolTip(
+            "Show progress dialogs during automatic calibration operations.\n\n"
+            "When enabled, progress windows will display master creation status.\n"
+            "Disable for headless or automated processing environments."
+        )
+
+        auto_cal_layout.addRow("Enable Auto-Calibration:", self.enable_auto_calibration)
+        auto_cal_layout.addRow("Min Files per Master:", self.min_files_per_master)
+        auto_cal_layout.addRow("Auto-Create Triggers:", self.auto_create_triggers)
+        auto_cal_layout.addRow("Master Retention (days):", self.master_retention_days)
+        auto_cal_layout.addRow("Show Progress Dialogs:", self.auto_calibration_progress)
 
         # Action buttons
         button_layout = QHBoxLayout()
@@ -182,6 +274,7 @@ class ConfigWidget(QWidget):
         layout.addWidget(tools_group)
         layout.addWidget(warnings_group)
         layout.addWidget(cloud_sync_group)
+        layout.addWidget(auto_cal_group)
         layout.addStretch()
         layout.addLayout(button_layout)
 
@@ -221,11 +314,20 @@ class ConfigWidget(QWidget):
             config.set('DEFAULT', 'font_size', str(self.font_size.value()))
             config.set('DEFAULT', 'grid_size', str(self.grid_size.value()))
             config.set('DEFAULT', 'fits_viewer_path', self.fits_viewer_path.text().strip())
+            config.set('DEFAULT', 'siril_cli_path', self.siril_cli_path.text().strip())
             config.set('DEFAULT', 'suppress_delete_warnings', str(self.suppress_delete_warnings.isChecked()))
             config.set('DEFAULT', 'cloud_vendor', self.cloud_vendor.currentText())
             config.set('DEFAULT', 'bucket_url', self.bucket_url.text().strip())
             config.set('DEFAULT', 'auth_file_path', self.auth_file_path.text().strip())
             config.set('DEFAULT', 'sync_profile', self.sync_profile.currentData())
+            config.set('DEFAULT', 'auto_cleanup_backed_files', str(self.auto_cleanup_backed_files.isChecked()))
+            
+            # Auto-calibration settings
+            config.set('DEFAULT', 'enable_auto_calibration', str(self.enable_auto_calibration.isChecked()))
+            config.set('DEFAULT', 'min_files_per_master', str(self.min_files_per_master.value()))
+            config.set('DEFAULT', 'auto_create_triggers', self.auto_create_triggers.currentData())
+            config.set('DEFAULT', 'master_retention_days', str(self.master_retention_days.value()))
+            config.set('DEFAULT', 'auto_calibration_progress', str(self.auto_calibration_progress.isChecked()))
             
             # Write to the astrofiler.ini file
             with open('astrofiler.ini', 'w') as configfile:
@@ -278,6 +380,10 @@ class ConfigWidget(QWidget):
                 fits_viewer_path = config.get('DEFAULT', 'fits_viewer_path')
                 self.fits_viewer_path.setText(fits_viewer_path)
             
+            if config.has_option('DEFAULT', 'siril_cli_path'):
+                siril_cli_path = config.get('DEFAULT', 'siril_cli_path')
+                self.siril_cli_path.setText(siril_cli_path)
+            
             if config.has_option('DEFAULT', 'suppress_delete_warnings'):
                 suppress_value_str = config.get('DEFAULT', 'suppress_delete_warnings')
                 logger.debug(f"Raw suppress_delete_warnings value from INI: '{suppress_value_str}'")
@@ -320,6 +426,42 @@ class ConfigWidget(QWidget):
                     if self.sync_profile.itemData(i) == sync_profile:
                         self.sync_profile.setCurrentIndex(i)
                         break
+            
+            if config.has_option('DEFAULT', 'auto_cleanup_backed_files'):
+                auto_cleanup_str = config.get('DEFAULT', 'auto_cleanup_backed_files')
+                # Convert to boolean
+                if isinstance(auto_cleanup_str, str):
+                    auto_cleanup_value = auto_cleanup_str.lower() in ('true', '1', 'yes', 'on')
+                else:
+                    auto_cleanup_value = bool(auto_cleanup_str)
+                self.auto_cleanup_backed_files.setChecked(auto_cleanup_value)
+
+            # Load auto-calibration settings
+            if config.has_option('DEFAULT', 'enable_auto_calibration'):
+                enable_auto_cal_str = config.get('DEFAULT', 'enable_auto_calibration')
+                enable_auto_cal_value = enable_auto_cal_str.lower() in ('true', '1', 'yes', 'on')
+                self.enable_auto_calibration.setChecked(enable_auto_cal_value)
+
+            if config.has_option('DEFAULT', 'min_files_per_master'):
+                min_files = config.getint('DEFAULT', 'min_files_per_master', fallback=3)
+                self.min_files_per_master.setValue(min_files)
+
+            if config.has_option('DEFAULT', 'auto_create_triggers'):
+                triggers = config.get('DEFAULT', 'auto_create_triggers')
+                # Find and set the combo box index
+                for i in range(self.auto_create_triggers.count()):
+                    if self.auto_create_triggers.itemData(i) == triggers:
+                        self.auto_create_triggers.setCurrentIndex(i)
+                        break
+
+            if config.has_option('DEFAULT', 'master_retention_days'):
+                retention_days = config.getint('DEFAULT', 'master_retention_days', fallback=365)
+                self.master_retention_days.setValue(retention_days)
+
+            if config.has_option('DEFAULT', 'auto_calibration_progress'):
+                progress_str = config.get('DEFAULT', 'auto_calibration_progress')
+                progress_value = progress_str.lower() in ('true', '1', 'yes', 'on')
+                self.auto_calibration_progress.setChecked(progress_value)
                 
             logger.debug("Settings loaded from astrofiler.ini!")
             
@@ -338,11 +480,20 @@ class ConfigWidget(QWidget):
         self.font_size.setValue(10)
         self.grid_size.setValue(64)
         self.fits_viewer_path.setText("")
+        self.siril_cli_path.setText("")
         self.suppress_delete_warnings.setChecked(False)
         self.cloud_vendor.setCurrentIndex(0)
         self.bucket_url.setText("astrofiler-repository")
         self.auth_file_path.setText("")
         self.sync_profile.setCurrentIndex(0)  # Default to Complete Sync
+        self.auto_cleanup_backed_files.setChecked(False)
+        
+        # Auto-calibration defaults
+        self.enable_auto_calibration.setChecked(True)
+        self.min_files_per_master.setValue(3)
+        self.auto_create_triggers.setCurrentIndex(3)  # Import + Session Creation
+        self.master_retention_days.setValue(365)
+        self.auto_calibration_progress.setChecked(True)
     
     def browse_source_path(self):
         """Open directory dialog for source path"""
@@ -374,6 +525,17 @@ class ConfigWidget(QWidget):
         )
         if file_path:
             self.fits_viewer_path.setText(file_path)
+
+    def browse_siril_cli(self):
+        """Open file dialog for Siril CLI executable"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Siril CLI Executable",
+            self.siril_cli_path.text() or os.path.expanduser("~"),
+            "Executable Files (*.exe);;All Files (*)" if os.name == 'nt' else "All Files (*)"
+        )
+        if file_path:
+            self.siril_cli_path.setText(file_path)
 
     def browse_auth_file(self):
         """Open file dialog for cloud authentication file"""

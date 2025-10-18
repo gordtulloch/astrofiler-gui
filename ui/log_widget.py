@@ -62,30 +62,28 @@ class LogWidget(QWidget):
             logger.error(f"Error loading log file: {e}")
     
     def clear_log(self):
-        """Clear the log file by deleting it and creating an empty file"""
+        """Clear the log file by truncating it instead of deleting (to avoid permission issues)"""
         try:
-            if os.path.exists(self.log_file_path):
-                os.remove(self.log_file_path)
-            
-            # Create an empty log file
+            # Instead of deleting, truncate the file to clear it
+            # This avoids permission issues when the file is in use by the logging system
             with open(self.log_file_path, 'w', encoding='utf-8') as file:
                 pass
             
             # Clear the display
             self.log_text.clear()
             
-            # Log this action (this will recreate the log file with the first entry)
+            # Log this action (this will add the first entry to the cleared log)
             logger.info("Log file cleared by user")
             
             # Reload to show the new log entry
             self.load_log_content()
             
-            QMessageBox.information(self, "Success", "Log file cleared successfully!")
-            
-        except Exception as e:
-            logger.error(f"Error clearing log file: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to clear log file: {str(e)}")
-            msg_box.setStyleSheet("""
+            # Create and show success message
+            success_msg = QMessageBox(self)
+            success_msg.setIcon(QMessageBox.Information)
+            success_msg.setWindowTitle("Success")
+            success_msg.setText("Log file cleared successfully!")
+            success_msg.setStyleSheet("""
                 QMessageBox {
                     background-color: #2d2d2d;
                     border: 2px solid #555555;
@@ -105,16 +103,16 @@ class LogWidget(QWidget):
                     border-radius: 3px;
                 }
             """)
-            msg_box.exec()
+            success_msg.exec()
             
         except Exception as e:
             logger.error(f"Error clearing log file: {e}")
-            # Apply same styling to error dialog
-            msg_box = QMessageBox(self)
-            msg_box.setIcon(QMessageBox.Warning)
-            msg_box.setWindowTitle("Error")
-            msg_box.setText(f"Failed to clear log file: {str(e)}")
-            msg_box.setStyleSheet("""
+            # Create and show error message
+            error_msg = QMessageBox(self)
+            error_msg.setIcon(QMessageBox.Warning)
+            error_msg.setWindowTitle("Error")
+            error_msg.setText(f"Failed to clear log file: {str(e)}")
+            error_msg.setStyleSheet("""
                 QMessageBox {
                     background-color: #2d2d2d;
                     border: 2px solid #555555;
@@ -134,4 +132,4 @@ class LogWidget(QWidget):
                     border-radius: 3px;
                 }
             """)
-            msg_box.exec()
+            error_msg.exec()

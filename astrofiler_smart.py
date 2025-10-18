@@ -11,6 +11,11 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import ftplib
+import numpy as np
+from datetime import datetime
+from astropy.io import fits
+from astrofiler_db import fitsSession, fitsFile
+from astrofiler_file import get_master_calibration_path
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -818,3 +823,304 @@ class SmartTelescopeManager:
 
 # Global instance
 smart_telescope_manager = SmartTelescopeManager()
+
+
+def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_master=None, 
+                         output_path=None, progress_callback=None):
+    """
+    Calibrate a single light frame using master calibration frames.
+    
+    Args:
+        light_path (str): Path to the light frame FITS file
+        dark_master (str): Path to master dark frame (optional)
+        flat_master (str): Path to master flat frame (optional)
+        bias_master (str): Path to master bias frame (optional)
+        output_path (str): Path for calibrated output file (optional, auto-generated if not provided)
+        progress_callback (callable): Optional callback for progress updates
+        
+    Returns:
+        dict: Calibration result with output path and metadata
+    """
+    try:
+        if progress_callback:
+            progress_callback(f"Starting calibration of {os.path.basename(light_path)}")
+            
+        # Load light frame
+        with fits.open(light_path) as hdul:
+            light_data = hdul[0].data.astype(np.float32)
+            light_header = hdul[0].header.copy()
+            
+        if light_data is None or light_data.size == 0:
+            return {"error": "No image data found in light frame"}
+            
+        calibrated_data = light_data.copy()
+        calibration_steps = []
+        
+        # Apply bias correction first
+        if bias_master and os.path.exists(bias_master):
+            if progress_callback:
+                progress_callback("Applying bias correction...")
+            try:
+                with fits.open(bias_master) as hdul:
+                    bias_data = hdul[0].data.astype(np.float32)
+                calibrated_data -= bias_data
+                calibration_steps.append(f"BIAS: {os.path.basename(bias_master)}")
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(f"Warning: Failed to apply bias correction: {e}")
+        
+        # Apply dark correction
+        if dark_master and os.path.exists(dark_master):
+            if progress_callback:
+                progress_callback("Applying dark correction...")
+            try:
+                with fits.open(dark_master) as hdul:
+                    dark_data = hdul[0].data.astype(np.float32)
+                    dark_header = hdul[0].header
+                    
+                # Scale dark frame by exposure time ratio if needed
+                light_exptime = light_header.get('EXPTIME', 1.0)
+                dark_exptime = dark_header.get('EXPTIME', 1.0)
+                
+                if dark_exptime > 0 and light_exptime != dark_exptime:
+                    scale_factor = light_exptime / dark_exptime
+                    dark_data *= scale_factor
+                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} (scaled {scale_factor:.3f})")
+                else:
+                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
+                
+                calibrated_data -= dark_data
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(f"Warning: Failed to apply dark correction: {e}")
+        
+        # Apply flat correction
+        if flat_master and os.path.exists(flat_master):
+            if progress_callback:
+                progress_callback("Applying flat correction...")
+            try:
+                with fits.open(flat_master) as hdul:
+                    flat_data = hdul[0].data.astype(np.float32)
+                    
+                # Normalize flat field (avoid division by zero)
+                flat_mean = np.mean(flat_data[flat_data > 0])
+                flat_normalized = flat_data / flat_mean
+                flat_normalized[flat_normalized <= 0] = 1.0  # Avoid division by zero
+                
+                calibrated_data /= flat_normalized
+                calibration_steps.append(f"FLAT: {os.path.basename(flat_master)}")
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(f"Warning: Failed to apply flat correction: {e}")
+        
+        # Generate output path if not provided
+        if not output_path:
+            base_dir = os.path.dirname(light_path)
+            base_name = os.path.splitext(os.path.basename(light_path))[0]
+            output_path = os.path.join(base_dir, f"{base_name}_calibrated.fits")
+            
+        # Update FITS header with calibration information
+        light_header['CALIBRAT'] = (True, 'Image has been calibrated')
+        light_header['CALDATE'] = (datetime.now().isoformat(), 'Calibration date')
+        
+        if calibration_steps:
+            light_header['CALSTEPS'] = (';'.join(calibration_steps), 'Calibration steps applied')
+        
+        # Add master frame references
+        if bias_master:
+            light_header['BIASMAST'] = (os.path.basename(bias_master), 'Master bias frame used')
+        if dark_master:
+            light_header['DARKMAST'] = (os.path.basename(dark_master), 'Master dark frame used')
+        if flat_master:
+            light_header['FLATMAST'] = (os.path.basename(flat_master), 'Master flat frame used')
+            
+        # Add calibration quality info
+        light_header['CALNOISE'] = (float(np.std(calibrated_data)), 'Noise level after calibration')
+        light_header['CALMEAN'] = (float(np.mean(calibrated_data)), 'Mean level after calibration')
+        
+        if progress_callback:
+            progress_callback("Saving calibrated frame...")
+            
+        # Save calibrated frame
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Ensure data is in appropriate range and type
+        calibrated_data = np.clip(calibrated_data, 0, None)  # Remove negative values
+        
+        hdu = fits.PrimaryHDU(data=calibrated_data.astype(np.float32), header=light_header)
+        hdu.writeto(output_path, overwrite=True)
+        
+        if progress_callback:
+            progress_callback(f"Calibration complete: {os.path.basename(output_path)}")
+            
+        return {
+            "success": True,
+            "output_path": output_path,
+            "calibration_steps": calibration_steps,
+            "noise_level": float(np.std(calibrated_data)),
+            "mean_level": float(np.mean(calibrated_data)),
+            "dynamic_range": float(np.max(calibrated_data) - np.min(calibrated_data))
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to calibrate light frame: {str(e)}"}
+
+
+def calibrate_session_lights(session_id, progress_callback=None, force_recalibrate=False):
+    """
+    Calibrate all light frames in a session using available master frames.
+    
+    Args:
+        session_id (int): Database ID of the session to calibrate
+        progress_callback (callable): Optional callback for progress updates
+        force_recalibrate (bool): If True, recalibrate even if already calibrated
+        
+    Returns:
+        dict: Calibration results with statistics
+    """
+    try:
+        if progress_callback:
+            progress_callback(f"Starting calibration for session {session_id}")
+            
+        # Get session and check if it exists
+        session = fitsSession.get_by_id(session_id)
+        if not session:
+            return {"error": f"Session {session_id} not found"}
+            
+        # Check for master frames
+        master_frames = get_session_master_frames(session_id)
+        if not any(master_frames.values()):
+            return {"error": "No master calibration frames available for this session"}
+            
+        # Get light frames from session
+        light_files = fitsFile.select().where(
+            (fitsFile.fitsSession == session) & 
+            (fitsFile.imageType.in_(['LIGHT', 'Light', 'light', 'Science', 'science', '']))
+        )
+        
+        if not light_files.exists():
+            return {"error": "No light frames found in session"}
+            
+        total_lights = light_files.count()
+        calibrated_count = 0
+        skipped_count = 0
+        error_count = 0
+        results = []
+        
+        for i, light_file in enumerate(light_files, 1):
+            if progress_callback:
+                progress_callback(f"Processing light frame {i}/{total_lights}: {light_file.fileName}")
+                
+            # Check if already calibrated (unless forcing recalibration)
+            if not force_recalibrate:
+                # Look for existing calibrated version
+                calibrated_path = os.path.join(
+                    os.path.dirname(light_file.filePath),
+                    f"{os.path.splitext(light_file.fileName)[0]}_calibrated.fits"
+                )
+                if os.path.exists(calibrated_path):
+                    if progress_callback:
+                        progress_callback(f"Skipping already calibrated: {light_file.fileName}")
+                    skipped_count += 1
+                    continue
+                    
+            # Calibrate the light frame
+            result = calibrate_light_frame(
+                light_path=light_file.filePath,
+                dark_master=master_frames['dark'],
+                flat_master=master_frames['flat'],
+                bias_master=master_frames['bias'],
+                progress_callback=progress_callback
+            )
+            
+            if result.get('success'):
+                calibrated_count += 1
+                results.append({
+                    "light_file": light_file.fileName,
+                    "output_file": os.path.basename(result['output_path']),
+                    "calibration_steps": result['calibration_steps'],
+                    "noise_level": result['noise_level']
+                })
+            else:
+                error_count += 1
+                if progress_callback:
+                    progress_callback(f"Error calibrating {light_file.fileName}: {result.get('error', 'Unknown error')}")
+                    
+        if progress_callback:
+            progress_callback(f"Calibration complete: {calibrated_count} processed, {skipped_count} skipped, {error_count} errors")
+            
+        return {
+            "success": True,
+            "session_id": session_id,
+            "total_lights": total_lights,
+            "calibrated_count": calibrated_count,
+            "skipped_count": skipped_count,
+            "error_count": error_count,
+            "results": results,
+            "master_frames_used": {k: os.path.basename(v) if v else None for k, v in master_frames.items()}
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to calibrate session lights: {str(e)}"}
+
+
+def get_session_master_frames(session_id):
+    """
+    Get the paths to master calibration frames for a session.
+    
+    Args:
+        session_id (int): Database ID of the session
+        
+    Returns:
+        dict: Paths to master frames (dark, flat, bias) or None if not available
+    """
+    try:
+        session = fitsSession.get_by_id(session_id)
+        if not session:
+            return {"dark": None, "flat": None, "bias": None}
+            
+        # Get the auto-calibration session IDs
+        dark_session_id = session.auto_calibration_dark_session_id
+        flat_session_id = session.auto_calibration_flat_session_id
+        bias_session_id = session.auto_calibration_bias_session_id
+        
+        masters = {"dark": None, "flat": None, "bias": None}
+        
+        # Look for master dark
+        if dark_session_id and session.master_dark_created:
+            dark_session = fitsSession.get_by_id(dark_session_id)
+            if dark_session:
+                master_path = os.path.join(
+                    get_master_calibration_path(),
+                    f"master_dark_session_{dark_session_id}.fits"
+                )
+                if os.path.exists(master_path):
+                    masters["dark"] = master_path
+                    
+        # Look for master flat
+        if flat_session_id and session.master_flat_created:
+            flat_session = fitsSession.get_by_id(flat_session_id)
+            if flat_session:
+                master_path = os.path.join(
+                    get_master_calibration_path(),
+                    f"master_flat_session_{flat_session_id}.fits"
+                )
+                if os.path.exists(master_path):
+                    masters["flat"] = master_path
+                    
+        # Look for master bias
+        if bias_session_id and session.master_bias_created:
+            bias_session = fitsSession.get_by_id(bias_session_id)
+            if bias_session:
+                master_path = os.path.join(
+                    get_master_calibration_path(),
+                    f"master_bias_session_{bias_session_id}.fits"
+                )
+                if os.path.exists(master_path):
+                    masters["bias"] = master_path
+                    
+        return masters
+        
+    except Exception as e:
+        logging.error(f"Failed to get master frames for session {session_id}: {e}")
+        return {"dark": None, "flat": None, "bias": None}

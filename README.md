@@ -10,7 +10,7 @@
 
 AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki. Astrofiler is a tool to manage FITS files (currently, XISF files and other non-FITS images are coming in the next version!) using FITS header data. FITS Headers are embedded with the image when created as metadata. Astrofiler reads this information to rename the file and file it appropriately in the Repository.
 
-**Current Status**: Release V1.1.2
+**Current Status**: Development V1.2.0 (Cloud Sync Integration)
 
 Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)
 
@@ -34,15 +34,22 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 
 ### ☁️ **Cloud Sync Integration**
 - **Google Cloud Storage**: Complete integration with Google Cloud Storage for backup and synchronization
-- **Multiple Sync Profiles**: Choose from Complete, Backup Only, or On Demand sync strategies
+- **Multiple Sync Profiles**: 
+  - **Complete Sync**: Bidirectional sync - downloads missing files from cloud AND uploads files without cloud URLs
+  - **Backup Only**: One-way backup - uploads local files to cloud for safe storage
+  - **On Demand**: Manual file-by-file synchronization (coming soon)
 - **Smart Upload Logic**: Only uploads files that don't exist in cloud to avoid duplicates and reduce transfer time
-- **Database Integration**: Tracks cloud URLs for all files, enabling future remote access features
+- **Database Integration**: Tracks cloud URLs for all files with `fitsFileCloudURL` field enabling future remote access features
+- **Images View Integration**: Local/Cloud status icons show file storage locations at a glance
 - **Real-time Progress**: Live progress tracking with file-by-file updates and cancellation support
+- **Command-Line Automation**: Complete command-line interface (`CloudSync.py`) with automation scripts for cron/Task Scheduler
+- **Analysis Mode**: Analyze cloud storage contents and compare with local database without performing sync
 - **Comprehensive Error Handling**: User-friendly error messages for authentication, bucket access, and network issues
 - **Directory Structure Preservation**: Maintains your local repository folder structure in cloud storage
 - **Bucket Validation**: Pre-operation checks ensure bucket exists and is accessible
 - **Service Account Authentication**: Secure authentication using Google Cloud service account keys
 - **Configuration Management**: Easy setup through dedicated Cloud Sync configuration interface
+- **Self-Contained Architecture**: All cloud operations integrated into dialog for improved maintainability
 
 ### 🗂️ **File Management**
 - **Repository Scanning**: Recursively scan directories for FITS files, rename to a descriptive name, and move into a centralized repository
@@ -50,7 +57,11 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **File Organization**: Automatically organize files based on metadata
 - **Duplicate Detection**: SHA-256 hash-based duplicate file identification
 - **Duplicate Management**: Safely remove duplicate files while preserving one copy
-- **Command Line Utilities**: Critical functions exposed as command line utilities to facilitate use of scripts and crontab
+- **Command Line Utilities**: Comprehensive command-line interface for automation and scripting
+  - **CloudSync.py**: Complete cloud synchronization with all GUI features available from command line
+  - **LoadRepo.py**: Batch file processing and repository loading
+  - **Automation Scripts**: Ready-to-use cron and Task Scheduler scripts for Windows/Linux/macOS
+  - **Unattended Operation**: Auto-confirm flags for scheduled and automated operations
 
 ### 📊 **Metadata & Analysis**
 - **Stats Page**: Provides basic statistics on the files contained in the Repository
@@ -102,6 +113,8 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **peewee**: Lightweight ORM for database operations
 - **peewee-migrate**: Database migration system
 - **pysmb**: SMB/CIFS protocol support for telescope communication
+- **google-cloud-storage**: Google Cloud Storage integration for cloud sync features
+- **google-auth**: Authentication library for Google Cloud services
 - **Pillow**: Image processing for thumbnails and previews
 
 ### Optional Dependencies
