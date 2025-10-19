@@ -68,7 +68,7 @@ class AstroFilerGUI(QMainWindow):
     def init_ui(self):
         """Initialize the user interface"""
         # Set window properties
-        self.setWindowTitle("AstroFiler - Astronomy File Management Tool")
+        self.setWindowTitle("AstroFiler - Astronomy File Management Tool v" + VERSION)
         self.resize(1200, 800)
         
         # Center the window on the screen
