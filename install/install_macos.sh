@@ -253,7 +253,7 @@ if [ -d ".git" ]; then
         UPDATE_COUNT=\$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
         if [ "\$UPDATE_COUNT" -gt 0 ] 2>/dev/null; then
             echo "Updates available! Pulling latest changes..."
-            if git pull origin main; then
+            if git fetch origin && git reset --hard origin/main; then
                 echo "Successfully updated to latest version."
             else
                 echo "Warning: Failed to update from GitHub. Continuing with current version."

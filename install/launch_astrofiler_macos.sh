@@ -18,7 +18,7 @@ if [ -d ".git" ]; then
         if [ "$UPDATE_COUNT" -gt 0 ] 2>/dev/null; then
             echo "Updates available! Pulling latest changes..."
             echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler_macos.sh - INFO - Updates available! $UPDATE_COUNT commits behind. Pulling latest changes..." >> astrofiler.log
-            if git pull origin main; then
+            if git fetch origin && git reset --hard origin/main; then
                 echo "Successfully updated to latest version."
                 echo "$(date '+%Y-%m-%d %H:%M:%S') - launch_astrofiler_macos.sh - INFO - Successfully updated to latest version from GitHub" >> astrofiler.log
                 # Run database migrations after successful update
