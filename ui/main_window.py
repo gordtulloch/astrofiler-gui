@@ -202,7 +202,7 @@ class AstroFilerGUI(QMainWindow):
         self.status_bar.showMessage(f"Current View: {view_names[index]}")
         
         # Update window title to include current view
-        self.setWindowTitle(f"AstroFiler - {view_names[index]}")
+        self.setWindowTitle(f"AstroFiler - {view_names[index]} {VERSION}")
 
     def refresh_current_view(self):
         """Refresh the currently active view"""
