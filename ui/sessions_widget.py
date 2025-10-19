@@ -37,7 +37,7 @@ class SessionsWidget(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager", "Filter", "Images"])
+        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager", "Filter", "Images", "Resources"])
         
         # Enable multi-selection
         self.sessions_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -49,6 +49,7 @@ class SessionsWidget(QWidget):
         self.sessions_tree.setColumnWidth(3, 150)  # Imager
         self.sessions_tree.setColumnWidth(4, 100)  # Filter
         self.sessions_tree.setColumnWidth(5, 80)   # Images
+        self.sessions_tree.setColumnWidth(6, 140)  # Resources
         
         # Enable context menu
         self.sessions_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -571,11 +572,20 @@ class SessionsWidget(QWidget):
             for object_name in sorted(sessions_by_object.keys()):
                 object_sessions = sessions_by_object[object_name]
                 
-                # Calculate total image count for this object across all sessions
+                # Calculate total image count and calibration statistics for this object
                 total_images = 0
+                calibrated_sessions = 0
+                total_light_sessions = 0
+                
                 for session in object_sessions:
                     session_image_count = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId).count()
                     total_images += session_image_count
+                    
+                    if session.fitsSessionObjectName not in ['Bias', 'Dark', 'Flat']:
+                        total_light_sessions += 1
+                        calibration_info = self._build_resources_status(session)
+                        if calibration_info["percentage"] > 0:
+                            calibrated_sessions += 1
                 
                 # Create parent item for each object
                 parent_item = QTreeWidgetItem()
@@ -585,6 +595,15 @@ class SessionsWidget(QWidget):
                 parent_item.setText(3, "")  # No imager for parent
                 parent_item.setText(4, "")  # No filter for parent
                 parent_item.setText(5, str(total_images))  # Total images for this object
+                
+                # Show resource summary for parent
+                if total_light_sessions > 0:
+                    cal_percentage = (calibrated_sessions / total_light_sessions) * 100
+                    cal_summary = f"{calibrated_sessions}/{total_light_sessions} ({cal_percentage:.0f}%)"
+                    parent_item.setText(6, cal_summary)
+                    parent_item.setToolTip(6, f"Resource Coverage: {calibrated_sessions} of {total_light_sessions} sessions have calibration resources")
+                else:
+                    parent_item.setText(6, "")
                 
                 # Style parent item differently
                 font = parent_item.font(0)
@@ -601,6 +620,9 @@ class SessionsWidget(QWidget):
                     # Get the image count for this specific session
                     session_image_count = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId).count()
                     
+                    # Build resources status
+                    calibration_info = self._build_resources_status(session)
+                    
                     child_item = QTreeWidgetItem()
                     child_item.setText(0, "")  # Empty object name for child
                     child_item.setText(1, str(session.fitsSessionDate) if session.fitsSessionDate else "Unknown Date")
@@ -608,6 +630,14 @@ class SessionsWidget(QWidget):
                     child_item.setText(3, session.fitsSessionImager or "Unknown")
                     child_item.setText(4, session.fitsSessionFilter or "Unknown")
                     child_item.setText(5, str(session_image_count))  # Image count for this session
+                    
+                    # Set resources status as simple text only
+                    if calibration_info["text"]:
+                        child_item.setText(6, calibration_info["text"])
+                        child_item.setToolTip(6, calibration_info["tooltip"])
+                    else:
+                        child_item.setText(6, "")
+                    
                     parent_item.addChild(child_item)
                 
                 # Only add parent item if it has children
@@ -1110,4 +1140,110 @@ class SessionsWidget(QWidget):
             
         except Exception as e:
             logger.error(f"Unexpected error during session regeneration: {e}")
-            QMessageBox.critical(self, "Error", f"Unexpected error during session regeneration: {e}")
+
+    def _build_resources_status(self, session):
+        """Build resources status showing frame counts or Master availability for light sessions."""
+        if session.fitsSessionObjectName in ['Bias', 'Dark', 'Flat']:
+            # This is a calibration session, don't show resources status
+            return {"text": "", "tooltip": "", "percentage": 0}
+        
+        # Check for master frames first
+        has_bias_master = hasattr(session, 'fitsBiasMaster') and session.fitsBiasMaster
+        has_dark_master = hasattr(session, 'fitsDarkMaster') and session.fitsDarkMaster
+        has_flat_master = hasattr(session, 'fitsFlatMaster') and session.fitsFlatMaster
+        
+        # Check calibration sessions availability
+        has_bias_session = bool(session.fitsBiasSession)
+        has_dark_session = bool(session.fitsDarkSession)
+        has_flat_session = bool(session.fitsFlatSession)
+        
+        # Build status parts
+        status_parts = []
+        tooltip_parts = []
+        
+        # Dark
+        if has_dark_master:
+            status_parts.append("Dark: Master")
+            tooltip_parts.append("✓ Dark master frame available")
+        elif has_dark_session:
+            # Count dark frames in the session
+            try:
+                dark_session = FitsSessionModel.get_by_id(session.fitsDarkSession)
+                dark_count = FitsFileModel.select().where(
+                    FitsFileModel.fitsFileSession == dark_session.fitsSessionId
+                ).count()
+                status_parts.append(f"Dark: {dark_count}")
+                tooltip_parts.append(f"✓ {dark_count} dark frames available")
+            except:
+                status_parts.append("Dark: Available")
+                tooltip_parts.append("✓ Dark frames available")
+        else:
+            status_parts.append("Dark: None")
+            tooltip_parts.append("✗ No dark frames available")
+            
+        # Flat
+        if has_flat_master:
+            status_parts.append("Flat: Master")
+            tooltip_parts.append("✓ Flat master frame available")
+        elif has_flat_session:
+            # Count flat frames in the session
+            try:
+                flat_session = FitsSessionModel.get_by_id(session.fitsFlatSession)
+                flat_count = FitsFileModel.select().where(
+                    FitsFileModel.fitsFileSession == flat_session.fitsSessionId
+                ).count()
+                status_parts.append(f"Flat: {flat_count}")
+                tooltip_parts.append(f"✓ {flat_count} flat frames available")
+            except:
+                status_parts.append("Flat: Available")
+                tooltip_parts.append("✓ Flat frames available")
+        else:
+            status_parts.append("Flat: None")
+            tooltip_parts.append("✗ No flat frames available")
+            
+        # Bias
+        if has_bias_master:
+            status_parts.append("Bias: Master")
+            tooltip_parts.append("✓ Bias master frame available")
+        elif has_bias_session:
+            # Count bias frames in the session
+            try:
+                bias_session = FitsSessionModel.get_by_id(session.fitsBiasSession)
+                bias_count = FitsFileModel.select().where(
+                    FitsFileModel.fitsFileSession == bias_session.fitsSessionId
+                ).count()
+                status_parts.append(f"Bias: {bias_count}")
+                tooltip_parts.append(f"✓ {bias_count} bias frames available")
+            except:
+                status_parts.append("Bias: Available")
+                tooltip_parts.append("✓ Bias frames available")
+        else:
+            status_parts.append("Bias: None")
+            tooltip_parts.append("✗ No bias frames available")
+        
+        # Calculate readiness percentage (for compatibility)
+        available_count = sum([
+            has_dark_master or has_dark_session,
+            has_flat_master or has_flat_session,
+            has_bias_master or has_bias_session
+        ])
+        readiness_percentage = (available_count / 3.0) * 100
+        
+        # Create comprehensive tooltip
+        tooltip = f"Calibration Resources ({readiness_percentage:.0f}% ready):\n" + "\n".join(tooltip_parts)
+        
+        # Build display text - combine all status parts with commas
+        if status_parts:
+            text = ", ".join(status_parts)
+        else:
+            text = "No resources"
+            
+        return {
+            "text": text,
+            "tooltip": tooltip,
+            "percentage": readiness_percentage,
+            "has_bias": has_bias_session or has_bias_master,
+            "has_dark": has_dark_session or has_dark_master,
+            "has_flat": has_flat_session or has_flat_master,
+            "has_masters": any([has_bias_master, has_dark_master, has_flat_master])
+        }
