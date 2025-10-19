@@ -19,7 +19,7 @@ from .cloud_sync_dialog import CloudSyncDialog
 logger = logging.getLogger(__name__)
 
 # Global version variable
-VERSION = "1.1.2"
+VERSION = "1.2.0"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
@@ -69,7 +69,7 @@ class AstroFilerGUI(QMainWindow):
     def init_ui(self):
         """Initialize the user interface"""
         # Set window properties
-        self.setWindowTitle("AstroFiler - Astronomy File Management Tool")
+        self.setWindowTitle("AstroFiler - Astronomy File Management Tool " + VERSION)
         self.resize(1200, 800)
         
         # Center the window on the screen

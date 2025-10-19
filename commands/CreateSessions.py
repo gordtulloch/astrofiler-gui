@@ -15,6 +15,7 @@ Options:
     -c, --config     Path to configuration file (default: astrofiler.ini)
     -l, --lights     Only create light sessions
     -C, --calibs     Only create calibration sessions
+    -r, --regenerate Clear all existing sessions first, then regenerate all session data
 
 Requirements:
     - astrofiler.ini configuration file
@@ -33,6 +34,9 @@ Example:
     
     # Only create calibration sessions
     python CreateSessions.py -C
+    
+    # Regenerate all sessions (clear existing first)
+    python CreateSessions.py -r
 """
 
 import sys
@@ -46,7 +50,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from astrofiler_file import fitsProcessing
-from astrofiler_db import setup_database
+from astrofiler_db import setup_database, fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 
 def setup_logging(verbose=False):
     """Setup logging configuration."""
@@ -97,6 +101,23 @@ def create_calibration_sessions(processor, logger):
         logger.error(f"Error creating calibration sessions: {e}")
         raise
 
+def clear_existing_sessions(logger):
+    """Clear all existing sessions from the database."""
+    logger.info("Clearing all existing sessions...")
+    try:
+        # Clear session references in files first to avoid foreign key constraints
+        files_updated = FitsFileModel.update(fitsFileSession=None).execute()
+        logger.info(f"Cleared session references from {files_updated} files")
+        
+        # Delete all sessions
+        sessions_deleted = FitsSessionModel.delete().execute()
+        logger.info(f"Deleted {sessions_deleted} existing sessions")
+        
+        return sessions_deleted
+    except Exception as e:
+        logger.error(f"Error clearing existing sessions: {e}")
+        raise
+
 def main():
     """Main function to create sessions from command line."""
     parser = argparse.ArgumentParser(
@@ -108,6 +129,7 @@ Examples:
     python CreateSessions.py -v            # Verbose output
     python CreateSessions.py -l            # Only light sessions
     python CreateSessions.py -C            # Only calibration sessions
+    python CreateSessions.py -r            # Clear all sessions and regenerate
         """
     )
     
@@ -119,8 +141,14 @@ Examples:
                         help='Only create light sessions')
     parser.add_argument('-C', '--calibs', action='store_true',
                         help='Only create calibration sessions')
+    parser.add_argument('-r', '--regenerate', action='store_true',
+                        help='Clear all existing sessions first, then regenerate all session data')
     
     args = parser.parse_args()
+    
+    # Validate argument combinations
+    if args.regenerate and (args.lights or args.calibs):
+        parser.error("--regenerate cannot be used with --lights or --calibs (regenerate always creates both)")
     
     # Setup logging
     logger = setup_logging(args.verbose)
@@ -140,12 +168,21 @@ Examples:
         # Create processor instance
         processor = fitsProcessing()
         
-        # Determine what to process
-        create_lights = not args.calibs  # Create lights unless only calibs requested
-        create_calibs = not args.lights  # Create calibs unless only lights requested
+        # Handle regenerate flag - this overrides other options
+        if args.regenerate:
+            create_lights = True
+            create_calibs = True
+            logger.info("Regenerate mode: Will clear all existing sessions and recreate both light and calibration sessions")
+        else:
+            # Determine what to process
+            create_lights = not args.calibs  # Create lights unless only calibs requested
+            create_calibs = not args.lights  # Create calibs unless only lights requested
+            logger.info(f"Will create light sessions: {create_lights}")
+            logger.info(f"Will create calibration sessions: {create_calibs}")
         
-        logger.info(f"Will create light sessions: {create_lights}")
-        logger.info(f"Will create calibration sessions: {create_calibs}")
+        # Clear existing sessions if regenerate flag is set
+        if args.regenerate:
+            clear_existing_sessions(logger)
         
         total_light_sessions = 0
         total_calib_sessions = 0
@@ -167,12 +204,22 @@ Examples:
         
         total_sessions = total_light_sessions + total_calib_sessions
         
+        if args.regenerate:
+            logger.info("=== Session Regeneration Complete ===")
+            logger.info(f"All existing sessions were cleared and recreated")
+        
         if total_sessions == 0:
-            logger.warning("No sessions were created - all files may already be assigned!")
+            if args.regenerate:
+                logger.warning("No sessions were created after regeneration - no unassigned files found!")
+            else:
+                logger.warning("No sessions were created - all files may already be assigned!")
             return 1
         else:
             logger.info(f"Total sessions created: {total_sessions}")
-            logger.info("Session creation completed successfully!")
+            if args.regenerate:
+                logger.info("Session regeneration completed successfully!")
+            else:
+                logger.info("Session creation completed successfully!")
             return 0
             
     except KeyboardInterrupt:

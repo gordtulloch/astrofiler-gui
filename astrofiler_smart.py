@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import ftplib
 import numpy as np
+import hashlib
 from datetime import datetime
 from astropy.io import fits
 from astrofiler_db import fitsSession, fitsFile
@@ -825,6 +826,206 @@ class SmartTelescopeManager:
 smart_telescope_manager = SmartTelescopeManager()
 
 
+def _update_calibrated_frame_header(header, calibration_steps, bias_master, dark_master, 
+                                   flat_master, calibrated_data, light_path):
+    """
+    Update FITS header of calibrated light frame with comprehensive metadata.
+    
+    Adds astronomy-standard headers for calibrated light frames including:
+    - Calibration identification and status
+    - Master frame references with full paths and checksums
+    - Processing history and timestamps
+    - Quality metrics and statistics
+    - Software version and processing parameters
+    
+    Args:
+        header: FITS header object to update
+        calibration_steps: List of calibration steps applied
+        bias_master: Path to bias master (or None)
+        dark_master: Path to dark master (or None)
+        flat_master: Path to flat master (or None)
+        calibrated_data: Calibrated image data array
+        light_path: Original light frame path
+    """
+    import numpy as np
+    import hashlib
+    import os
+    from datetime import datetime
+    
+    # =================================================================
+    # PRIMARY CALIBRATION IDENTIFICATION
+    # =================================================================
+    header['CALIBRAT'] = (True, 'Image has been calibrated')
+    header['IMAGETYP'] = ('LIGHT_CAL', 'Calibrated light frame')
+    header['CALDATE'] = (datetime.now().isoformat(), 'Calibration processing timestamp')
+    header['CALSOFT'] = ('AstroFiler v1.2.0', 'Calibration software and version')
+    
+    # Original file reference
+    header['ORIGFILE'] = (os.path.basename(light_path), 'Original uncalibrated filename')
+    header['ORIGPATH'] = (light_path, 'Full path to original file')
+    
+    # =================================================================
+    # CALIBRATION PROCESS HISTORY
+    # =================================================================
+    if calibration_steps:
+        # Join steps with proper separator for astronomy software compatibility
+        steps_str = ' -> '.join(calibration_steps)
+        header['CALSTEPS'] = (steps_str, 'Calibration steps applied in order')
+        header['NSTEPS'] = (len(calibration_steps), 'Number of calibration steps')
+        
+        # Add individual step details for machine readability
+        for i, step in enumerate(calibration_steps, 1):
+            if i <= 9:  # FITS keyword limit
+                header[f'STEP{i:01d}'] = (step, f'Calibration step {i}')
+    
+    # =================================================================
+    # MASTER FRAME REFERENCES AND METADATA
+    # =================================================================
+    master_count = 0
+    
+    if bias_master and os.path.exists(bias_master):
+        master_count += 1
+        header['BIASMAST'] = (os.path.basename(bias_master), 'Master bias frame filename')
+        header['BIASREF'] = (bias_master, 'Full path to master bias frame')
+        
+        # Add master frame checksum for verification
+        try:
+            with open(bias_master, 'rb') as f:
+                bias_hash = hashlib.md5(f.read()).hexdigest()[:16]  # Truncate for FITS
+            header['BIASMD5'] = (bias_hash, 'MD5 checksum of bias master (truncated)')
+        except:
+            pass
+            
+        # Try to get master frame creation info
+        try:
+            from astropy.io import fits
+            with fits.open(bias_master) as hdul:
+                bias_header = hdul[0].header
+                if 'CREATED' in bias_header:
+                    header['BIASMADE'] = (bias_header['CREATED'], 'Bias master creation date')
+                if 'NFRAMES' in bias_header:
+                    header['BIASN'] = (bias_header['NFRAMES'], 'Number of frames in bias master')
+        except:
+            pass
+    
+    if dark_master and os.path.exists(dark_master):
+        master_count += 1
+        header['DARKMAST'] = (os.path.basename(dark_master), 'Master dark frame filename')
+        header['DARKREF'] = (dark_master, 'Full path to master dark frame')
+        
+        try:
+            with open(dark_master, 'rb') as f:
+                dark_hash = hashlib.md5(f.read()).hexdigest()[:16]
+            header['DARKMD5'] = (dark_hash, 'MD5 checksum of dark master (truncated)')
+        except:
+            pass
+            
+        try:
+            from astropy.io import fits
+            with fits.open(dark_master) as hdul:
+                dark_header = hdul[0].header
+                if 'CREATED' in dark_header:
+                    header['DARKMADE'] = (dark_header['CREATED'], 'Dark master creation date')
+                if 'NFRAMES' in dark_header:
+                    header['DARKN'] = (dark_header['NFRAMES'], 'Number of frames in dark master')
+                if 'EXPTIME' in dark_header:
+                    header['DARKEXP'] = (dark_header['EXPTIME'], 'Dark master exposure time')
+        except:
+            pass
+    
+    if flat_master and os.path.exists(flat_master):
+        master_count += 1
+        header['FLATMAST'] = (os.path.basename(flat_master), 'Master flat frame filename')
+        header['FLATREF'] = (flat_master, 'Full path to master flat frame')
+        
+        try:
+            with open(flat_master, 'rb') as f:
+                flat_hash = hashlib.md5(f.read()).hexdigest()[:16]
+            header['FLATMD5'] = (flat_hash, 'MD5 checksum of flat master (truncated)')
+        except:
+            pass
+            
+        try:
+            from astropy.io import fits
+            with fits.open(flat_master) as hdul:
+                flat_header = hdul[0].header
+                if 'CREATED' in flat_header:
+                    header['FLATMADE'] = (flat_header['CREATED'], 'Flat master creation date')
+                if 'NFRAMES' in flat_header:
+                    header['FLATN'] = (flat_header['NFRAMES'], 'Number of frames in flat master')
+                if 'FILTER' in flat_header:
+                    header['FLATFILT'] = (flat_header['FILTER'], 'Flat master filter')
+        except:
+            pass
+    
+    header['NMASTERS'] = (master_count, 'Number of master frames applied')
+    
+    # =================================================================
+    # CALIBRATION QUALITY METRICS
+    # =================================================================
+    # Basic image statistics
+    header['CALMEAN'] = (float(np.mean(calibrated_data)), 'Mean pixel value after calibration')
+    header['CALMED'] = (float(np.median(calibrated_data)), 'Median pixel value after calibration')
+    header['CALSTD'] = (float(np.std(calibrated_data)), 'Standard deviation after calibration')
+    header['CALNOISE'] = (float(np.std(calibrated_data)), 'Noise level (RMS) after calibration')
+    
+    # Dynamic range and signal metrics
+    min_val = float(np.min(calibrated_data))
+    max_val = float(np.max(calibrated_data))
+    header['CALMIN'] = (min_val, 'Minimum pixel value after calibration')
+    header['CALMAX'] = (max_val, 'Maximum pixel value after calibration')
+    header['CALRANGE'] = (max_val - min_val, 'Dynamic range after calibration')
+    
+    # Signal-to-noise estimation
+    if np.std(calibrated_data) > 0:
+        snr_estimate = np.mean(calibrated_data) / np.std(calibrated_data)
+        header['CALSNR'] = (float(snr_estimate), 'Estimated signal-to-noise ratio')
+    
+    # Hot/dead pixel detection
+    data_flat = calibrated_data.flatten()
+    sorted_data = np.sort(data_flat)
+    p99_9 = sorted_data[int(len(sorted_data) * 0.999)]
+    p0_1 = sorted_data[int(len(sorted_data) * 0.001)]
+    
+    hot_pixels = np.sum(calibrated_data > p99_9)
+    dead_pixels = np.sum(calibrated_data < p0_1)
+    
+    header['CALHOT'] = (int(hot_pixels), 'Number of potential hot pixels')
+    header['CALDEAD'] = (int(dead_pixels), 'Number of potential dead pixels')
+    
+    # =================================================================
+    # PROCESSING ENVIRONMENT AND PARAMETERS
+    # =================================================================
+    header['CALHOST'] = (os.environ.get('COMPUTERNAME', 'Unknown'), 'Computer used for calibration')
+    header['CALOS'] = (f"{os.name}", 'Operating system used for calibration')
+    
+    # Processing parameters
+    header['CALNEG'] = (bool(np.any(calibrated_data < 0)), 'Negative values present after calibration')
+    header['CALCLIP'] = ('Applied' if np.any(calibrated_data < 0) else 'None', 'Negative value clipping applied')
+    
+    # =================================================================
+    # ASTRONOMY SOFTWARE COMPATIBILITY HEADERS
+    # =================================================================
+    # Common headers expected by popular astronomy software
+    header['PROCESSED'] = (True, 'Frame has been processed/calibrated')
+    header['REDUCER'] = ('AstroFiler', 'Software used for calibration')
+    header['REDDATE'] = (datetime.now().strftime('%Y-%m-%d'), 'Date of calibration processing')
+    
+    # Compatibility with common pipeline formats
+    header['HISTORY'] = f"CALIBRATED by AstroFiler v1.2.0 on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    if calibration_steps:
+        header['HISTORY'] = f"Applied: {' -> '.join(calibration_steps)}"
+    
+    # =================================================================
+    # DATA INTEGRITY AND VERIFICATION
+    # =================================================================
+    header['CALSUM'] = (float(np.sum(calibrated_data)), 'Checksum: sum of all pixel values')
+    header['CALN'] = (int(calibrated_data.size), 'Total number of pixels')
+    
+    # Version tracking for future compatibility
+    header['CALVER'] = ('1.0', 'Calibration header format version')
+
+
 def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_master=None, 
                          output_path=None, progress_callback=None):
     """
@@ -919,24 +1120,10 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
             base_name = os.path.splitext(os.path.basename(light_path))[0]
             output_path = os.path.join(base_dir, f"{base_name}_calibrated.fits")
             
-        # Update FITS header with calibration information
-        light_header['CALIBRAT'] = (True, 'Image has been calibrated')
-        light_header['CALDATE'] = (datetime.now().isoformat(), 'Calibration date')
-        
-        if calibration_steps:
-            light_header['CALSTEPS'] = (';'.join(calibration_steps), 'Calibration steps applied')
-        
-        # Add master frame references
-        if bias_master:
-            light_header['BIASMAST'] = (os.path.basename(bias_master), 'Master bias frame used')
-        if dark_master:
-            light_header['DARKMAST'] = (os.path.basename(dark_master), 'Master dark frame used')
-        if flat_master:
-            light_header['FLATMAST'] = (os.path.basename(flat_master), 'Master flat frame used')
-            
-        # Add calibration quality info
-        light_header['CALNOISE'] = (float(np.std(calibrated_data)), 'Noise level after calibration')
-        light_header['CALMEAN'] = (float(np.mean(calibrated_data)), 'Mean level after calibration')
+        # Update FITS header with comprehensive calibration information
+        _update_calibrated_frame_header(light_header, calibration_steps, 
+                                      bias_master, dark_master, flat_master, 
+                                      calibrated_data, light_path)
         
         if progress_callback:
             progress_callback("Saving calibrated frame...")

@@ -20,6 +20,17 @@
   - **Comprehensive Error Handling**: User-friendly error messages for bucket not found, access denied, authentication failures, and configuration issues
   - **Progress Tracking**: Real-time progress dialogs with file-by-file updates, cancellation support, and detailed completion statistics
   - **Bucket Validation**: Pre-operation validation ensures bucket exists and is accessible before starting sync operations
+  - **Enhanced Cloud Safety System**: Revolutionary safety features for data protection and automated calibration file management
+    - **Cloud Verification Before Deletion**: Mandatory cloud backup verification using `check_file_exists_in_gcs()` before any local file deletion, preventing data loss from failed uploads
+    - **Soft-Deleted File Management**: Automatic handling of calibration files marked for deletion after master frame creation with `fitsFileSoftDelete` database field tracking
+    - **Smart Sync Profile Behavior**: 
+      - Complete Sync: Maintains files in both local and cloud storage (NO deletion of soft-deleted files)
+      - Backup Sync: Uploads and safely deletes soft-deleted files after cloud verification
+      - On Demand Sync: Targets only soft-deleted files for immediate upload and cleanup with verification
+    - **Master Frame Cloud Integration**: All master calibration frames automatically included in cloud backup operations through enhanced database queries
+    - **Safety Error Handling**: Comprehensive error management with graceful fallbacks - if cloud verification fails, local files are preserved with detailed error logging
+    - **Enhanced CLI Safety**: All command-line cloud sync operations include identical safety checks with cloud verification before deletion
+    - **Intelligent File Detection**: Updated queries to include all file types (regular FITS, soft-deleted calibration files, master frames) in appropriate sync operations
 
 - **Command-Line Cloud Sync**: Complete automation support for unattended cloud operations
   - **CloudSync.py**: Comprehensive command-line utility in `commands/` folder supporting all sync profiles
@@ -32,11 +43,43 @@
   - **Comprehensive Documentation**: Complete setup and scheduling guide in `commands/README.md`
 - **Auto-Calibration System**: Comprehensive automatic calibration framework for traditional telescopes
   - **Master Frame Creation**: Enhanced master calibration frame creation with Siril CLI integration, intelligent session grouping, and astronomy-standard FITS headers
+  - **Soft Deletion and Cloud Integration**: Revolutionary automated cleanup system for calibration files
+    - **Automatic Soft Deletion**: Calibration files used to create master frames are automatically marked with `fitsFileSoftDelete=True` after successful master creation
+    - **Cloud Sync Integration**: Soft-deleted files are automatically uploaded to cloud storage and safely removed from local storage during sync operations
+    - **Safety First Architecture**: Local files are never deleted without verification that they exist in cloud storage using mandatory cloud backup verification
+    - **Storage Optimization**: Frees up significant disk space by moving processed calibration files to cloud while maintaining full data integrity and accessibility
+- **Professional Light Frame Calibration**: Advanced PySiril-powered light frame calibration system for production-quality results
+  - **calibrateLights.py Command**: Comprehensive command-line utility for light frame calibration using PySiril integration
+    - **Flexible Input Options**: Process by session ID (`-s`), object name (`-o`), or specific file list (`-f`) with automatic database integration
+    - **Smart Master Detection**: Automatically finds appropriate master calibration frames from AstroFiler database or specified directories
+    - **PySiril Integration**: Professional-grade processing using Siril's proven calibration engine for maximum compatibility and quality
+    - **CFA/OSC Support**: Complete Color Filter Array processing with automatic detection and optional debayering for one-shot color cameras
+    - **Complete Pipeline Options**: Individual calibration, calibration + registration, calibration + stacking, or full pipeline processing
+    - **Quality Assessment Integration**: Built-in FWHM analysis, noise metrics, star detection, and quality scoring with configurable thresholds
+    - **Batch Processing**: Efficient processing of large datasets with progress tracking and comprehensive error handling
+    - **Flexible Output Options**: Individual calibrated frames or stacked master light frames with customizable stacking parameters
+  - **Advanced Processing Features**:
+    - **Registration/Alignment**: Optional star-based frame registration using Siril's proven algorithms
+    - **Intelligent Stacking**: Multiple stacking methods (median, average, sigma-clipping) with configurable rejection parameters
+    - **Normalization Options**: Additive scale, multiplicative scale, or no normalization for different imaging scenarios  
+    - **Multi-Threading**: Configurable thread count for optimal performance on multi-core systems
+    - **Temporary File Management**: Intelligent temporary directory handling with optional cleanup or preservation for debugging
+  - **Automation Support**:
+    - **Windows Automation**: `cron_calibrate_lights.bat` script with Task Scheduler integration and multiple operation modes
+    - **Linux/macOS Automation**: `cron_calibrate_lights.sh` script with cron integration and comprehensive logging
+    - **Operation Modes**: Auto calibration, session-specific, object-specific, quality assessment only, and help modes
+    - **Monitoring Integration**: Automatic log cleanup, error flag creation, and timestamped logging for system monitoring
+  - **Prerequisites**: Requires Siril 1.4+ installation and PySiril Python package for professional-grade processing capabilities
   - **Calibration Session Analysis**: Automated detection of calibration opportunities with session matching by telescope, instrument, binning, temperature (±5°C), and filter criteria
   - **Master File Storage Structure**: Organized `/Masters` directory with standardized naming conventions and comprehensive metadata tracking
   - **Configuration Interface**: Complete auto-calibration settings in Configuration dialog including enable/disable toggle, minimum files per master (default: 3), auto-creation triggers (manual/on import/on session creation), master retention policies, and progress tracking options
   - **Database Integration**: Enhanced schema with 7 new calibration tracking fields via Migration 007: `fitsFileCalibrationStatus`, `fitsFileCalibrationDate`, master frame references, original file tracking, and soft-delete capabilities for cloud cleanup integration
   - **Enhanced FITS Headers**: Comprehensive master frame headers with `IMAGETYP` (MasterBias/MasterDark/MasterFlat), source file metadata copying, processing history, quality metrics placeholders, and astronomy workflow compatibility
+  - **Filesystem Sanitization**: Comprehensive filename and path sanitization system for cross-platform compatibility
+    - **Universal Sanitization Function**: `sanitize_filesystem_name()` handles all invalid characters (spaces, slashes, colons, asterisks, quotes, pipes, etc.) with underscore replacement
+    - **FITS Header Compliance**: All FITS header keywords shortened to ≤8 characters per FITS standard (QUALSTD, QUALMEAN, QUALREJ, QUALSCOR)
+    - **Master Frame Naming**: Standardized naming convention using underscores for cross-platform compatibility (Master_Bias_Telescope_Instrument_Binning_Date.fits)
+    - **Repository Organization**: Applied sanitization throughout folder creation, file naming, and metadata extraction for consistent filesystem structure
   - **Intelligent Detection Logic**: Quality assessment scoring system for master creation prioritization based on file count, session consistency, and temporal distribution
   - **Cloud Integration**: Automatic cleanup of calibration files and uncalibrated light frames after cloud backup with `fitsFileSoftDelete` tracking and Auto-cleanup Backed Files setting
   - **Progress Tracking Integration**: Comprehensive progress callback system with 5-phase workflow tracking (analysis, master creation, opportunity detection, light calibration, finalization), real-time progress dialogs with cancellation support, and descriptive status messages integrated with existing progress dialog architecture
@@ -71,6 +114,41 @@
     - **CLI Integration**: Full calibrate operation support in AutoCalibration.py with dry-run mode, session filtering, progress reporting, and comprehensive error handling for automation workflows
     - **Quality Assurance**: Built-in validation for master frame availability, light frame detection, output path management, and graceful handling of missing calibration frames
     - **File Management**: Intelligent output naming with _calibrated suffix, directory creation, FITS format preservation, and data type optimization for reduced file sizes
+
+- **Enhanced FITS Header Metadata**: Comprehensive calibration metadata system for professional astronomy workflows
+  - **Calibration Identification**: CALIBRAT='Y', IMAGETYP='Light (Calibrated)', CALDATE timestamp, and CALSOFT='AstroFiler' headers for clear calibration status
+  - **Master Frame References**: BIASMAST, DARKMAST, FLATMAST with full file paths and corresponding MD5 checksums (BIASMD5, DARKMD5, FLATMD5) for verification
+  - **Frame Count Tracking**: BIASCNT, DARKCNT, FLATCNT headers recording number of frames used in each master calibration frame
+  - **Processing History**: CALSTEPS counter with detailed STEP1-STEP9 processing log documenting complete calibration workflow
+  - **Quality Metrics**: CALMEAN, CALSTD, CALNOISE, CALSNR headers providing statistical analysis of calibrated frame quality
+  - **Astronomy Software Compatibility**: Industry-standard headers for seamless integration with PixInsight, MaxIm DL, and other professional astronomy applications
+  - **MD5 Verification**: Automatic calculation and storage of master frame checksums enabling integrity validation of calibration references
+
+- **Advanced UI Status Indicators**: Professional visual calibration status system with comprehensive user feedback
+  - **Enhanced Status Summary Bar**: Real-time calibration coverage statistics with color-coded progress bar (green/yellow/orange/red), light session counts, and visual legend for calibration indicators
+  - **Smart Calibration Column**: Color-coded backgrounds based on completeness (100%=green, 67-99%=yellow, 33-66%=orange, 0-32%=red) with detailed hover tooltips
+  - **Visual Calibration Icons**: Colored shape system - blue circles (bias), dark squares (dark), orange triangles (flat), green circles (masters) for instant status recognition
+  - **Parent Object Statistics**: Overall calibration coverage per object showing "calibrated_sessions/total_sessions (percentage%)" with matching color coding
+  - **Interactive Elements**: Rich tooltips with calibration breakdown ("✓ Bias frames available", "✗ No dark frames"), hover details, and comprehensive status explanations
+  - **Automatic Updates**: Status indicators refresh dynamically when calibration data changes, ensuring real-time accuracy
+
+- **Existing File Registration System**: Intelligent duplicate work prevention with comprehensive file discovery
+  - **Master Frame Detection**: Multi-method identification via filename patterns (Master-Bias, Master-Dark, etc.) and FITS headers (IMAGETYP, CALTYPE, OBJECT)
+  - **Calibrated Light Detection**: FITS header analysis for CALIBRAT='Y', CALDATE, CALSOFT, and master frame references (BIASMAST, DARKMAST, FLATMAST)
+  - **Smart Database Integration**: Automatic updates of fitsFileCalibrated status, calibration dates, and master frame references for existing files
+  - **Session Linking**: Intelligent matching of discovered master frames to appropriate sessions based on telescope, instrument, and binning parameters
+  - **Consistency Validation**: Broken reference cleanup, orphaned file detection, and database integrity maintenance
+  - **UI Integration**: "Register Existing" button with options dialog (recursive scanning, header verification) and comprehensive results reporting
+  - **CLI Support**: RegisterExisting.py command-line tool with full automation capabilities, dry-run mode, and batch processing for unattended operation
+
+- **Professional Context Menu System**: Comprehensive master frame management with enhanced UI integration
+  - **Smart Context-Aware Menus**: Dynamic menu adaptation based on selection type (light sessions, calibration sessions, parent objects)
+  - **Master Frame Operations**: Create master frames (🔨), view detailed master info (👁️), validate integrity (✅), and link sessions to masters (🔗)
+  - **Calibration Management**: View detailed calibration status (📊), calibrate light frames (🌟), browse master files (📁), and cleanup operations (🧹)
+  - **Session Tools**: Refresh calibration links (🔄), export session information to CSV (📤), and comprehensive properties dialog (🔍)
+  - **Visual Enhancement**: Emoji icons for menu clarity, hierarchical organization with submenus, descriptive tooltips, and professional styling
+  - **Batch Operations**: Multi-session support for master creation, validation, calibration, and link management with progress tracking
+  - **Information Dialogs**: Detailed master frame properties with FITS header analysis, file system information, and quality assessment results
 
 ### Bug Fixes
 

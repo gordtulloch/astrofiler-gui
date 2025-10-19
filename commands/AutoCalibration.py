@@ -86,6 +86,10 @@ def setup_logging(verbose=False, log_file=None):
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=handlers
     )
+    
+    # Disable Peewee SQL query logging to reduce verbosity
+    peewee_logger = logging.getLogger('peewee')
+    peewee_logger.setLevel(logging.WARNING)
 
 def load_config(config_path='astrofiler.ini'):
     """Load configuration from file"""
@@ -137,35 +141,114 @@ def validate_database_access():
         raise Exception(f"Database validation failed: {e}")
 
 def analyze_calibration_opportunities(config, session_id=None, min_files=None):
-    """Analyze sessions for calibration opportunities"""
+    """Analyze sessions for calibration opportunities with detailed diagnostic information"""
     from astrofiler_file import fitsProcessing
+    from astrofiler_db import fitsSession as FitsSessionModel
     
     logging.info("Starting calibration opportunity analysis...")
     
     try:
         processor = fitsProcessing()
         
-        # Override min files if specified
-        if min_files:
-            original_min_files = config.getint('DEFAULT', 'min_files_per_master', fallback=3)
-            # Temporarily override in processor if possible
-            logging.info(f"Using minimum files per master: {min_files} (config default: {original_min_files})")
+        # Get min files configuration
+        configured_min_files = config.getint('DEFAULT', 'min_files_per_master', fallback=3)
+        actual_min_files = min_files if min_files else configured_min_files
         
-        # Detect opportunities
-        opportunities = processor.detectAutoCalibrationOpportunities(
-            progress_callback=create_cli_progress_callback("Analyzing opportunities")
+        logging.info(f"Using minimum files per master: {actual_min_files} (config default: {configured_min_files})")
+        
+        # Get comprehensive session analysis
+        logging.info("Analyzing all calibration sessions for detailed diagnostics...")
+        
+        # Query all calibration sessions
+        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT']
+        all_cal_sessions = FitsSessionModel.select().where(
+            FitsSessionModel.fitsSessionObjectName.in_(calibration_types)
         )
         
-        # Report results
-        if opportunities:
-            logging.info(f"Found {len(opportunities)} calibration opportunities:")
-            for i, opp in enumerate(opportunities, 1):
-                session_info = opp.get('session_info', {})
-                scores = opp.get('scores', {})
-                logging.info(f"  {i}. Session {session_info.get('sessionId', 'Unknown')}: "
-                           f"Score {scores.get('total_score', 0):.1f}/100")
-                logging.info(f"     Files: {scores.get('file_count', 0)}, "
-                           f"Types: {', '.join(scores.get('frame_types', []))}")
+        # Analyze each session for detailed reporting
+        sessions_by_type = {'bias': [], 'dark': [], 'flat': []}
+        rejected_sessions = {'bias': [], 'dark': [], 'flat': []}
+        
+        logging.info(f"Found {len(all_cal_sessions)} total calibration sessions to analyze")
+        
+        for session in all_cal_sessions:
+            session_info = processor._analyze_calibration_session(session, actual_min_files)
+            session_type = session_info['session_type']
+            
+            # Determine session type category
+            cal_type = None
+            if 'bias' in session_type:
+                cal_type = 'bias'
+            elif 'dark' in session_type:
+                cal_type = 'dark'
+            elif 'flat' in session_type:
+                cal_type = 'flat'
+            
+            if cal_type:
+                if session_info['needs_master'] and session_info['can_create_master']:
+                    sessions_by_type[cal_type].append(session_info)
+                else:
+                    # Add rejection reason
+                    if not session_info['needs_master']:
+                        session_info['rejection_reason'] = f"Already has master: {session_info['master_file_path']}"
+                    elif not session_info['can_create_master']:
+                        session_info['rejection_reason'] = f"Insufficient files: {session_info['file_count']} < {actual_min_files}"
+                    rejected_sessions[cal_type].append(session_info)
+        
+        # Report detailed analysis
+        logging.info("\n=== DETAILED SESSION ANALYSIS ===")
+        
+        for cal_type in ['bias', 'dark', 'flat']:
+            viable_count = len(sessions_by_type[cal_type])
+            rejected_count = len(rejected_sessions[cal_type])
+            total_count = viable_count + rejected_count
+            
+            logging.info(f"\n{cal_type.upper()} Sessions Analysis:")
+            logging.info(f"  Total sessions: {total_count}")
+            logging.info(f"  Viable for masters: {viable_count}")
+            logging.info(f"  Rejected: {rejected_count}")
+            
+            if rejected_count > 0:
+                logging.info(f"  Rejection reasons:")
+                rejection_summary = {}
+                for session in rejected_sessions[cal_type]:
+                    reason = session['rejection_reason']
+                    rejection_summary[reason] = rejection_summary.get(reason, 0) + 1
+                
+                for reason, count in rejection_summary.items():
+                    logging.info(f"    • {reason}: {count} sessions")
+        
+        # Now get master creation opportunities
+        opportunities = processor.detectAutoCalibrationOpportunities(
+            progress_callback=create_cli_progress_callback("Analyzing master creation opportunities")
+        )
+        
+        # Report master creation results
+        if opportunities and isinstance(opportunities, dict):
+            total_opps = opportunities.get('total_opportunities', 0)
+            estimated_masters = opportunities.get('estimated_masters', 0)
+            
+            logging.info(f"\n=== MASTER CREATION ANALYSIS ===")
+            logging.info(f"Found {total_opps} sessions ready for master creation ({estimated_masters} potential masters):")
+            
+            # Report by calibration type
+            for cal_type in ['bias', 'dark', 'flat']:
+                sessions = opportunities.get(f'{cal_type}_sessions', [])
+                
+                logging.info(f"\n{cal_type.title()} Masters:")
+                logging.info(f"  Sessions ready for master creation: {len(sessions)}")
+                
+                if sessions:
+                    for i, session in enumerate(sessions, 1):
+                        file_count = session.get('file_count', 0)
+                        quality = session.get('estimated_quality', 0)
+                        session_date = session.get('session_date', 'Unknown')
+                        telescope = session.get('telescope', 'Unknown')
+                        instrument = session.get('instrument', 'Unknown')
+                        binning = f"{session.get('x_binning', 1)}x{session.get('y_binning', 1)}"
+                        
+                        logging.info(f"    {i}. {file_count} files, quality: {quality}/100, date: {session_date}")
+                        logging.info(f"       Equipment: {telescope}, {instrument}, binning: {binning}")
         else:
             logging.info("No calibration opportunities found")
         
@@ -194,7 +277,7 @@ def create_master_frames(config, session_id=None, force=False, dry_run=False):
         
         if session_id:
             # Filter to specific session
-            sessions_needing_masters = [s for s in sessions_needing_masters if s.sessionId == session_id]
+            sessions_needing_masters = [s for s in sessions_needing_masters if s['session_id'] == session_id]
             if not sessions_needing_masters:
                 logging.warning(f"Session {session_id} not found or doesn't need masters")
                 return False
@@ -207,34 +290,43 @@ def create_master_frames(config, session_id=None, force=False, dry_run=False):
         
         if dry_run:
             for session in sessions_needing_masters:
-                logging.info(f"Would create masters for session {session.sessionId}: {session.sessionName}")
+                session_id_val = session['session_id']
+                session_type = session['session_type']
+                logging.info(f"Would create masters for session {session_id_val}: {session_type}")
             return True
         
-        # Create masters for each session
-        success_count = 0
-        for session in sessions_needing_masters:
-            try:
-                logging.info(f"Creating masters for session {session.sessionId}: {session.sessionName}")
-                
-                result = processor.createMasterCalibrationFrames(
-                    session.sessionId,
-                    force_recreation=force,
-                    progress_callback=create_cli_progress_callback(f"Session {session.sessionId}")
+        # Create masters for sessions
+        try:
+            if session_id:
+                # Create masters for specific sessions only
+                logging.info(f"Creating master frames for specific session: {session_id}")
+                result = processor.createMasterCalibrationFramesForSessions(
+                    sessions_needing_masters,
+                    progress_callback=create_cli_progress_callback("Creating master frames")
                 )
+            else:
+                # Create masters for all sessions
+                logging.info("Creating master frames for all calibration sessions...")
+                result = processor.createMasterCalibrationFrames(
+                    progress_callback=create_cli_progress_callback("Creating master frames")
+                )
+            
+            if isinstance(result, dict):
+                total_masters = (result.get('bias_masters', 0) + 
+                               result.get('dark_masters', 0) + 
+                               result.get('flat_masters', 0))
+                logging.info(f"Master creation complete: {total_masters} masters created")
+                logging.info(f"  - Bias masters: {result.get('bias_masters', 0)}")
+                logging.info(f"  - Dark masters: {result.get('dark_masters', 0)}")
+                logging.info(f"  - Flat masters: {result.get('flat_masters', 0)}")
+                return total_masters > 0
+            else:
+                logging.error("Master creation returned unexpected result format")
+                return False
                 
-                if result.get('success', False):
-                    success_count += 1
-                    masters_created = result.get('masters_created', {})
-                    logging.info(f"Successfully created {len(masters_created)} masters: {', '.join(masters_created.keys())}")
-                else:
-                    errors = result.get('errors', [])
-                    logging.error(f"Failed to create masters: {'; '.join(errors)}")
-                    
-            except Exception as e:
-                logging.error(f"Error creating masters for session {session.sessionId}: {e}")
-        
-        logging.info(f"Master creation complete: {success_count}/{len(sessions_needing_masters)} sessions successful")
-        return success_count > 0
+        except Exception as e:
+            logging.error(f"Error creating master frames: {e}")
+            return False
         
     except Exception as e:
         logging.error(f"Error in master frame creation: {e}")
@@ -385,8 +477,6 @@ def run_complete_workflow(config, session_id=None, force=False, dry_run=False):
         
         # Run the complete workflow
         result = processor.runAutoCalibrationWorkflow(
-            force_recreation=force,
-            session_filter=session_id,
             progress_callback=create_cli_progress_callback("Auto-calibration workflow")
         )
         
@@ -501,7 +591,7 @@ def main():
                        help='Path to configuration file (default: astrofiler.ini)')
     parser.add_argument('-o', '--operation', choices=['analyze', 'masters', 'calibrate', 'quality', 'all'],
                        default='all', help='Operation to perform (default: all)')
-    parser.add_argument('-s', '--session', type=int,
+    parser.add_argument('-s', '--session', type=str,
                        help='Specific session ID to process')
     parser.add_argument('-f', '--force', action='store_true',
                        help='Force operation even if masters exist')

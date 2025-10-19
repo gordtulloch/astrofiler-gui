@@ -37,6 +37,45 @@ def normalize_file_path(file_path):
         return file_path.replace('\\', '/')
     return file_path
 
+def sanitize_filesystem_name(name):
+    """
+    Sanitize a string for use in filesystem paths and filenames.
+    
+    Replaces invalid filesystem characters with underscores to match
+    the existing folder creation logic in registerFitsImage.
+    
+    Args:
+        name: String that may contain invalid filesystem characters
+        
+    Returns:
+        Sanitized string safe for filesystem use
+    """
+    if not name:
+        return "Unknown"
+    
+    # Convert to string and strip whitespace
+    sanitized = str(name).strip()
+    
+    # Replace invalid filesystem characters with underscores
+    # This matches the existing logic: .replace(" ", "_").replace("\\", "_")
+    invalid_chars = [' ', '\\', '/', ':', '*', '?', '"', '<', '>', '|', '\t', '\n', '\r']
+    
+    for char in invalid_chars:
+        sanitized = sanitized.replace(char, '_')
+    
+    # Remove multiple consecutive underscores
+    while '__' in sanitized:
+        sanitized = sanitized.replace('__', '_')
+    
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip('_')
+    
+    # Ensure we don't return empty string
+    if not sanitized:
+        sanitized = "Unknown"
+    
+    return sanitized
+
 def dwarfFixHeader(hdr, root, file):
     """
     Fix FITS headers for DWARF telescope files based on folder structure and filenames.
@@ -491,11 +530,11 @@ class fitsProcessing:
                 # Create a new file name
                 if ("OBJECT" in hdr):
                     if ("FILTER" in hdr):
-                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(sanitize_filesystem_name(hdr["OBJECT"]),sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),sanitize_filesystem_name(hdr["FILTER"]),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                     else:
-                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(hdr["OBJECT"],telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                        newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(sanitize_filesystem_name(hdr["OBJECT"]),sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),"OSC",fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
                     logger.warning("Invalid object name in header. File not processed is "+str(os.path.join(root, file)))
                     return False
@@ -504,20 +543,20 @@ class fitsProcessing:
             ############## F L A T S ##################################################################            
             elif "FLAT" in hdr["IMAGETYP"].upper():
                 if ("FILTER" in hdr):
-                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),sanitize_filesystem_name(hdr["FILTER"]),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
                 else:
-                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                    newName="{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format("Flat",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),"OSC",fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             
             ############## D A R K S ##################################################################   
             elif "DARK" in hdr["IMAGETYP"].upper():
-                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Dark",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Dark",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
             ############## B I A S E S ################################################################   
             elif "BIAS" in hdr["IMAGETYP"].upper():
-                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Bias",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
+                newName="{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format("Bias",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),fitsDate,exposure,hdr["XBINNING"],hdr["YBINNING"],hdr["CCD-TEMP"])
 
             else:
                 logger.warning("File not processed as IMAGETYP -"+hdr["IMAGETYP"]+"- not recognized: "+str(os.path.join(root, file)))
@@ -546,21 +585,21 @@ class fitsProcessing:
             # Create the folder structure (if needed)
             fitsDate=dateobj.strftime("%Y%m%d")
             if "LIGHT" in hdr["IMAGETYP"].upper():
-                newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(hdr["OBJECT"],telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate)
+                newPath=self.repoFolder+"Light/{0}/{1}/{2}/{3}/".format(sanitize_filesystem_name(hdr["OBJECT"]),sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),fitsDate)
             elif "DARK" in hdr["IMAGETYP"].upper():
-                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Dark",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),exposure,fitsDate)
+                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Dark",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),exposure,fitsDate)
             elif "FLAT" in hdr["IMAGETYP"].upper():
                 if ("FILTER" in hdr):
-                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),hdr["FILTER"],fitsDate)
+                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),sanitize_filesystem_name(hdr["FILTER"]),fitsDate)
                 else:
-                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),"OSC",fitsDate)
+                    newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/{4}/".format("Flat",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),"OSC",fitsDate)
             elif "BIAS" in hdr["IMAGETYP"].upper():
-                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",telescope.replace(" ", "_").replace("\\", "_"),
-                                    hdr["INSTRUME"].replace(" ", "_"),fitsDate)
+                newPath=self.repoFolder+"Calibrate/{0}/{1}/{2}/{3}/".format("Bias",sanitize_filesystem_name(telescope),
+                                    sanitize_filesystem_name(hdr["INSTRUME"]),fitsDate)
             else:
                 logger.warning("File not processed as IMAGETYP not recognized: "+str(os.path.join(root, file)))
                 return None
@@ -571,7 +610,7 @@ class fitsProcessing:
             # Calculate file hash for duplicate detection
             currentFilePath = os.path.join(root, file)
             fileHash = self.calculateFileHash(currentFilePath)
-            logger.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName.replace(" ", "_"))
+            logger.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName)
             newFitsFileId=self.submitFileToDB(newPath+newName,hdr,fileHash)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
@@ -780,7 +819,6 @@ class fitsProcessing:
             currentFitsFile.fitsFileSession = currentSessionId
             currentFitsFile.save()
             logger.info("Assigned "+str(currentFitsFile.fitsFileName)+" to session "+str(currentSessionId))
-            sessionsCreated.append(currentSessionId)
             
         return sessionsCreated
         
@@ -817,9 +855,11 @@ class fitsProcessing:
         logger.info("createCalibrationSessions found "+str(total_darks)+" unassigned Dark calibration files to Session")
         logger.info("createCalibrationSessions found "+str(total_flats)+" unassigned Flat calibration files to Session")
 
-        # Bias calibration files
-        currDate="0001-01-01"
-        uuidStr=uuid.uuid4()
+        # Bias calibration files - group by date, telescope, imager, binning, gain, offset
+        current_session_params = None
+        uuidStr = None
+        last_file_time = None
+        session_gap_minutes = 15  # Create new session if gap > 15 minutes
                         
         for biasFitsFile in unassignedBiases:
             current_count += 1
@@ -831,9 +871,34 @@ class fitsProcessing:
                     logger.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
-            if not self.sameDay(self.dateToString(biasFitsFile.fitsFileDate), currDate):
-                logger.info("Current date for bias is " + str(biasFitsFile.fitsFileDate))
-                currDate = self.dateToString(biasFitsFile.fitsFileDate)
+            # Create session parameters tuple for comparison (bias: date, binning, imager)
+            file_params = (
+                self.dateToString(biasFitsFile.fitsFileDate),  # Date
+                biasFitsFile.fitsFileInstrument,               # Imager
+                biasFitsFile.fitsFileXBinning,                 # X Binning
+                biasFitsFile.fitsFileYBinning                  # Y Binning
+            )
+            
+            # Check time gap between files (for same-day session separation)
+            time_gap_exceeded = False
+            if last_file_time is not None:
+                current_time = biasFitsFile.fitsFileDate
+                # Ensure both times are datetime objects
+                if isinstance(current_time, str):
+                    current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+                if isinstance(last_file_time, str):
+                    last_file_time = datetime.fromisoformat(last_file_time.replace('T', ' '))
+                
+                time_diff = abs((current_time - last_file_time).total_seconds() / 60)  # minutes
+                if time_diff > session_gap_minutes:
+                    time_gap_exceeded = True
+                    logger.info(f"Time gap of {time_diff:.1f} minutes detected, creating new bias session")
+            
+            # Create new session if parameters changed or time gap exceeded
+            if current_session_params != file_params or time_gap_exceeded:
+                logger.info(f"Creating new bias session - Date: {file_params[0]}, "
+                           f"Imager: {file_params[1]}, Binning: {file_params[2]}x{file_params[3]}")
+                current_session_params = file_params
                 uuidStr = uuid.uuid4()  # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                                 fitsSessionDate=self.dateToDateField(biasFitsFile.fitsFileDate),
@@ -850,15 +915,24 @@ class fitsProcessing:
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
-                logger.info("New date for bias "+currDate) 
+                createdCalibrationSessions.append(uuidStr)  # Add session only when created
+                
+            # Update last file time for gap detection
+            current_time = biasFitsFile.fitsFileDate
+            if isinstance(current_time, str):
+                current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+            last_file_time = current_time
+            
             biasFitsFile.fitsFileSession=uuidStr
             biasFitsFile.save()   
             logger.info("Set Session for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
-            createdCalibrationSessions.append(uuidStr)
         
-        # Dark calibration files
-        currDate="0001-01-01"
-        uuidStr=uuid.uuid4()
+        # Dark calibration files - group by date, telescope, imager, exposure, binning, gain, offset
+        current_session_params = None
+        uuidStr = None
+        last_file_time = None
+        session_gap_minutes = 15  # Create new session if gap > 15 minutes
+        
         for darkFitsFile in unassignedDarks:
             current_count += 1
             
@@ -869,9 +943,39 @@ class fitsProcessing:
                     logger.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
-            if not self.sameDay(self.dateToString(darkFitsFile.fitsFileDate), currDate):
-                currDate = self.dateToString(darkFitsFile.fitsFileDate)
-                logger.info("Current date for dark is " + str(darkFitsFile.fitsFileDate))
+            # Create session parameters tuple for comparison (dark: date, binning, imager, gain, offset, temp, exposure)
+            file_params = (
+                self.dateToString(darkFitsFile.fitsFileDate),  # Date
+                darkFitsFile.fitsFileInstrument,               # Imager
+                darkFitsFile.fitsFileXBinning,                 # X Binning
+                darkFitsFile.fitsFileYBinning,                 # Y Binning
+                darkFitsFile.fitsFileGain,                     # Gain
+                darkFitsFile.fitsFileOffset,                   # Offset
+                darkFitsFile.fitsFileCCDTemp,                  # Temperature
+                darkFitsFile.fitsFileExpTime                   # Exposure time
+            )
+            
+            # Check time gap between files (for same-day session separation)
+            time_gap_exceeded = False
+            if last_file_time is not None:
+                current_time = darkFitsFile.fitsFileDate
+                # Ensure both times are datetime objects
+                if isinstance(current_time, str):
+                    current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+                if isinstance(last_file_time, str):
+                    last_file_time = datetime.fromisoformat(last_file_time.replace('T', ' '))
+                
+                time_diff = abs((current_time - last_file_time).total_seconds() / 60)  # minutes
+                if time_diff > session_gap_minutes:
+                    time_gap_exceeded = True
+                    logger.info(f"Time gap of {time_diff:.1f} minutes detected, creating new dark session")
+            
+            # Create new session if parameters changed or time gap exceeded
+            if current_session_params != file_params or time_gap_exceeded:
+                logger.info(f"Creating new dark session - Date: {file_params[0]}, "
+                           f"Imager: {file_params[1]}, Binning: {file_params[2]}x{file_params[3]}, "
+                           f"Gain: {file_params[4]}, Offset: {file_params[5]}, Temp: {file_params[6]}, Exposure: {file_params[7]}")
+                current_session_params = file_params
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                                 fitsSessionDate=self.dateToDateField(darkFitsFile.fitsFileDate),
@@ -888,15 +992,23 @@ class fitsProcessing:
                                                 fitsBiasSession=None,
                                                 fitsDarkSession=None,
                                                 fitsFlatSession=None)
-                logger.info("New date "+currDate) 
+                createdCalibrationSessions.append(uuidStr)  # Add session only when created
+                
+            # Update last file time for gap detection
+            current_time = darkFitsFile.fitsFileDate
+            if isinstance(current_time, str):
+                current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+            last_file_time = current_time 
             darkFitsFile.fitsFileSession=uuidStr
             darkFitsFile.save()   
             logger.info("Set Session for dark "+darkFitsFile.fitsFileName+" to "+str(uuidStr))
-            createdCalibrationSessions.append(uuidStr)
             
-        # Flat calibration files
-        currDate="0001-01-01"
-        uuidStr=uuid.uuid4()
+        # Flat calibration files - group by date, binning, imager, telescope, filter
+        current_session_params = None
+        uuidStr = None
+        last_file_time = None
+        session_gap_minutes = 15  # Create new session if gap > 15 minutes
+        
         for flatFitsFile in unassignedFlats:
             current_count += 1
             
@@ -907,9 +1019,37 @@ class fitsProcessing:
                     logger.info("Calibration Session creation cancelled by user")
                     return createdCalibrationSessions
             
-            if not self.sameDay(self.dateToString(flatFitsFile.fitsFileDate), currDate):
-                currDate = self.dateToString(flatFitsFile.fitsFileDate)
-                logger.info("Current date for flat is " + str(flatFitsFile.fitsFileDate))
+            # Create session parameters tuple for comparison (flat: date, binning, imager, telescope, filter)
+            file_params = (
+                self.dateToString(flatFitsFile.fitsFileDate),   # Date
+                flatFitsFile.fitsFileInstrument,               # Imager
+                flatFitsFile.fitsFileXBinning,                 # X Binning
+                flatFitsFile.fitsFileYBinning,                 # Y Binning
+                flatFitsFile.fitsFileTelescop,                 # Telescope
+                flatFitsFile.fitsFileFilter                    # Filter
+            )
+            
+            # Check time gap between files (for same-day session separation)
+            time_gap_exceeded = False
+            if last_file_time is not None:
+                current_time = flatFitsFile.fitsFileDate
+                # Ensure both times are datetime objects
+                if isinstance(current_time, str):
+                    current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+                if isinstance(last_file_time, str):
+                    last_file_time = datetime.fromisoformat(last_file_time.replace('T', ' '))
+                
+                time_diff = abs((current_time - last_file_time).total_seconds() / 60)  # minutes
+                if time_diff > session_gap_minutes:
+                    time_gap_exceeded = True
+                    logger.info(f"Time gap of {time_diff:.1f} minutes detected, creating new flat session")
+            
+            # Create new session if parameters changed or time gap exceeded
+            if current_session_params != file_params or time_gap_exceeded:
+                logger.info(f"Creating new flat session - Date: {file_params[0]}, "
+                           f"Imager: {file_params[1]}, Binning: {file_params[2]}x{file_params[3]}, "
+                           f"Telescope: {file_params[4]}, Filter: {file_params[5]}")
+                current_session_params = file_params
                 uuidStr=uuid.uuid4() # New Session
                 newFitsSession=fitsSessionModel.create(fitsSessionId=uuidStr,
                                 fitsSessionDate=self.dateToDateField(flatFitsFile.fitsFileDate),
@@ -926,11 +1066,16 @@ class fitsProcessing:
                                 fitsBiasSession=None,
                                 fitsDarkSession=None,
                                 fitsFlatSession=None)
-                logger.info("New date "+currDate) 
+                createdCalibrationSessions.append(uuidStr)  # Add session only when created
+                
+            # Update last file time for gap detection
+            current_time = flatFitsFile.fitsFileDate
+            if isinstance(current_time, str):
+                current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+            last_file_time = current_time 
             flatFitsFile.fitsFileSession=uuidStr
             flatFitsFile.save()   
             logger.info("Set Session for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
-            createdCalibrationSessions.append(uuidStr)
         
         return createdCalibrationSessions
 
@@ -1222,27 +1367,112 @@ class fitsProcessing:
                     logger.warning(f"Not enough files ({len(file_list)}) for {cal_type} session {session.fitsSessionId}")
                     continue
                 
+                # Log detailed master creation start with file verification
+                logger.info(f"=" * 80)
+                logger.info(f"STARTING MASTER {cal_type.upper()} CREATION")
+                logger.info(f"Session ID: {session.fitsSessionId}")
+                logger.info(f"Number of files: {len(file_list)}")
+                logger.info(f"Session Date: {session.fitsSessionDate}")
+                logger.info(f"=" * 80)
+                
+                # Analyze all files for parameter consistency
+                file_params = []
+                inconsistent_params = []
+                
+                for i_file, file_path in enumerate(file_list):
+                    try:
+                        with fits.open(file_path) as hdul:
+                            hdr = hdul[0].header
+                            params = {
+                                'file': os.path.basename(file_path),
+                                'telescope': hdr.get('TELESCOP', 'Unknown'),
+                                'instrument': hdr.get('INSTRUME', 'Unknown'),
+                                'xbinning': hdr.get('XBINNING', 'Unknown'),
+                                'ybinning': hdr.get('YBINNING', 'Unknown'),
+                                'gain': hdr.get('GAIN', 'Unknown'),
+                                'offset': hdr.get('OFFSET', 'Unknown'),
+                                'ccd_temp': hdr.get('CCD-TEMP', hdr.get('SET-TEMP', 'Unknown')),
+                                'filter': hdr.get('FILTER', 'Unknown'),
+                                'exptime': hdr.get('EXPTIME', 'Unknown')
+                            }
+                            file_params.append(params)
+                            
+                            # Log each file details
+                            if cal_type == 'bias':
+                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                           f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
+                                           f"Binning: {params['xbinning']}x{params['ybinning']}, "
+                                           f"Gain: {params['gain']}, Offset: {params['offset']}")
+                            elif cal_type == 'dark':
+                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                           f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
+                                           f"Binning: {params['xbinning']}x{params['ybinning']}, "
+                                           f"Exposure: {params['exptime']}s, Temp: {params['ccd_temp']}°C, "
+                                           f"Gain: {params['gain']}, Offset: {params['offset']}")
+                            else:  # flat
+                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                           f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
+                                           f"Binning: {params['xbinning']}x{params['ybinning']}, "
+                                           f"Filter: {params['filter']}, Exposure: {params['exptime']}s")
+                    except Exception as e:
+                        logger.error(f"Error reading file {file_path}: {e}")
+                        inconsistent_params.append(f"Unable to read file: {os.path.basename(file_path)}")
+                
+                # Check parameter consistency
+                if len(file_params) > 1:
+                    reference = file_params[0]
+                    logger.info(f"-" * 80)
+                    logger.info(f"PARAMETER CONSISTENCY CHECK:")
+                    
+                    # Check critical parameters based on calibration type
+                    if cal_type == 'bias':
+                        critical_params = ['instrument', 'xbinning', 'ybinning']
+                    elif cal_type == 'dark':
+                        critical_params = ['instrument', 'xbinning', 'ybinning', 'exptime']
+                    else:  # flat
+                        critical_params = ['telescope', 'instrument', 'xbinning', 'ybinning', 'filter']
+                    
+                    for param in critical_params:
+                        ref_value = reference[param]
+                        different_values = set(fp[param] for fp in file_params if fp[param] != ref_value)
+                        if different_values:
+                            inconsistent_params.append(f"{param}: Expected {ref_value}, found {different_values}")
+                            logger.error(f"INCONSISTENT {param.upper()}: Expected '{ref_value}', but found {different_values}")
+                        else:
+                            logger.info(f"✓ {param.upper()}: All files match '{ref_value}'")
+                
+                if inconsistent_params:
+                    logger.error(f"CRITICAL: Cannot create master - inconsistent parameters detected:")
+                    for issue in inconsistent_params:
+                        logger.error(f"  - {issue}")
+                    logger.error(f"Skipping master creation for session {session.fitsSessionId}")
+                    continue
+                else:
+                    logger.info(f"✓ All parameters consistent - proceeding with master creation")
+                
+                logger.info(f"-" * 80)
+                
                 # Get metadata from first file for naming
                 first_file_path = file_list[0]
                 with fits.open(first_file_path) as hdul:
                     header = hdul[0].header
                     
-                    telescope = header.get('TELESCOP', 'Unknown').replace(' ', '-').replace('/', '-')
-                    instrument = header.get('INSTRUME', 'Unknown').replace(' ', '-').replace('/', '-')
+                    telescope = sanitize_filesystem_name(header.get('TELESCOP', 'Unknown'))
+                    instrument = sanitize_filesystem_name(header.get('INSTRUME', 'Unknown'))
                     xbinning = header.get('XBINNING', '1')
                     ybinning = header.get('YBINNING', '1')
-                    date_str = session.fitsSessionDate.strftime('%Y-%m-%d') if session.fitsSessionDate else 'Unknown'
+                    date_str = session.fitsSessionDate.strftime('%Y%m%d') if session.fitsSessionDate else 'Unknown'
                     
-                    # Type-specific naming
+                    # Type-specific naming (using underscores to match folder creation logic)
                     if cal_type == 'bias':
-                        master_filename = f"Master-Bias-{telescope}-{instrument}-{xbinning}x{ybinning}-{date_str}.fits"
+                        master_filename = f"Master_Bias_{telescope}_{instrument}_{xbinning}x{ybinning}_{date_str}.fits"
                     elif cal_type == 'dark':
-                        exptime = header.get('EXPTIME', 'Unknown')
-                        ccd_temp = header.get('CCD-TEMP', header.get('SET-TEMP', 'Unknown'))
-                        master_filename = f"Master-Dark-{telescope}-{instrument}-{xbinning}x{ybinning}-{exptime}-{ccd_temp}-{date_str}.fits"
+                        exptime = sanitize_filesystem_name(str(header.get('EXPTIME', 'Unknown')))
+                        ccd_temp = sanitize_filesystem_name(str(header.get('CCD-TEMP', header.get('SET-TEMP', 'Unknown'))))
+                        master_filename = f"Master_Dark_{telescope}_{instrument}_{xbinning}x{ybinning}_{exptime}s_{ccd_temp}C_{date_str}.fits"
                     else:  # flat
-                        filter_name = header.get('FILTER', 'Unknown').replace(' ', '-').replace('/', '-')
-                        master_filename = f"Master-Flat-{telescope}-{instrument}-{filter_name}-{xbinning}x{ybinning}-{date_str}.fits"
+                        filter_name = sanitize_filesystem_name(header.get('FILTER', 'Unknown'))
+                        master_filename = f"Master_Flat_{telescope}_{instrument}_{filter_name}_{xbinning}x{ybinning}_{date_str}.fits"
                 
                 master_path = os.path.join(masters_dir, master_filename)
                 
@@ -1273,12 +1503,230 @@ class fitsProcessing:
                         results['flat_masters'] += 1
                     
                     session.save()
+                    
+                    # Soft delete calibration files used in this master
+                    self._soft_delete_calibration_files(session.fitsSessionId, cal_type)
+                    
                     logger.info(f"Created {cal_type} master: {master_filename}")
                 else:
                     logger.error(f"Failed to create {cal_type} master for session {session.fitsSessionId}")
                     
             except Exception as e:
                 logger.error(f"Error creating {cal_type} master for session {session.fitsSessionId}: {e}")
+                continue
+        
+        # Final progress update
+        if progress_callback:
+            progress_callback(total_sessions, total_sessions, "Master creation complete")
+        
+        logger.info(f"Master creation completed: {results}")
+        return results
+    
+    def createMasterCalibrationFramesForSessions(self, session_list, progress_callback=None):
+        """
+        Create master calibration frames for specific sessions using Siril CLI.
+        
+        Args:
+            session_list: List of session info dictionaries from getSessionsNeedingMasters()
+            progress_callback: Optional callback function for progress updates
+            
+        Returns:
+            Dictionary with counts of created masters: {'bias_masters': n, 'dark_masters': n, 'flat_masters': n}
+        """
+        import subprocess
+        import configparser
+        from astrofiler_db import fitsSession as FitsSessionModel, fitsFile as FitsFileModel
+        
+        logger.info(f"Starting master calibration frame creation for {len(session_list)} sessions")
+        
+        # Get Siril CLI path from config
+        config = configparser.ConfigParser()
+        config.read('astrofiler.ini')
+        siril_cli_path = config.get('DEFAULT', 'siril_cli_path', fallback='')
+        
+        if not siril_cli_path or not os.path.exists(siril_cli_path):
+            raise Exception("Siril CLI path not configured or invalid. Please set the Siril CLI location in Config tab.")
+        
+        # Ensure Masters directory exists
+        masters_dir = os.path.join(self.repoFolder, 'Masters')
+        os.makedirs(masters_dir, exist_ok=True)
+        
+        results = {'bias_masters': 0, 'dark_masters': 0, 'flat_masters': 0}
+        
+        total_sessions = len(session_list)
+        logger.info(f"Processing {total_sessions} specified sessions for master creation")
+        
+        if total_sessions == 0:
+            return results
+        
+        for i, session_info in enumerate(session_list):
+            if progress_callback:
+                if not progress_callback(i, total_sessions, f"Processing {session_info['session_type']} session {session_info['session_id']}"):
+                    logger.info("Master creation cancelled by user")
+                    return results
+            
+            try:
+                # Get the actual session from database
+                session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session_info['session_id'])
+                cal_type = session_info['session_type']
+                
+                # Get files for this session
+                session_files = FitsFileModel.select().where(
+                    FitsFileModel.fitsFileSession == session.fitsSessionId
+                )
+                
+                file_list = [f.fitsFileName for f in session_files if f.fitsFileName and os.path.exists(f.fitsFileName)]
+                
+                if len(file_list) < 2:
+                    logger.warning(f"Not enough files ({len(file_list)}) for {cal_type} session {session.fitsSessionId}")
+                    continue
+                
+                # Log detailed master creation start with file verification
+                logger.info(f"=" * 80)
+                logger.info(f"STARTING MASTER {cal_type.upper()} CREATION (Targeted Session)")
+                logger.info(f"Session ID: {session.fitsSessionId}")
+                logger.info(f"Number of files: {len(file_list)}")
+                logger.info(f"Session Date: {session.fitsSessionDate}")
+                logger.info(f"=" * 80)
+                
+                # Analyze all files for parameter consistency
+                file_params = []
+                inconsistent_params = []
+                
+                for i_file, file_path in enumerate(file_list):
+                    try:
+                        with fits.open(file_path) as hdul:
+                            hdr = hdul[0].header
+                            params = {
+                                'file': os.path.basename(file_path),
+                                'telescope': hdr.get('TELESCOP', 'Unknown'),
+                                'instrument': hdr.get('INSTRUME', 'Unknown'),
+                                'xbinning': hdr.get('XBINNING', 'Unknown'),
+                                'ybinning': hdr.get('YBINNING', 'Unknown'),
+                                'gain': hdr.get('GAIN', 'Unknown'),
+                                'offset': hdr.get('OFFSET', 'Unknown'),
+                                'ccd_temp': hdr.get('CCD-TEMP', hdr.get('SET-TEMP', 'Unknown')),
+                                'filter': hdr.get('FILTER', 'Unknown'),
+                                'exptime': hdr.get('EXPTIME', 'Unknown')
+                            }
+                            file_params.append(params)
+                            
+                            # Log each file details
+                            if cal_type == 'bias':
+                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                           f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
+                                           f"Binning: {params['xbinning']}x{params['ybinning']}, "
+                                           f"Gain: {params['gain']}, Offset: {params['offset']}")
+                            elif cal_type == 'dark':
+                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                           f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
+                                           f"Binning: {params['xbinning']}x{params['ybinning']}, "
+                                           f"Exposure: {params['exptime']}s, Temp: {params['ccd_temp']}°C, "
+                                           f"Gain: {params['gain']}, Offset: {params['offset']}")
+                            else:  # flat
+                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                           f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
+                                           f"Binning: {params['xbinning']}x{params['ybinning']}, "
+                                           f"Filter: {params['filter']}, Exposure: {params['exptime']}s")
+                    except Exception as e:
+                        logger.error(f"Error reading file {file_path}: {e}")
+                        inconsistent_params.append(f"Unable to read file: {os.path.basename(file_path)}")
+                
+                # Check parameter consistency
+                if len(file_params) > 1:
+                    reference = file_params[0]
+                    logger.info(f"-" * 80)
+                    logger.info(f"PARAMETER CONSISTENCY CHECK:")
+                    
+                    # Check critical parameters based on calibration type
+                    if cal_type == 'bias':
+                        critical_params = ['telescope', 'instrument', 'xbinning', 'ybinning']
+                    elif cal_type == 'dark':
+                        critical_params = ['telescope', 'instrument', 'xbinning', 'ybinning', 'exptime']
+                    else:  # flat
+                        critical_params = ['telescope', 'instrument', 'xbinning', 'ybinning', 'filter']
+                    
+                    for param in critical_params:
+                        ref_value = reference[param]
+                        different_values = set(fp[param] for fp in file_params if fp[param] != ref_value)
+                        if different_values:
+                            inconsistent_params.append(f"{param}: Expected {ref_value}, found {different_values}")
+                            logger.error(f"INCONSISTENT {param.upper()}: Expected '{ref_value}', but found {different_values}")
+                        else:
+                            logger.info(f"✓ {param.upper()}: All files match '{ref_value}'")
+                
+                if inconsistent_params:
+                    logger.error(f"CRITICAL: Cannot create master - inconsistent parameters detected:")
+                    for issue in inconsistent_params:
+                        logger.error(f"  - {issue}")
+                    logger.error(f"Skipping master creation for session {session.fitsSessionId}")
+                    continue
+                else:
+                    logger.info(f"✓ All parameters consistent - proceeding with master creation")
+                
+                logger.info(f"-" * 80)
+                
+                # Get metadata from first file for naming
+                first_file_path = file_list[0]
+                with fits.open(first_file_path) as hdul:
+                    header = hdul[0].header
+                    
+                    telescope = sanitize_filesystem_name(header.get('TELESCOP', 'Unknown'))
+                    instrument = sanitize_filesystem_name(header.get('INSTRUME', 'Unknown'))
+                    xbinning = header.get('XBINNING', '1')
+                    ybinning = header.get('YBINNING', '1')
+                    date_str = session.fitsSessionDate.strftime('%Y%m%d') if session.fitsSessionDate else 'Unknown'
+                    
+                    # Type-specific naming (using underscores to match folder creation logic)
+                    if cal_type == 'bias':
+                        master_filename = f"Master_Bias_{telescope}_{instrument}_{xbinning}x{ybinning}_{date_str}.fits"
+                    elif cal_type == 'dark':
+                        exptime = sanitize_filesystem_name(str(header.get('EXPTIME', 'Unknown')))
+                        ccd_temp = sanitize_filesystem_name(str(header.get('CCD-TEMP', header.get('SET-TEMP', 'Unknown'))))
+                        master_filename = f"Master_Dark_{telescope}_{instrument}_{xbinning}x{ybinning}_{exptime}s_{ccd_temp}C_{date_str}.fits"
+                    else:  # flat
+                        filter_name = sanitize_filesystem_name(header.get('FILTER', 'Unknown'))
+                        master_filename = f"Master_Flat_{telescope}_{instrument}_{filter_name}_{xbinning}x{ybinning}_{date_str}.fits"
+                
+                master_path = os.path.join(masters_dir, master_filename)
+                
+                # Skip if master already exists
+                if os.path.exists(master_path):
+                    logger.info(f"Master {master_filename} already exists, skipping")
+                    continue
+                
+                # Create master using Siril CLI
+                success = self._create_master_with_siril(siril_cli_path, file_list, master_path, cal_type)
+                
+                if success:
+                    # Update FITS header with master frame metadata
+                    self._update_master_header(master_path, session, file_list, cal_type)
+                    
+                    # Add master to database
+                    master_fits_id = self._register_master_in_database(master_path, session, cal_type)
+                    
+                    # Update session with master reference
+                    if cal_type == 'bias':
+                        session.fitsBiasMaster = master_path
+                        results['bias_masters'] += 1
+                    elif cal_type == 'dark':
+                        session.fitsDarkMaster = master_path
+                        results['dark_masters'] += 1
+                    else:  # flat
+                        session.fitsFlatMaster = master_path
+                        results['flat_masters'] += 1
+                    
+                    session.save()
+                    
+                    # Soft delete calibration files used in this master
+                    self._soft_delete_calibration_files(session.fitsSessionId, cal_type)
+                    
+                    logger.info(f"Created {cal_type} master: {master_filename}")
+                else:
+                    logger.error(f"Failed to create {cal_type} master for session {session.fitsSessionId}")
+                    
+            except Exception as e:
+                logger.error(f"Error creating {cal_type} master for session {session_info['session_id']}: {e}")
                 continue
         
         # Final progress update
@@ -1328,7 +1776,9 @@ class fitsProcessing:
                     logger.info(f"Successfully linked {links_created} files, copied {copies_made} files for {cal_type} master creation")
                 
                 # Create Siril script content
-                script_content = f"cd {temp_dir}\n"
+                script_content = f"requires 0.9.12\n"  # Add required compatibility line
+                script_content += f"cd {temp_dir}\n"
+                script_content += "setext fits\n"  # Set FITS extension to .fits
                 script_content += "convert *.fits . -out=frame_\n"
                 
                 if cal_type == 'bias':
@@ -1340,25 +1790,51 @@ class fitsProcessing:
                 
                 script_content += "close\n"
                 
+                # Log the script content for debugging
+                logger.info(f"Generated Siril script for {cal_type} master:")
+                logger.info(f"Script path: {script_path}")
+                logger.info(f"Script content:\n{script_content}")
+                logger.info(f"Processing {len(temp_files)} files in {temp_dir}")
+                
                 # Write script file
                 with open(script_path, 'w') as f:
                     f.write(script_content)
                 
                 # Run Siril CLI
                 cmd = [siril_cli_path, '-s', script_path]
+                logger.info(f"Running Siril CLI command: {' '.join(cmd)}")
+                
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                
+                # Log detailed output for debugging
+                logger.info(f"Siril CLI return code: {result.returncode}")
+                if result.stdout:
+                    logger.info(f"Siril CLI stdout: {result.stdout}")
+                if result.stderr:
+                    logger.warning(f"Siril CLI stderr: {result.stderr}")
                 
                 if result.returncode == 0:
                     # Copy result to final location
                     temp_master = os.path.join(temp_dir, 'master.fits')
+                    logger.info(f"Looking for master file: {temp_master}")
+                    logger.info(f"Files in temp directory: {os.listdir(temp_dir)}")
+                    
                     if os.path.exists(temp_master):
+                        logger.info(f"Found master file, copying to: {output_path}")
+                        # Ensure output directory exists
+                        os.makedirs(os.path.dirname(output_path), exist_ok=True)
                         shutil.copy2(temp_master, output_path)
+                        logger.info(f"Successfully copied master file to: {output_path}")
                         return True
                     else:
                         logger.error(f"Siril completed but master file not found: {temp_master}")
+                        logger.info(f"Files in temp directory: {os.listdir(temp_dir)}")
                         return False
                 else:
-                    logger.error(f"Siril CLI failed: {result.stderr}")
+                    logger.error(f"Siril CLI failed with return code {result.returncode}")
+                    logger.error(f"Command: {' '.join(cmd)}")
+                    logger.error(f"Stderr: {result.stderr}")
+                    logger.error(f"Stdout: {result.stdout}")
                     return False
                     
         except Exception as e:
@@ -1372,7 +1848,7 @@ class fitsProcessing:
         Adds astronomy-standard headers for master calibration frames including:
         - Master frame identification and metadata
         - Source session and file information
-        - Processing history and quality metrics
+        - Processing history and source file tracking
         - Compatibility headers for calibration workflows
         """
         try:
@@ -1433,19 +1909,7 @@ class fitsProcessing:
                 header['HISTORY'] = f'Master {cal_type} created from {len(file_list)} frames'
                 header['HISTORY'] = f'Created by AstroFiler v1.2.0 on {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
                 header['HISTORY'] = f'Source session: {session.fitsSessionId}'
-                
-                # Add source file list (truncated if too long)
-                source_files = [os.path.basename(f) for f in file_list[:10]]  # Limit to first 10
-                header['SRCFILES'] = (', '.join(source_files), 'Source files (first 10)')
-                if len(file_list) > 10:
-                    header['SRCFTRUN'] = (True, f'Source file list truncated ({len(file_list)} total)')
-                
-                # Quality metrics placeholders (to be filled by Siril or post-processing)
-                header['QUAL_STD'] = (0.0, 'Standard deviation of source frames')
-                header['QUAL_MEAN'] = (0.0, 'Mean value of source frames')
-                header['QUAL_REJECT'] = (0, 'Number of rejected frames')
-                header['QUAL_SCORE'] = (0, 'Overall quality score (0-100)')
-                
+                              
                 # Calibration workflow compatibility
                 header['BZERO'] = (0.0, 'Data scaling zero point')
                 header['BSCALE'] = (1.0, 'Data scaling factor')
@@ -1495,6 +1959,41 @@ class fitsProcessing:
         except Exception as e:
             logger.error(f"Error registering master in database: {e}")
             return None
+
+    def _soft_delete_calibration_files(self, session_id, cal_type):
+        """
+        Soft delete calibration files from a session after master creation.
+        
+        Args:
+            session_id: Session ID containing the files to soft delete
+            cal_type: Type of calibration ('bias', 'dark', 'flat')
+            
+        Returns:
+            int: Number of files that were soft deleted
+        """
+        from astrofiler_db import fitsFile as FitsFileModel
+        
+        try:
+            # Get all files from this session that match the calibration type
+            files_to_delete = FitsFileModel.select().where(
+                (FitsFileModel.fitsFileSession == session_id) &
+                (FitsFileModel.fitsFileType.contains(cal_type.upper())) &
+                (FitsFileModel.fitsFileSoftDelete.is_null(True) | (FitsFileModel.fitsFileSoftDelete == False))
+            )
+            
+            deleted_count = 0
+            for file_record in files_to_delete:
+                file_record.fitsFileSoftDelete = True
+                file_record.save()
+                deleted_count += 1
+                logger.debug(f"Soft deleted {cal_type} file: {file_record.fitsFileName}")
+            
+            logger.info(f"Soft deleted {deleted_count} {cal_type} files from session {session_id}")
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Error soft deleting {cal_type} files from session {session_id}: {e}")
+            return 0
 
     #################################################################################################################
     ## checkCalibrationSessionsForMasters - Query calibration sessions and check master status                  ##
@@ -1818,12 +2317,6 @@ class fitsProcessing:
         - SESSION = session_id (source session reference)
         - IMAGETYP = 'MasterBias'/'MasterDark'/'MasterFlat'
         
-        Quality Metrics (future enhancement):
-        - QUAL_STD = standard deviation of source frames
-        - QUAL_MEAN = mean value statistics
-        - QUAL_REJECT = number of rejected frames
-        - QUAL_SCORE = overall quality score (0-100)
-        
         Database Integration:
         ====================
         Master references stored in fitsSession table:
@@ -1866,8 +2359,7 @@ class fitsProcessing:
             },
             'header_metadata': {
                 'required': ['MASTER', 'CALTYPE', 'NFRAMES', 'CREATED', 'CREATOR', 'SESSION', 'IMAGETYP'],
-                'optional': ['TELESCOP', 'INSTRUME', 'DATE-OBS', 'XBINNING', 'YBINNING'],
-                'quality_metrics': ['QUAL_STD', 'QUAL_MEAN', 'QUAL_REJECT', 'QUAL_SCORE']
+                'optional': ['TELESCOP', 'INSTRUME', 'DATE-OBS', 'XBINNING', 'YBINNING']
             },
             'database_fields': {
                 'session_table': 'fitsSession',
@@ -1970,7 +2462,10 @@ class fitsProcessing:
 
     def linkSessionWithMasterPreference(self, light_session):
         """
-        Link a light session with calibration, preferring master frames over individual sessions.
+        Link a light session with calibration sessions and optionally master frames.
+        
+        This function always attempts to link calibration sessions for checkout functionality,
+        and optionally links master frames when auto-calibration is enabled.
         
         Args:
             light_session: The light session to link
@@ -1985,7 +2480,7 @@ class fitsProcessing:
             import configparser
             config = configparser.ConfigParser()
             config.read('astrofiler.ini')
-            use_masters = config.getboolean('DEFAULT', 'enable_auto_calibration', fallback=True)
+            use_masters = config.getboolean('DEFAULT', 'enable_auto_calibration', fallback=False)
             
             # Process each calibration type
             for cal_type, session_field, master_field in [
@@ -1996,29 +2491,36 @@ class fitsProcessing:
                 current_session = getattr(light_session, session_field, None)
                 current_master = getattr(light_session, master_field, None)
                 
-                # Skip if already has both session and master references
-                if current_session and current_master:
-                    continue
+                # Always attempt to link calibration sessions (for checkout functionality)
+                matching_session = self._findMatchingCalibrationSession(light_session, cal_type)
+                if matching_session:
+                    new_session_id = str(matching_session.fitsSessionId)
+                    if current_session != new_session_id:
+                        setattr(light_session, session_field, new_session_id)
+                        session_updated = True
+                        logger.info(f"Linked {cal_type} session {matching_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                elif current_session:
+                    # Clear the link if no matching session found
+                    setattr(light_session, session_field, None)
+                    session_updated = True
+                    logger.info(f"Cleared {cal_type} session link for light session {light_session.fitsSessionId} (no matching session found)")
                 
-                # Try to find master frame first (if auto-calibration enabled)
-                master_path = None
+                # Additionally try to find master frame if auto-calibration enabled
                 if use_masters:
                     master_path = self.findMatchingMasterFrame(light_session, cal_type)
-                
-                if master_path:
-                    # Use master frame
-                    if not current_master or current_master != master_path:
+                    if master_path and current_master != master_path:
                         setattr(light_session, master_field, master_path)
                         session_updated = True
                         logger.info(f"Linked {cal_type} master {master_path} to light session {light_session.fitsSessionId}")
-                
-                elif not current_session:
-                    # Fall back to individual calibration session linking
-                    matching_session = self._findMatchingCalibrationSession(light_session, cal_type)
-                    if matching_session:
-                        setattr(light_session, session_field, str(matching_session.fitsSessionId))
+                    elif not master_path and current_master:
+                        # Clear the master link if no matching master found
+                        setattr(light_session, master_field, None)
                         session_updated = True
-                        logger.info(f"Linked {cal_type} session {matching_session.fitsSessionId} to light session {light_session.fitsSessionId}")
+                        logger.info(f"Cleared {cal_type} master link for light session {light_session.fitsSessionId} (no matching master found)")
+            
+            # Save changes to database if any updates were made
+            if session_updated:
+                light_session.save()
             
             return session_updated
             
@@ -2066,17 +2568,15 @@ class fitsProcessing:
 
     def detectAutoCalibrationOpportunities(self, progress_callback=None, min_files=3):
         """
-        Automatically detect when new calibration files enable master creation.
+        Detect individual calibration sessions that can create master calibration files.
         
-        Analyzes calibration sessions to find groups that:
-        1. Have sufficient files for master creation (default: 3+ files)
-        2. Match on key criteria (telescope, instrument, binning, etc.)
-        3. Don't already have masters created
-        4. Would benefit from master frame creation
+        Each session creates its own master if it has sufficient files.
+        Sessions are NOT combined - each session produces one master that can be used 
+        to calibrate light frames with matching equipment attributes.
         
         Args:
             progress_callback: Optional callback for progress updates
-            min_files: Minimum files required per master (default: 3)
+            min_files: Minimum files required per session to create a master (default: 3)
             
         Returns:
             Dictionary with detection results and recommendations
@@ -2085,9 +2585,9 @@ class fitsProcessing:
             logger.info(f"Detecting auto-calibration opportunities (min {min_files} files)...")
             
             opportunities = {
-                'bias_groups': [],
-                'dark_groups': [], 
-                'flat_groups': [],
+                'bias_sessions': [],
+                'dark_sessions': [], 
+                'flat_sessions': [],
                 'total_opportunities': 0,
                 'estimated_masters': 0
             }
@@ -2102,9 +2602,7 @@ class fitsProcessing:
             total_sessions = len(cal_sessions)
             logger.info(f"Analyzing {total_sessions} calibration sessions for master opportunities...")
             
-            # Group sessions by calibration type
-            sessions_by_type = {'bias': [], 'dark': [], 'flat': []}
-            
+            # Analyze each session individually
             for i, session_data in enumerate(cal_sessions):
                 if progress_callback:
                     if not progress_callback(i, total_sessions, f"Analyzing session {session_data.get('session_id', 'unknown')}"):
@@ -2112,31 +2610,39 @@ class fitsProcessing:
                         break
                 
                 session_type = session_data.get('session_type', '').lower()
-                if session_type in sessions_by_type:
-                    sessions_by_type[session_type].append(session_data)
-            
-            # Analyze each calibration type for grouping opportunities
-            for cal_type, sessions in sessions_by_type.items():
-                if not sessions:
-                    continue
+                file_count = session_data.get('file_count', 0)
+                
+                # Each session that meets the minimum file requirement can create a master
+                if file_count >= min_files and session_type in ['bias', 'dark', 'flat']:
+                    # Add session details for master creation
+                    master_opportunity = {
+                        'session_id': session_data.get('session_id'),
+                        'session_date': session_data.get('session_date'),
+                        'file_count': file_count,
+                        'telescope': session_data.get('telescope', ''),
+                        'instrument': session_data.get('instrument', ''),
+                        'x_binning': session_data.get('x_binning', 1),
+                        'y_binning': session_data.get('y_binning', 1),
+                        'gain': session_data.get('gain'),
+                        'offset': session_data.get('offset'),
+                        'estimated_quality': 90.0  # Individual sessions get high quality score
+                    }
                     
-                logger.info(f"Analyzing {len(sessions)} {cal_type} sessions for grouping...")
-                groups = self._groupSessionsByMatchingCriteria(sessions, cal_type)
-                
-                # Filter groups that have sufficient files
-                viable_groups = []
-                for group in groups:
-                    total_files = sum(s.get('file_count', 0) for s in group['sessions'])
-                    if total_files >= min_files:
-                        group['total_files'] = total_files
-                        group['estimated_quality'] = self._estimateGroupQuality(group, cal_type)
-                        viable_groups.append(group)
-                        opportunities['estimated_masters'] += 1
-                
-                opportunities[f'{cal_type}_groups'] = viable_groups
-                opportunities['total_opportunities'] += len(viable_groups)
-                
-                logger.info(f"Found {len(viable_groups)} viable {cal_type} master opportunities")
+                    # Add calibration-type specific attributes
+                    if session_type == 'dark':
+                        master_opportunity['exposure_time'] = session_data.get('exposure_time')
+                        master_opportunity['ccd_temp'] = session_data.get('ccd_temp')
+                    elif session_type == 'flat':
+                        master_opportunity['filter'] = session_data.get('filter', '')
+                    
+                    opportunities[f'{session_type}_sessions'].append(master_opportunity)
+                    opportunities['estimated_masters'] += 1
+                    opportunities['total_opportunities'] += 1
+            
+            # Log results by calibration type
+            for cal_type in ['bias', 'dark', 'flat']:
+                session_count = len(opportunities[f'{cal_type}_sessions'])
+                logger.info(f"Found {session_count} viable {cal_type} master opportunities")
             
             logger.info(f"Auto-calibration detection complete: {opportunities['total_opportunities']} opportunities, "
                        f"{opportunities['estimated_masters']} potential masters")
@@ -2220,7 +2726,14 @@ class fitsProcessing:
             temp1 = criteria1.get('ccd_temp')
             temp2 = criteria2.get('ccd_temp')
             if temp1 is not None and temp2 is not None:
-                if abs(temp1 - temp2) > 5.0:
+                try:
+                    # Convert string temperatures to float for comparison
+                    temp1_float = float(temp1) if isinstance(temp1, str) else temp1
+                    temp2_float = float(temp2) if isinstance(temp2, str) else temp2
+                    if abs(temp1_float - temp2_float) > 5.0:
+                        return False
+                except (ValueError, TypeError):
+                    # If conversion fails, temperatures don't match
                     return False
                     
         elif cal_type == 'flat':
@@ -4951,3 +5464,554 @@ class fitsProcessing:
                 "failed_files": len(file_paths),
                 "errors": [error_msg]
             }
+
+    #################################################################################################################
+    ## registerExistingFiles - Register existing calibrated files and master frames to avoid duplicate work      ##
+    #################################################################################################################
+    def registerExistingFiles(self, progress_callback=None, scan_subdirectories=True, verify_headers=True):
+        """
+        Scan repository for existing calibrated files and master frames and register them in the database
+        to avoid duplicate processing work.
+        
+        This method performs:
+        - Scans for existing calibrated light frames (identified by FITS headers)
+        - Identifies existing master calibration frames 
+        - Updates database records to reflect existing calibration status
+        - Links master frames to appropriate sessions
+        - Validates file integrity and consistency
+        
+        Args:
+            progress_callback: Optional callback function for progress updates
+            scan_subdirectories: Whether to recursively scan subdirectories (default: True)
+            verify_headers: Whether to verify FITS headers for calibration metadata (default: True)
+            
+        Returns:
+            Dictionary with registration results: {
+                'calibrated_files_found': int,
+                'master_frames_found': int,
+                'database_updates': int,
+                'errors': [],
+                'summary': {...}
+            }
+        """
+        logger.info("Starting registration of existing calibrated files and master frames")
+        
+        results = {
+            'calibrated_files_found': 0,
+            'master_frames_found': 0,
+            'database_updates': 0,
+            'existing_master_links': 0,
+            'new_master_links': 0,
+            'calibrated_file_updates': 0,
+            'verification_errors': 0,
+            'errors': [],
+            'summary': {}
+        }
+        
+        try:
+            # Phase 1: Scan for master calibration frames
+            logger.info("Phase 1: Scanning for existing master calibration frames")
+            master_results = self._scanForExistingMasterFrames(progress_callback, scan_subdirectories, verify_headers)
+            results['master_frames_found'] = master_results['masters_found']
+            results['existing_master_links'] = master_results['existing_links']
+            results['new_master_links'] = master_results['new_links']
+            results['errors'].extend(master_results.get('errors', []))
+            
+            # Phase 2: Scan for calibrated light frames
+            logger.info("Phase 2: Scanning for existing calibrated light frames")
+            calibrated_results = self._scanForCalibratedLightFrames(progress_callback, scan_subdirectories, verify_headers)
+            results['calibrated_files_found'] = calibrated_results['calibrated_files']
+            results['calibrated_file_updates'] = calibrated_results['database_updates']
+            results['verification_errors'] = calibrated_results['verification_errors']
+            results['errors'].extend(calibrated_results.get('errors', []))
+            
+            # Phase 3: Validate consistency and fix issues
+            logger.info("Phase 3: Validating consistency and fixing issues")
+            validation_results = self._validateExistingFileConsistency(progress_callback)
+            results['database_updates'] += validation_results['fixes_applied']
+            results['errors'].extend(validation_results.get('errors', []))
+            
+            # Build summary
+            results['summary'] = {
+                'total_files_processed': results['calibrated_files_found'] + results['master_frames_found'],
+                'master_frames': {
+                    'found': results['master_frames_found'],
+                    'already_linked': results['existing_master_links'],
+                    'newly_linked': results['new_master_links']
+                },
+                'calibrated_lights': {
+                    'found': results['calibrated_files_found'],
+                    'updated': results['calibrated_file_updates'],
+                    'verification_errors': results['verification_errors']
+                },
+                'database_changes': results['database_updates'] + results['calibrated_file_updates'] + results['new_master_links'],
+                'errors_encountered': len(results['errors'])
+            }
+            
+            logger.info(f"Existing file registration complete: {results['summary']['total_files_processed']} files processed")
+            logger.info(f"  - Master frames found: {results['master_frames_found']}")
+            logger.info(f"  - Calibrated light frames found: {results['calibrated_files_found']}")
+            logger.info(f"  - Database updates made: {results['summary']['database_changes']}")
+            
+            if results['errors']:
+                logger.warning(f"  - Errors encountered: {len(results['errors'])}")
+                for error in results['errors'][:5]:  # Log first 5 errors
+                    logger.warning(f"    {error}")
+                if len(results['errors']) > 5:
+                    logger.warning(f"    ... and {len(results['errors']) - 5} more errors")
+            
+            return results
+            
+        except Exception as e:
+            error_msg = f"Critical error in existing file registration: {e}"
+            logger.error(error_msg)
+            results['errors'].append(error_msg)
+            return results
+    
+    def _scanForExistingMasterFrames(self, progress_callback, scan_subdirectories, verify_headers):
+        """Scan for existing master calibration frames."""
+        results = {
+            'masters_found': 0,
+            'existing_links': 0,
+            'new_links': 0,
+            'errors': []
+        }
+        
+        try:
+            from astrofiler_db import fitsSession as FitsSessionModel, fitsFile as FitsFileModel
+            
+            # Define search directories
+            search_dirs = [os.path.join(self.repoFolder, 'Masters')]
+            if scan_subdirectories:
+                # Add common master frame directories
+                additional_dirs = [
+                    os.path.join(self.repoFolder, 'Masters', 'Bias'),
+                    os.path.join(self.repoFolder, 'Masters', 'Dark'),  
+                    os.path.join(self.repoFolder, 'Masters', 'Flat'),
+                    os.path.join(self.repoFolder, 'Calibrated'),
+                    self.repoFolder  # Also scan root for masters
+                ]
+                search_dirs.extend([d for d in additional_dirs if os.path.exists(d)])
+            
+            master_files = []
+            for search_dir in search_dirs:
+                if not os.path.exists(search_dir):
+                    continue
+                    
+                if scan_subdirectories:
+                    for root, dirs, files in os.walk(search_dir):
+                        # Skip quarantine directories
+                        if '_quarantine' in root.lower():
+                            continue
+                        for file in files:
+                            if file.lower().endswith(('.fits', '.fit')):
+                                master_files.append(os.path.join(root, file))
+                else:
+                    master_files.extend([
+                        os.path.join(search_dir, f) for f in os.listdir(search_dir) 
+                        if f.lower().endswith(('.fits', '.fit'))
+                    ])
+            
+            logger.info(f"Found {len(master_files)} potential master files to analyze")
+            
+            for i, master_path in enumerate(master_files):
+                if progress_callback:
+                    if not progress_callback(i, len(master_files), f"Analyzing master file: {os.path.basename(master_path)}"):
+                        logger.info("Master frame scanning cancelled by user")
+                        break
+                
+                try:
+                    # Check if this is a master frame by filename or header
+                    is_master = self._identifyMasterFrame(master_path, verify_headers)
+                    
+                    if is_master:
+                        results['masters_found'] += 1
+                        
+                        # Try to link this master to appropriate sessions
+                        link_result = self._linkMasterFrameToSessions(master_path, is_master)
+                        if link_result['existing_link']:
+                            results['existing_links'] += 1
+                        elif link_result['new_link']:
+                            results['new_links'] += 1
+                        
+                        # Register in database if not already present
+                        self._ensureMasterInDatabase(master_path, is_master)
+                        
+                except Exception as e:
+                    error_msg = f"Error analyzing master file {master_path}: {e}"
+                    results['errors'].append(error_msg)
+                    logger.warning(error_msg)
+            
+            return results
+            
+        except Exception as e:
+            results['errors'].append(f"Error in master frame scanning: {e}")
+            return results
+    
+    def _scanForCalibratedLightFrames(self, progress_callback, scan_subdirectories, verify_headers):
+        """Scan for existing calibrated light frames."""
+        results = {
+            'calibrated_files': 0,
+            'database_updates': 0,
+            'verification_errors': 0,
+            'errors': []
+        }
+        
+        try:
+            from astrofiler_db import fitsFile as FitsFileModel
+            
+            # Get all registered light frames from database
+            light_files = FitsFileModel.select().where(
+                (FitsFileModel.fitsFileType.not_in(['BIAS', 'DARK', 'FLAT'])) |
+                (FitsFileModel.fitsFileType.is_null())
+            )
+            
+            logger.info(f"Checking {light_files.count()} registered files for calibration status")
+            
+            for i, fits_file in enumerate(light_files):
+                if progress_callback:
+                    if not progress_callback(i, light_files.count(), f"Checking calibration: {os.path.basename(fits_file.fitsFileName or '')}"):
+                        logger.info("Calibrated file scanning cancelled by user")
+                        break
+                
+                try:
+                    file_path = fits_file.fitsFileName
+                    if not file_path or not os.path.exists(file_path):
+                        continue
+                    
+                    # Check if file is calibrated
+                    calibration_info = self._checkFileCalibrationStatus(file_path, verify_headers)
+                    
+                    if calibration_info['is_calibrated']:
+                        results['calibrated_files'] += 1
+                        
+                        # Update database record if needed
+                        needs_update = False
+                        
+                        if not fits_file.fitsFileCalibrated or fits_file.fitsFileCalibrated != 1:
+                            fits_file.fitsFileCalibrated = 1
+                            needs_update = True
+                        
+                        if calibration_info['calibration_date'] and not fits_file.fitsFileCalibrationDate:
+                            fits_file.fitsFileCalibrationDate = calibration_info['calibration_date']
+                            needs_update = True
+                        
+                        # Update master frame references if found in headers
+                        if calibration_info['master_bias'] and not fits_file.fitsFileMasterBias:
+                            fits_file.fitsFileMasterBias = calibration_info['master_bias']
+                            needs_update = True
+                        
+                        if calibration_info['master_dark'] and not fits_file.fitsFileMasterDark:
+                            fits_file.fitsFileMasterDark = calibration_info['master_dark']
+                            needs_update = True
+                        
+                        if calibration_info['master_flat'] and not fits_file.fitsFileMasterFlat:
+                            fits_file.fitsFileMasterFlat = calibration_info['master_flat']
+                            needs_update = True
+                        
+                        if needs_update:
+                            fits_file.save()
+                            results['database_updates'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error checking calibration status for {file_path}: {e}"
+                    results['errors'].append(error_msg)
+                    results['verification_errors'] += 1
+                    logger.warning(error_msg)
+            
+            return results
+            
+        except Exception as e:
+            results['errors'].append(f"Error in calibrated file scanning: {e}")
+            return results
+    
+    def _identifyMasterFrame(self, file_path, verify_headers=True):
+        """Identify if a file is a master calibration frame."""
+        try:
+            filename = os.path.basename(file_path).lower()
+            
+            # Check filename patterns
+            master_keywords = ['master-bias', 'master-dark', 'master-flat', 'masterbias', 'masterdark', 'masterflat']
+            filename_suggests_master = any(keyword in filename for keyword in master_keywords)
+            
+            if not verify_headers:
+                if filename_suggests_master:
+                    # Guess type from filename
+                    if 'bias' in filename:
+                        return {'type': 'bias', 'confidence': 'filename'}
+                    elif 'dark' in filename:
+                        return {'type': 'dark', 'confidence': 'filename'}
+                    elif 'flat' in filename:
+                        return {'type': 'flat', 'confidence': 'filename'}
+                return None
+            
+            # Verify with FITS headers
+            try:
+                with fits.open(file_path) as hdul:
+                    header = hdul[0].header
+                    
+                    # Check for master frame indicators in headers
+                    imagetyp = header.get('IMAGETYP', '').upper()
+                    caltype = header.get('CALTYPE', '').upper() 
+                    object_name = header.get('OBJECT', '').upper()
+                    
+                    master_indicators = ['MASTERBIAS', 'MASTERDARK', 'MASTERFLAT', 'MASTER-BIAS', 'MASTER-DARK', 'MASTER-FLAT']
+                    
+                    is_master_by_header = (
+                        any(indicator in imagetyp for indicator in master_indicators) or
+                        any(indicator in caltype for indicator in master_indicators) or
+                        any(indicator in object_name for indicator in master_indicators) or
+                        'MASTER' in imagetyp or 'MASTER' in object_name
+                    )
+                    
+                    if is_master_by_header or filename_suggests_master:
+                        # Determine master type
+                        master_type = None
+                        if 'BIAS' in imagetyp or 'BIAS' in caltype or 'bias' in filename:
+                            master_type = 'bias'
+                        elif 'DARK' in imagetyp or 'DARK' in caltype or 'dark' in filename:
+                            master_type = 'dark'
+                        elif 'FLAT' in imagetyp or 'FLAT' in caltype or 'flat' in filename:
+                            master_type = 'flat'
+                        
+                        if master_type:
+                            confidence = 'header' if is_master_by_header else 'filename'
+                            return {'type': master_type, 'confidence': confidence, 'header': header}
+                    
+            except Exception as e:
+                logger.warning(f"Error reading FITS header for {file_path}: {e}")
+                # Fall back to filename analysis
+                if filename_suggests_master:
+                    if 'bias' in filename:
+                        return {'type': 'bias', 'confidence': 'filename_fallback'}
+                    elif 'dark' in filename:
+                        return {'type': 'dark', 'confidence': 'filename_fallback'}  
+                    elif 'flat' in filename:
+                        return {'type': 'flat', 'confidence': 'filename_fallback'}
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error identifying master frame {file_path}: {e}")
+            return None
+    
+    def _linkMasterFrameToSessions(self, master_path, master_info):
+        """Link a master frame to appropriate calibration sessions."""
+        result = {'existing_link': False, 'new_link': False, 'error': None}
+        
+        try:
+            from astrofiler_db import fitsSession as FitsSessionModel
+            
+            master_type = master_info['type']
+            
+            # Check if master is already linked
+            if master_type == 'bias':
+                existing_sessions = FitsSessionModel.select().where(FitsSessionModel.fitsBiasMaster == master_path)
+            elif master_type == 'dark':
+                existing_sessions = FitsSessionModel.select().where(FitsSessionModel.fitsDarkMaster == master_path)
+            elif master_type == 'flat':
+                existing_sessions = FitsSessionModel.select().where(FitsSessionModel.fitsFlatMaster == master_path)
+            else:
+                return result
+            
+            if existing_sessions.count() > 0:
+                result['existing_link'] = True
+                return result
+            
+            # Try to find matching sessions to link this master to
+            # This is a simplified matching - in practice, you'd want to match based on
+            # telescope, instrument, binning, filter, etc.
+            if 'header' in master_info:
+                header = master_info['header']
+                telescope = header.get('TELESCOP', '')
+                instrument = header.get('INSTRUME', '')
+                
+                # Find sessions that could use this master
+                matching_sessions = FitsSessionModel.select().where(
+                    (FitsSessionModel.fitsSessionTelescope == telescope) &
+                    (FitsSessionModel.fitsSessionImager == instrument)
+                )
+                
+                # Link to sessions that don't already have this type of master
+                links_made = 0
+                for session in matching_sessions:
+                    try:
+                        if master_type == 'bias' and not session.fitsBiasMaster:
+                            session.fitsBiasMaster = master_path
+                            session.save()
+                            links_made += 1
+                        elif master_type == 'dark' and not session.fitsDarkMaster:
+                            session.fitsDarkMaster = master_path
+                            session.save()
+                            links_made += 1
+                        elif master_type == 'flat' and not session.fitsFlatMaster:
+                            session.fitsFlatMaster = master_path
+                            session.save()
+                            links_made += 1
+                    except Exception as e:
+                        logger.warning(f"Error linking master to session {session.fitsSessionId}: {e}")
+                
+                if links_made > 0:
+                    result['new_link'] = True
+                    logger.info(f"Linked {master_path} to {links_made} sessions")
+            
+            return result
+            
+        except Exception as e:
+            result['error'] = str(e)
+            logger.warning(f"Error linking master frame {master_path}: {e}")
+            return result
+    
+    def _ensureMasterInDatabase(self, master_path, master_info):
+        """Ensure master frame is registered in the database."""
+        try:
+            from astrofiler_db import fitsFile as FitsFileModel
+            
+            # Check if already in database
+            existing = FitsFileModel.select().where(FitsFileModel.fitsFileName == normalize_file_path(master_path))
+            if existing.count() > 0:
+                return existing.first().fitsFileId
+            
+            # Register new master frame
+            master_id = str(uuid.uuid4())
+            file_stat = os.stat(master_path)
+            file_date = datetime.fromtimestamp(file_stat.st_mtime).date()
+            file_hash = self.calculateFileHash(master_path)
+            
+            fits_file = FitsFileModel.create(
+                fitsFileId=master_id,
+                fitsFileName=normalize_file_path(master_path),
+                fitsFileDate=file_date,
+                fitsFileCalibrated=1,  # Masters are considered calibrated
+                fitsFileType=master_info['type'].upper(),
+                fitsFileStacked=1,  # Masters are stacked
+                fitsFileObject=f"Master-{master_info['type'].title()}",
+                fitsFileHash=file_hash
+            )
+            
+            logger.info(f"Registered existing master frame in database: {os.path.basename(master_path)}")
+            return master_id
+            
+        except Exception as e:
+            logger.warning(f"Error registering master frame in database {master_path}: {e}")
+            return None
+    
+    def _checkFileCalibrationStatus(self, file_path, verify_headers=True):
+        """Check if a file has been calibrated."""
+        result = {
+            'is_calibrated': False,
+            'calibration_date': None,
+            'master_bias': None,
+            'master_dark': None,
+            'master_flat': None,
+            'confidence': 'unknown'
+        }
+        
+        try:
+            if not verify_headers:
+                # Simple filename check
+                filename = os.path.basename(file_path).lower()
+                if 'calibrated' in filename or 'cal_' in filename:
+                    result['is_calibrated'] = True
+                    result['confidence'] = 'filename'
+                return result
+            
+            # Check FITS headers for calibration indicators
+            with fits.open(file_path) as hdul:
+                header = hdul[0].header
+                
+                # Look for calibration indicators
+                calibrat = header.get('CALIBRAT', '').upper()
+                imagetyp = header.get('IMAGETYP', '').upper()
+                caldate = header.get('CALDATE', '')
+                calsoft = header.get('CALSOFT', '')
+                
+                # Check for master frame references
+                bias_master = header.get('BIASMAST', '')
+                dark_master = header.get('DARKMAST', '') 
+                flat_master = header.get('FLATMAST', '')
+                
+                # Determine if calibrated
+                is_calibrated = (
+                    calibrat == 'Y' or
+                    'CALIBRATED' in imagetyp or
+                    caldate or
+                    calsoft or
+                    bias_master or dark_master or flat_master
+                )
+                
+                result['is_calibrated'] = is_calibrated
+                result['confidence'] = 'header' if is_calibrated else 'none'
+                
+                if is_calibrated:
+                    # Extract calibration metadata
+                    if caldate:
+                        try:
+                            result['calibration_date'] = datetime.fromisoformat(caldate.replace('Z', '+00:00'))
+                        except:
+                            pass
+                    
+                    result['master_bias'] = bias_master if bias_master else None
+                    result['master_dark'] = dark_master if dark_master else None
+                    result['master_flat'] = flat_master if flat_master else None
+                
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Error checking calibration status for {file_path}: {e}")
+            return result
+    
+    def _validateExistingFileConsistency(self, progress_callback):
+        """Validate consistency between registered files and database records."""
+        results = {
+            'fixes_applied': 0,
+            'errors': []
+        }
+        
+        try:
+            from astrofiler_db import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
+            
+            # Check for broken master frame references
+            sessions_with_masters = FitsSessionModel.select().where(
+                (FitsSessionModel.fitsBiasMaster.is_null(False) & (FitsSessionModel.fitsBiasMaster != '')) |
+                (FitsSessionModel.fitsDarkMaster.is_null(False) & (FitsSessionModel.fitsDarkMaster != '')) |
+                (FitsSessionModel.fitsFlatMaster.is_null(False) & (FitsSessionModel.fitsFlatMaster != ''))
+            )
+            
+            for session in sessions_with_masters:
+                try:
+                    fixes_needed = False
+                    
+                    # Check bias master
+                    if session.fitsBiasMaster and not os.path.exists(session.fitsBiasMaster):
+                        logger.warning(f"Broken bias master reference in session {session.fitsSessionId}: {session.fitsBiasMaster}")
+                        session.fitsBiasMaster = None
+                        fixes_needed = True
+                    
+                    # Check dark master  
+                    if session.fitsDarkMaster and not os.path.exists(session.fitsDarkMaster):
+                        logger.warning(f"Broken dark master reference in session {session.fitsSessionId}: {session.fitsDarkMaster}")
+                        session.fitsDarkMaster = None
+                        fixes_needed = True
+                    
+                    # Check flat master
+                    if session.fitsFlatMaster and not os.path.exists(session.fitsFlatMaster):
+                        logger.warning(f"Broken flat master reference in session {session.fitsSessionId}: {session.fitsFlatMaster}")
+                        session.fitsFlatMaster = None
+                        fixes_needed = True
+                    
+                    if fixes_needed:
+                        session.save()
+                        results['fixes_applied'] += 1
+                        
+                except Exception as e:
+                    error_msg = f"Error validating session {session.fitsSessionId}: {e}"
+                    results['errors'].append(error_msg)
+                    logger.warning(error_msg)
+            
+            logger.info(f"Consistency validation complete: {results['fixes_applied']} fixes applied")
+            return results
+            
+        except Exception as e:
+            results['errors'].append(f"Error in consistency validation: {e}")
+            return results

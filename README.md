@@ -10,7 +10,7 @@
 
 AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki. Astrofiler is a tool to manage FITS files (currently, XISF files and other non-FITS images are coming in the next version!) using FITS header data. FITS Headers are embedded with the image when created as metadata. Astrofiler reads this information to rename the file and file it appropriately in the Repository.
 
-**Current Status**: Development V1.2.0 (Cloud Sync Integration)
+**Current Status**: Development V1.2.0 (Auto-Calibration System)
 
 Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)
 
@@ -77,21 +77,48 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
   - Optional remote file deletion after successful processing
   - Automatic header standardization and metadata extraction
 - **External Viewer Support**: Launch your favorite FITS viewer directly from AstroFiler
-- **Siril CLI Integration**: Create master calibration frames using Siril command-line interface
-- **Automated Master Creation**: Generate master bias, dark, and flat frames with proper naming and metadata
+- **Comprehensive Siril CLI Integration**: Full integration with Siril for professional-grade image processing
+  - Master calibration frame creation (bias, dark, flat)
+  - Automated light frame calibration workflows
+  - Progress monitoring with real-time status updates
+  - Quality validation and error handling
+  - Batch processing capabilities for large datasets
+- **Professional Calibration System**: Complete auto-calibration workflow from raw frames to calibrated images
+  - Intelligent session detection and grouping
+  - Automatic master frame creation with optimal parameters
+  - Smart calibration file matching based on camera settings
+  - Quality assessment and validation systems
+  - Enhanced metadata tracking throughout the calibration process
 
-### 📈 **Session Management**
-- **Session Detection**: Automatically group lights and calibration images
-- **Session Operations**: Create, update, and clear session groupings
-- **Session Linking**: Automatically link calibration sessions to light sessions
-- **Session Export**: Export Lights and Calibration files ready for SIRIL processing
-- **Master Frame Management**: Track and create master calibration frames per session
+### 📈 **Advanced Session Management**
+- **Intelligent Session Detection**: Automatically group lights and calibration images based on FITS metadata
+- **Comprehensive Session Operations**: Create, update, clear, and manage session groupings with advanced tools
+- **Smart Session Linking**: Automatically link calibration sessions to light sessions based on camera, binning, and temperature matching
+- **Professional Session Export**: Export sessions with organized folder structures ready for external processing
+- **Master Frame Management**: Complete master calibration frame lifecycle management
+  - Create master frames with optimal Siril parameters
+  - Validate master frame quality and integrity
+  - Track master frame usage and relationships
+  - Browse and manage master frame files
+  - Cleanup and maintenance tools for master frame storage
+- **Context-Aware Operations**: Right-click context menus with session-specific tools and batch operations
+- **Calibration Workflow Integration**: Seamless integration between session management and auto-calibration system
+- **Progress Tracking**: Real-time status updates for all session operations with detailed progress monitoring
+
+### 🚀 **Auto-Calibration System**
+- **Intelligent Master Frame Creation**: Automatically creates master bias, dark, and flat frames using Siril CLI
+- **Smart Session Linking**: Automatically links calibration sessions to light frame sessions based on camera, binning, and temperature
+- **Calibration Workflow**: One-click calibration of light frames using appropriate master calibration files
+- **Quality Assessment**: Validates master frames and calibration files with detailed quality metrics
+- **Progress Tracking**: Real-time progress monitoring with detailed status updates and ETA calculations
+- **Enhanced FITS Headers**: Automatic addition of comprehensive calibration metadata to processed files
+- **Professional Context Menus**: Right-click context menus with master frame management, calibration operations, and session tools
+- **Existing File Detection**: Smart duplicate prevention and master frame reuse to avoid unnecessary processing
+- **Command-Line Automation**: Complete CLI interface for automated calibration workflows and batch processing
+- **Advanced UI Indicators**: Visual status indicators showing calibration status, master frame availability, and processing state
 
 ### **Future Versions**
-- **XISF support**: Load XISF files and extract FITS headers
-- **Processed Images**: Support for processed images and formats (XISF, TIFF, JPG)
-- **Archiving**: Saving images to Google Cloud Services, Dropbox, Amazon etc.
-- **Auto-Calibration**: Calibrate any lights with calibration files (build masters first) with Siril
+- **XISF import**: Load XISF files, extract headers and data, save to FITS format (optional)
 - **Thumbnails/Sample Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
 
 ## 🔧 Technical Requirements
@@ -116,9 +143,11 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **google-cloud-storage**: Google Cloud Storage integration for cloud sync features
 - **google-auth**: Authentication library for Google Cloud services
 - **Pillow**: Image processing for thumbnails and previews
+- **Siril**: Command-line integration for master frame creation and calibration workflows
 
 ### Optional Dependencies
 - **Git**: Required for auto-update functionality
+- **Siril**: Required for auto-calibration features (must be in system PATH)
 
 ## 🚀 Quick Installation
 
@@ -129,7 +158,10 @@ Download SETUP.ZIP, unzip it, and run it. It will download everything needed and
 
 You will need to install and run Git for updates however. Download git, and from the astrofiler-gui folder run
 
-git pull origin main
+```bash
+git fetch origin
+git reset --hard origin/main
+```
 
 ### Windows - Install Script
 Install Git - There are also a few ways to install Git on Windows. The most official build is available for download on the Git website. Just go to https://git-scm.com/download/win and the download will start automatically. Note that this is a project called Git for Windows, which is separate from Git itself; for more information on it, go to https://gitforwindows.org.
@@ -178,6 +210,32 @@ chmod +x install/install_macos.sh && ./install/install_macos.sh
 Desktop launchers automatically check for and install updates from GitHub when starting AstroFiler (if installed via git clone).
 
 📖 **See the Wiki for detailed installation instructions and troubleshooting.**
+
+## 🎯 Usage Examples
+
+### Basic Repository Management
+1. **Setup Repository**: Configure your FITS file repository location in Settings
+2. **Scan Files**: Use "Load Repository" to scan and catalog your FITS files
+3. **View Statistics**: Check the Stats tab for repository overview and file counts
+
+### Auto-Calibration Workflow
+1. **Organize Sessions**: AstroFiler automatically groups your calibration and light frames into sessions
+2. **Create Masters**: Right-click on calibration sessions → "Create Master Frame" 
+3. **Link Sessions**: Use "Link Sessions to Masters" to automatically match calibration and light sessions
+4. **Calibrate**: Right-click on light sessions → "Calibrate Session" for one-click calibration
+5. **Monitor Progress**: Real-time progress tracking with detailed status updates
+
+### Smart Telescope Integration
+1. **Network Scan**: Tools → "Download from Smart Telescope" → "Scan Network"
+2. **Connect**: Select your telescope from discovered devices
+3. **Browse & Download**: Navigate telescope folders and download FITS files
+4. **Auto-Process**: Files are automatically processed and added to your repository
+
+### Cloud Sync Setup
+1. **Google Cloud Setup**: Follow the [GCS Setup Guide](GCS_SETUP_GUIDE.md)
+2. **Configure Sync**: Tools → "Cloud Sync" → Configure your bucket and credentials  
+3. **Choose Profile**: Select Complete Sync, Backup Only, or On Demand
+4. **Sync**: Monitor progress with real-time status updates
 
 ## 🗄️ Database Migrations
 

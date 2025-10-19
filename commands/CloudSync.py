@@ -196,7 +196,8 @@ def perform_sync(cloud_config, sync_profile, auto_confirm=False):
     if not auto_confirm:
         operation_desc = {
             'backup': f"Backup Sync: Upload local files to {cloud_config['bucket_url']}",
-            'complete': f"Complete Sync: Bidirectional sync with {cloud_config['bucket_url']}"
+            'complete': f"Complete Sync: Bidirectional sync with {cloud_config['bucket_url']}",
+            'ondemand': f"On Demand Sync: Upload and delete soft-deleted files to {cloud_config['bucket_url']}"
         }
         
         print(f"\nAbout to perform: {operation_desc.get(sync_profile, sync_profile)}")
@@ -233,6 +234,8 @@ def perform_sync(cloud_config, sync_profile, auto_confirm=False):
             perform_backup_sync_cli(cloud_config, repo_path)
         elif sync_profile == 'complete':
             perform_complete_sync_cli(cloud_config, repo_path)
+        elif sync_profile == 'ondemand':
+            perform_ondemand_sync_cli(cloud_config, repo_path)
         else:
             raise ValueError(f"Unknown sync profile: {sync_profile}")
             
@@ -256,7 +259,7 @@ def perform_backup_sync_cli(cloud_config, repo_path):
     
     auth_info = {'auth_string': cloud_config['auth_file_path']}
     
-    # Get files without cloud URLs
+    # Get files without cloud URLs (including soft-deleted files)
     fits_files = list(fitsFile.select().where(
         (fitsFile.fitsFileName.is_null(False)) &
         ((fitsFile.fitsFileCloudURL.is_null(True)) | (fitsFile.fitsFileCloudURL == ""))
@@ -295,8 +298,34 @@ def perform_backup_sync_cli(cloud_config, repo_path):
                 fits_file.save()
                 updated_count += 1
                 
+                # Check if we actually uploaded (vs already existed)
                 if "uploaded" in message.lower():
                     uploaded_count += 1
+                
+                # Delete local file if it's soft-deleted, but verify cloud backup first
+                if fits_file.fitsFileSoftDelete:
+                    try:
+                        # Verify file exists in cloud before deleting
+                        from ui.cloud_sync_dialog import check_file_exists_in_gcs
+                        from astrofiler_cloud import _get_gcs_client
+                        
+                        client = _get_gcs_client(auth_info)
+                        gcs_object_name = relative_path.replace('\\', '/')
+                        
+                        if check_file_exists_in_gcs(client, bucket_name, gcs_object_name):
+                            # File verified in cloud, safe to delete locally
+                            os.remove(full_path)
+                            print(f"    → Uploaded and deleted soft-deleted file after cloud verification")
+                        else:
+                            logging.error(f"SAFETY CHECK FAILED: File not found in cloud, keeping local copy: {relative_path}")
+                            print(f"    → Uploaded (cloud verification failed, keeping local copy)")
+                    except OSError as e:
+                        logging.warning(f"Failed to delete soft-deleted file {relative_path}: {e}")
+                        print(f"    → Uploaded (failed to delete local copy)")
+                    except Exception as e:
+                        logging.error(f"Cloud verification failed for {relative_path}, keeping local copy: {e}")
+                        print(f"    → Uploaded (cloud verification failed, keeping local copy)")
+                elif "uploaded" in message.lower():
                     print(f"    → Uploaded")
                 else:
                     print(f"    → Already exists")
@@ -309,6 +338,181 @@ def perform_backup_sync_cli(cloud_config, repo_path):
             error_count += 1
     
     print(f"\nBackup sync completed:")
+    print(f"  Files processed: {len(fits_files)}")
+    print(f"  Files uploaded: {uploaded_count}")
+    print(f"  Database records updated: {updated_count}")
+    print(f"  Errors: {error_count}")
+
+def perform_ondemand_sync_cli(cloud_config, repo_path):
+    """Perform on-demand sync from command line - upload and delete soft-deleted files"""
+    from ui.cloud_sync_dialog import upload_file_to_backup
+    from astrofiler_db import fitsFile
+    
+    # Get bucket info
+    bucket_url = cloud_config['bucket_url']
+    if bucket_url.startswith('gs://'):
+        bucket_name = bucket_url.replace('gs://', '').rstrip('/')
+    else:
+        bucket_name = bucket_url.rstrip('/')
+    
+    auth_info = {'auth_string': cloud_config['auth_file_path']}
+    
+    # Get soft-deleted files
+    soft_deleted_files = list(fitsFile.select().where(
+        (fitsFile.fitsFileName.is_null(False)) &
+        (fitsFile.fitsFileSoftDelete == True)
+    ))
+    
+    print(f"Found {len(soft_deleted_files)} soft-deleted files to upload and delete")
+    
+    if len(soft_deleted_files) == 0:
+        print("No soft-deleted files found. Nothing to do.")
+        return
+    
+    uploaded_count = 0
+    deleted_count = 0
+    updated_count = 0
+    error_count = 0
+    
+    for i, fits_file in enumerate(soft_deleted_files):
+        try:
+            print(f"[{i+1:3d}/{len(soft_deleted_files)}] {os.path.basename(fits_file.fitsFileName)}")
+            
+            # Get relative path
+            full_path = fits_file.fitsFileName
+            if full_path.startswith(repo_path):
+                relative_path = os.path.relpath(full_path, repo_path)
+            else:
+                relative_path = os.path.basename(full_path)
+            
+            # Check if file exists
+            if not os.path.exists(full_path):
+                logging.warning(f"Soft-deleted file not found: {full_path}")
+                error_count += 1
+                continue
+            
+            # Upload
+            success, cloud_url, message = upload_file_to_backup(
+                bucket_name, auth_info, full_path, relative_path
+            )
+            
+            if success:
+                fits_file.fitsFileCloudURL = cloud_url
+                fits_file.save()
+                updated_count += 1
+                
+                # Check if we actually uploaded (vs already existed)
+                if "uploaded" in message.lower():
+                    uploaded_count += 1
+                
+                # Verify cloud backup before deleting local file
+                try:
+                    from ui.cloud_sync_dialog import check_file_exists_in_gcs
+                    from astrofiler_cloud import _get_gcs_client
+                    
+                    client = _get_gcs_client(auth_info)
+                    gcs_object_name = relative_path.replace('\\', '/')
+                    
+                    if check_file_exists_in_gcs(client, bucket_name, gcs_object_name):
+                        # File verified in cloud, safe to delete locally
+                        os.remove(full_path)
+                        deleted_count += 1
+                        print(f"    → Uploaded and deleted after cloud verification")
+                    else:
+                        logging.error(f"SAFETY CHECK FAILED: File not found in cloud, keeping local copy: {relative_path}")
+                        print(f"    → Uploaded (cloud verification failed, keeping local copy)")
+                except OSError as e:
+                    logging.warning(f"Failed to delete soft-deleted file {relative_path}: {e}")
+                    print(f"    → Uploaded (failed to delete local copy)")
+                except Exception as e:
+                    logging.error(f"Cloud verification failed for {relative_path}, keeping local copy: {e}")
+                    print(f"    → Uploaded (cloud verification failed, keeping local copy)")
+            else:
+                logging.error(f"Failed to upload {relative_path}: {message}")
+                error_count += 1
+                
+        except Exception as e:
+            logging.error(f"Error processing {fits_file.fitsFileName}: {e}")
+            error_count += 1
+    
+    print(f"\nOn-demand sync completed:")
+    print(f"  Soft-deleted files processed: {len(soft_deleted_files)}")
+    print(f"  Files uploaded: {uploaded_count}")
+    print(f"  Local files deleted: {deleted_count}")
+    print(f"  Database records updated: {updated_count}")
+    print(f"  Errors: {error_count}")
+
+def perform_upload_without_deletion_cli(cloud_config, repo_path):
+    """Perform upload without deletion for complete sync - keep files in both places"""
+    from ui.cloud_sync_dialog import upload_file_to_backup
+    from astrofiler_db import fitsFile
+    
+    # Get bucket info
+    bucket_url = cloud_config['bucket_url']
+    if bucket_url.startswith('gs://'):
+        bucket_name = bucket_url.replace('gs://', '').rstrip('/')
+    else:
+        bucket_name = bucket_url.rstrip('/')
+    
+    auth_info = {'auth_string': cloud_config['auth_file_path']}
+    
+    # Get files without cloud URLs (including soft-deleted and masters)
+    fits_files = list(fitsFile.select().where(
+        (fitsFile.fitsFileName.is_null(False)) &
+        ((fitsFile.fitsFileCloudURL.is_null(True)) | (fitsFile.fitsFileCloudURL == ""))
+    ))
+    
+    print(f"Found {len(fits_files)} files to upload (keeping local copies)")
+    
+    uploaded_count = 0
+    updated_count = 0
+    error_count = 0
+    
+    for i, fits_file in enumerate(fits_files):
+        try:
+            print(f"[{i+1:3d}/{len(fits_files)}] {os.path.basename(fits_file.fitsFileName)}")
+            
+            # Get relative path
+            full_path = fits_file.fitsFileName
+            if full_path.startswith(repo_path):
+                relative_path = os.path.relpath(full_path, repo_path)
+            else:
+                relative_path = os.path.basename(full_path)
+            
+            # Check if file exists
+            if not os.path.exists(full_path):
+                logging.warning(f"File not found: {full_path}")
+                error_count += 1
+                continue
+            
+            # Upload
+            success, cloud_url, message = upload_file_to_backup(
+                bucket_name, auth_info, full_path, relative_path
+            )
+            
+            if success:
+                fits_file.fitsFileCloudURL = cloud_url
+                fits_file.save()
+                updated_count += 1
+                
+                # Check if we actually uploaded (vs already existed)
+                if "uploaded" in message.lower():
+                    uploaded_count += 1
+                
+                # Complete Sync: NO deletion - keep files in both places
+                if "uploaded" in message.lower():
+                    print(f"    → Uploaded (keeping local copy)")
+                else:
+                    print(f"    → Already exists")
+            else:
+                logging.error(f"Failed to upload {relative_path}: {message}")
+                error_count += 1
+                
+        except Exception as e:
+            logging.error(f"Error processing {fits_file.fitsFileName}: {e}")
+            error_count += 1
+    
+    print(f"\nUpload phase completed:")
     print(f"  Files processed: {len(fits_files)}")
     print(f"  Files uploaded: {uploaded_count}")
     print(f"  Database records updated: {updated_count}")
@@ -438,8 +642,8 @@ def perform_complete_sync_cli(cloud_config, repo_path):
     
     print("\nPhase 2: Uploading local files without cloud URLs...")
     
-    # Perform backup sync for remaining files
-    perform_backup_sync_cli(cloud_config, repo_path)
+    # Perform upload without deletion for complete sync (keep files in both places)
+    perform_upload_without_deletion_cli(cloud_config, repo_path)
 
 def main():
     """Main entry point"""
@@ -453,8 +657,8 @@ def main():
                       help='Enable verbose logging')
     parser.add_argument('-c', '--config', default='astrofiler.ini',
                       help='Path to configuration file (default: astrofiler.ini)')
-    parser.add_argument('-p', '--profile', choices=['backup', 'complete'],
-                      help='Override sync profile (backup|complete)')
+    parser.add_argument('-p', '--profile', choices=['backup', 'complete', 'ondemand'],
+                      help='Override sync profile (backup|complete|ondemand)')
     parser.add_argument('-a', '--analyze', action='store_true',
                       help='Only analyze cloud storage, don\'t sync')
     parser.add_argument('-y', '--yes', action='store_true',

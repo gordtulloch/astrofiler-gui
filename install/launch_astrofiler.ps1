@@ -21,7 +21,8 @@ if (Test-Path ".git") {
         if ($updateCount -and $updateCount -gt 0) {
             Write-Host "Updates available! Pulling latest changes..." -ForegroundColor Green
             Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Updates available! $updateCount commits behind. Pulling latest changes..."
-            & git pull origin main
+            & git fetch origin
+            & git reset --hard origin/main
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "Successfully updated to latest version." -ForegroundColor Green
                 Add-Content -Path "astrofiler.log" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Successfully updated to latest version from GitHub"
