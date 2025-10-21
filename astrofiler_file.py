@@ -256,7 +256,7 @@ def dwarfFixHeader(hdr, root, file):
                             hdr['YBINNING'] = int(binning)
                             hdr['CCD-TEMP'] = float(ccd_temp)
                 
-                logger.info(f"Fixed CALI_FRAME header for {file}: IMAGETYP={frame_type.upper()}, INSTRUME={hdr.get('INSTRUME')}")
+                logger.debug(f"Fixed CALI_FRAME header for {file}: IMAGETYP={frame_type.upper()}, INSTRUME={hdr.get('INSTRUME')}")
         
         # Handle DWARF_DARK library files
         elif "DWARF_DARK" in path_components:
@@ -324,7 +324,7 @@ def mapFitsHeader(hdr, file_path):
                 mappings = list(Mapping.select())
                 mapFitsHeader._cached_mappings = mappings
                 mapFitsHeader._cache_loaded = True
-                logger.info(f"Loaded {len(mappings)} mappings into cache")
+                logger.debug(f"Loaded {len(mappings)} mappings into cache")
             except Exception as e:
                 logger.error(f"Error loading mappings from database: {e}")
                 return False
@@ -354,7 +354,7 @@ def mapFitsHeader(hdr, file_path):
                     if header_value == current:
                         hdr[card] = replace
                         header_modified = True
-                        logger.info(f"Applied mapping for {card}: '{current}' → '{replace}' in {file_path}")
+                        logger.debug(f"Applied mapping for {card}: '{current}' → '{replace}' in {file_path}")
             # No default mapping logic
         
         return header_modified
@@ -371,7 +371,7 @@ def clearMappingCache():
     if hasattr(mapFitsHeader, '_cache_loaded'):
         mapFitsHeader._cache_loaded = False
         mapFitsHeader._cached_mappings = None
-        logger.info("Mapping cache cleared")
+        logger.debug("Mapping cache cleared")
 
 def get_master_calibration_path():
     """
@@ -441,7 +441,7 @@ class fitsProcessing:
 
         # Ignore everything not a *fit* file
         if "fit" not in file_extension.lower():
-            logger.info("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
+            logger.debug("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
             return False
         
         # Open the FITS file for reading and close immediately after reading header
@@ -573,7 +573,7 @@ class fitsProcessing:
                 if header_modified and save_modified:
                     hdul_update = fits.open(os.path.join(root, file), mode='update')
                     hdul_update.flush()  # Save header changes to file
-                    logger.info(f"Saved header modifications for {file}")
+                    logger.debug(f"Saved header modifications for {file}")
                     hdul_update.close()
             except Exception as e:
                 logger.warning(f"Non-compliant header warning in {os.path.basename(__file__)} while processing file {os.path.join(root, file)}")
@@ -610,11 +610,11 @@ class fitsProcessing:
             # Calculate file hash for duplicate detection
             currentFilePath = os.path.join(root, file)
             fileHash = self.calculateFileHash(currentFilePath)
-            logger.info("Registering file "+os.path.join(root, file)+" to "+newPath+newName)
+            logger.debug("Registering file "+os.path.join(root, file)+" to "+newPath+newName)
             newFitsFileId=self.submitFileToDB(newPath+newName,hdr,fileHash)
             if (newFitsFileId != None) and moveFiles:
                 if not os.path.exists(newPath+newName):
-                    logger.info("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
+                    logger.debug("Moving file "+os.path.join(root, file)+" to "+newPath+newName)
                     # Move the file to the new location
                     try:
                         shutil.move(os.path.join(root, file), newPath+newName)
@@ -624,7 +624,7 @@ class fitsProcessing:
                     except OSError as e:
                         logger.error("OS error moving file "+os.path.join(root, file)+" to "+newPath+newName+": "+str(e))
                         return None
-                    logger.info("File successfully moved to repo - "+newPath+newName)
+                    logger.debug("File successfully moved to repo - "+newPath+newName)
                 else:
                     logger.warning("File already exists in repo, no changes - "+newPath+newName)
                     return "DUPLICATE"  # Special return value for duplicate files
@@ -676,7 +676,7 @@ class fitsProcessing:
         duplicate_files = 0
         cancelled_by_user = False
         
-        logger.info(f"Starting second pass to process {total_files} FITS files")
+        logger.debug(f"Starting second pass to process {total_files} FITS files")
         
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
             logger.debug(f"Processing directory: {root} with {len(files)} files")
@@ -684,7 +684,7 @@ class fitsProcessing:
                 file_name, file_extension = os.path.splitext(file)
                 if "fit" in file_extension.lower():
                     currCount += 1
-                    logger.info(f"Found FITS file #{currCount}: {file}")
+                    logger.debug(f"Found FITS file #{currCount}: {file}")
                     
                     # Call progress callback if provided
                     if progress_callback:
@@ -720,12 +720,12 @@ class fitsProcessing:
                     if newFitsFileId == "DUPLICATE":
                         # File was skipped because it's a duplicate
                         duplicate_files += 1
-                        logger.info(f"Skipped duplicate file: {file}")
+                        logger.debug(f"Skipped duplicate file: {file}")
                     elif newFitsFileId is not None:
                         # Add the file to the list of registered files
                         registeredFiles.append(newFitsFileId)
                         successful_files += 1
-                        logger.info(f"Successfully registered file: {file}")
+                        logger.debug(f"Successfully registered file: {file}")
                     else:
                         failed_files += 1
                         logger.warning(f"Failed to register file: {file}")
@@ -775,8 +775,8 @@ class fitsProcessing:
                     logger.info("Session creation cancelled by user")
                     break
 
-            logger.info("Current Object is "+str(currentFitsFile.fitsFileObject)+", date "+str(currentFitsFile.fitsFileDate)+", filter "+str(currentFitsFile.fitsFileFilter))
-            logger.info("Processing "+str(currentFitsFile.fitsFileName))
+            logger.debug("Current Object is "+str(currentFitsFile.fitsFileObject)+", date "+str(currentFitsFile.fitsFileDate)+", filter "+str(currentFitsFile.fitsFileFilter))
+            logger.debug("Processing "+str(currentFitsFile.fitsFileName))
 
             # If the object name, date, or filter has changed, create a new session
             fits_date = self.dateToDateField(currentFitsFile.fitsFileDate)
@@ -808,7 +808,7 @@ class fitsProcessing:
                         fitsFlatSession=None
                     )
                     sessionsCreated.append(currentSessionId)
-                    logger.info("New session created for "+str(newFitsSession.fitsSessionId))
+                    logger.debug("New session created for "+str(newFitsSession.fitsSessionId))
                 except IntegrityError as e:
                     # Handle the integrity error
                     logger.error("IntegrityError: "+str(e))
@@ -818,7 +818,7 @@ class fitsProcessing:
             # Assign the current session to the fits file
             currentFitsFile.fitsFileSession = currentSessionId
             currentFitsFile.save()
-            logger.info("Assigned "+str(currentFitsFile.fitsFileName)+" to session "+str(currentSessionId))
+            logger.debug("Assigned "+str(currentFitsFile.fitsFileName)+" to session "+str(currentSessionId))
             
         return sessionsCreated
         
@@ -836,6 +836,7 @@ class fitsProcessing:
     ##                              assigned to one                                                                ##
     #################################################################################################################
     def createCalibrationSessions(self, progress_callback=None):
+        from datetime import date, datetime
         createdCalibrationSessions=[]
         
         # Query for all calibration files that are not assigned to a session
@@ -883,20 +884,31 @@ class fitsProcessing:
             time_gap_exceeded = False
             if last_file_time is not None:
                 current_time = biasFitsFile.fitsFileDate
-                # Ensure both times are datetime objects
+                
+                # Ensure both times are datetime objects for comparison
+                
+                # Convert current_time to datetime if needed
                 if isinstance(current_time, str):
                     current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+                elif isinstance(current_time, date) and not isinstance(current_time, datetime):
+                    # Convert date to datetime at midnight
+                    current_time = datetime.combine(current_time, datetime.min.time())
+                
+                # Convert last_file_time to datetime if needed  
                 if isinstance(last_file_time, str):
                     last_file_time = datetime.fromisoformat(last_file_time.replace('T', ' '))
+                elif isinstance(last_file_time, date) and not isinstance(last_file_time, datetime):
+                    # Convert date to datetime at midnight
+                    last_file_time = datetime.combine(last_file_time, datetime.min.time())
                 
                 time_diff = abs((current_time - last_file_time).total_seconds() / 60)  # minutes
                 if time_diff > session_gap_minutes:
                     time_gap_exceeded = True
-                    logger.info(f"Time gap of {time_diff:.1f} minutes detected, creating new bias session")
+                    logger.debug(f"Time gap of {time_diff:.1f} minutes detected, creating new bias session")
             
             # Create new session if parameters changed or time gap exceeded
             if current_session_params != file_params or time_gap_exceeded:
-                logger.info(f"Creating new bias session - Date: {file_params[0]}, "
+                logger.debug(f"Creating new bias session - Date: {file_params[0]}, "
                            f"Imager: {file_params[1]}, Binning: {file_params[2]}x{file_params[3]}")
                 current_session_params = file_params
                 uuidStr = uuid.uuid4()  # New Session
@@ -925,7 +937,7 @@ class fitsProcessing:
             
             biasFitsFile.fitsFileSession=uuidStr
             biasFitsFile.save()   
-            logger.info("Set Session for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
+            logger.debug("Set Session for bias "+biasFitsFile.fitsFileName+" to "+str(uuidStr))
         
         # Dark calibration files - group by date, telescope, imager, exposure, binning, gain, offset
         current_session_params = None
@@ -959,20 +971,31 @@ class fitsProcessing:
             time_gap_exceeded = False
             if last_file_time is not None:
                 current_time = darkFitsFile.fitsFileDate
-                # Ensure both times are datetime objects
+                
+                # Ensure both times are datetime objects for comparison
+                
+                # Convert current_time to datetime if needed
                 if isinstance(current_time, str):
                     current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+                elif isinstance(current_time, date) and not isinstance(current_time, datetime):
+                    # Convert date to datetime at midnight
+                    current_time = datetime.combine(current_time, datetime.min.time())
+                
+                # Convert last_file_time to datetime if needed  
                 if isinstance(last_file_time, str):
                     last_file_time = datetime.fromisoformat(last_file_time.replace('T', ' '))
+                elif isinstance(last_file_time, date) and not isinstance(last_file_time, datetime):
+                    # Convert date to datetime at midnight
+                    last_file_time = datetime.combine(last_file_time, datetime.min.time())
                 
                 time_diff = abs((current_time - last_file_time).total_seconds() / 60)  # minutes
                 if time_diff > session_gap_minutes:
                     time_gap_exceeded = True
-                    logger.info(f"Time gap of {time_diff:.1f} minutes detected, creating new dark session")
+                    logger.debug(f"Time gap of {time_diff:.1f} minutes detected, creating new dark session")
             
             # Create new session if parameters changed or time gap exceeded
             if current_session_params != file_params or time_gap_exceeded:
-                logger.info(f"Creating new dark session - Date: {file_params[0]}, "
+                logger.debug(f"Creating new dark session - Date: {file_params[0]}, "
                            f"Imager: {file_params[1]}, Binning: {file_params[2]}x{file_params[3]}, "
                            f"Gain: {file_params[4]}, Offset: {file_params[5]}, Temp: {file_params[6]}, Exposure: {file_params[7]}")
                 current_session_params = file_params
@@ -1001,7 +1024,7 @@ class fitsProcessing:
             last_file_time = current_time 
             darkFitsFile.fitsFileSession=uuidStr
             darkFitsFile.save()   
-            logger.info("Set Session for dark "+darkFitsFile.fitsFileName+" to "+str(uuidStr))
+            logger.debug("Set Session for dark "+darkFitsFile.fitsFileName+" to "+str(uuidStr))
             
         # Flat calibration files - group by date, binning, imager, telescope, filter
         current_session_params = None
@@ -1033,20 +1056,31 @@ class fitsProcessing:
             time_gap_exceeded = False
             if last_file_time is not None:
                 current_time = flatFitsFile.fitsFileDate
-                # Ensure both times are datetime objects
+                
+                # Ensure both times are datetime objects for comparison
+                
+                # Convert current_time to datetime if needed
                 if isinstance(current_time, str):
                     current_time = datetime.fromisoformat(current_time.replace('T', ' '))
+                elif isinstance(current_time, date) and not isinstance(current_time, datetime):
+                    # Convert date to datetime at midnight
+                    current_time = datetime.combine(current_time, datetime.min.time())
+                
+                # Convert last_file_time to datetime if needed  
                 if isinstance(last_file_time, str):
                     last_file_time = datetime.fromisoformat(last_file_time.replace('T', ' '))
+                elif isinstance(last_file_time, date) and not isinstance(last_file_time, datetime):
+                    # Convert date to datetime at midnight
+                    last_file_time = datetime.combine(last_file_time, datetime.min.time())
                 
                 time_diff = abs((current_time - last_file_time).total_seconds() / 60)  # minutes
                 if time_diff > session_gap_minutes:
                     time_gap_exceeded = True
-                    logger.info(f"Time gap of {time_diff:.1f} minutes detected, creating new flat session")
+                    logger.debug(f"Time gap of {time_diff:.1f} minutes detected, creating new flat session")
             
             # Create new session if parameters changed or time gap exceeded
             if current_session_params != file_params or time_gap_exceeded:
-                logger.info(f"Creating new flat session - Date: {file_params[0]}, "
+                logger.debug(f"Creating new flat session - Date: {file_params[0]}, "
                            f"Imager: {file_params[1]}, Binning: {file_params[2]}x{file_params[3]}, "
                            f"Telescope: {file_params[4]}, Filter: {file_params[5]}")
                 current_session_params = file_params
@@ -1075,7 +1109,7 @@ class fitsProcessing:
             last_file_time = current_time 
             flatFitsFile.fitsFileSession=uuidStr
             flatFitsFile.save()   
-            logger.info("Set Session for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
+            logger.debug("Set Session for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
         
         return createdCalibrationSessions
 
@@ -1085,7 +1119,7 @@ class fitsProcessing:
     def submitFileToDB(self,fileName,hdr,fileHash=None):
         if "DATE-OBS" in hdr:
             # Create new fitsFile record
-            logger.info("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
+            logger.debug("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
             
             # Adjust for different keywords
             if ("EXPTIME" in hdr):
@@ -1190,7 +1224,7 @@ class fitsProcessing:
                 if session_updated:
                     light_session.save()
                     updated_sessions.append(str(light_session.fitsSessionId))
-                    logger.info(f"Updated light session {light_session.fitsSessionId} with calibration links")
+                    logger.debug(f"Updated light session {light_session.fitsSessionId} with calibration links")
             
             logger.info(f"Session linking complete. Updated {len(updated_sessions)} light sessions with calibration links")
             
@@ -1368,12 +1402,12 @@ class fitsProcessing:
                     continue
                 
                 # Log detailed master creation start with file verification
-                logger.info(f"=" * 80)
-                logger.info(f"STARTING MASTER {cal_type.upper()} CREATION")
-                logger.info(f"Session ID: {session.fitsSessionId}")
-                logger.info(f"Number of files: {len(file_list)}")
-                logger.info(f"Session Date: {session.fitsSessionDate}")
-                logger.info(f"=" * 80)
+                logger.debug(f"=" * 80)
+                logger.debug(f"STARTING MASTER {cal_type.upper()} CREATION")
+                logger.debug(f"Session ID: {session.fitsSessionId}")
+                logger.debug(f"Number of files: {len(file_list)}")
+                logger.debug(f"Session Date: {session.fitsSessionDate}")
+                logger.debug(f"=" * 80)
                 
                 # Analyze all files for parameter consistency
                 file_params = []
@@ -1399,18 +1433,18 @@ class fitsProcessing:
                             
                             # Log each file details
                             if cal_type == 'bias':
-                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                logger.debug(f"File {i_file+1:3d}: {params['file']} - "
                                            f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
                                            f"Binning: {params['xbinning']}x{params['ybinning']}, "
                                            f"Gain: {params['gain']}, Offset: {params['offset']}")
                             elif cal_type == 'dark':
-                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                logger.debug(f"File {i_file+1:3d}: {params['file']} - "
                                            f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
                                            f"Binning: {params['xbinning']}x{params['ybinning']}, "
                                            f"Exposure: {params['exptime']}s, Temp: {params['ccd_temp']}°C, "
                                            f"Gain: {params['gain']}, Offset: {params['offset']}")
                             else:  # flat
-                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                logger.debug(f"File {i_file+1:3d}: {params['file']} - "
                                            f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
                                            f"Binning: {params['xbinning']}x{params['ybinning']}, "
                                            f"Filter: {params['filter']}, Exposure: {params['exptime']}s")
@@ -1421,8 +1455,8 @@ class fitsProcessing:
                 # Check parameter consistency
                 if len(file_params) > 1:
                     reference = file_params[0]
-                    logger.info(f"-" * 80)
-                    logger.info(f"PARAMETER CONSISTENCY CHECK:")
+                    logger.debug(f"-" * 80)
+                    logger.debug(f"PARAMETER CONSISTENCY CHECK:")
                     
                     # Check critical parameters based on calibration type
                     if cal_type == 'bias':
@@ -1439,7 +1473,7 @@ class fitsProcessing:
                             inconsistent_params.append(f"{param}: Expected {ref_value}, found {different_values}")
                             logger.error(f"INCONSISTENT {param.upper()}: Expected '{ref_value}', but found {different_values}")
                         else:
-                            logger.info(f"✓ {param.upper()}: All files match '{ref_value}'")
+                            logger.debug(f"✓ {param.upper()}: All files match '{ref_value}'")
                 
                 if inconsistent_params:
                     logger.error(f"CRITICAL: Cannot create master - inconsistent parameters detected:")
@@ -1448,9 +1482,9 @@ class fitsProcessing:
                     logger.error(f"Skipping master creation for session {session.fitsSessionId}")
                     continue
                 else:
-                    logger.info(f"✓ All parameters consistent - proceeding with master creation")
+                    logger.debug(f"✓ All parameters consistent - proceeding with master creation")
                 
-                logger.info(f"-" * 80)
+                logger.debug(f"-" * 80)
                 
                 # Get metadata from first file for naming
                 first_file_path = file_list[0]
@@ -1478,7 +1512,7 @@ class fitsProcessing:
                 
                 # Skip if master already exists
                 if os.path.exists(master_path):
-                    logger.info(f"Master {master_filename} already exists, skipping")
+                    logger.debug(f"Master {master_filename} already exists, skipping")
                     continue
                 
                 # Create master using Siril CLI
@@ -1507,7 +1541,7 @@ class fitsProcessing:
                     # Soft delete calibration files used in this master
                     self._soft_delete_calibration_files(session.fitsSessionId, cal_type)
                     
-                    logger.info(f"Created {cal_type} master: {master_filename}")
+                    logger.debug(f"Created {cal_type} master: {master_filename}")
                 else:
                     logger.error(f"Failed to create {cal_type} master for session {session.fitsSessionId}")
                     
@@ -1582,12 +1616,12 @@ class fitsProcessing:
                     continue
                 
                 # Log detailed master creation start with file verification
-                logger.info(f"=" * 80)
-                logger.info(f"STARTING MASTER {cal_type.upper()} CREATION (Targeted Session)")
-                logger.info(f"Session ID: {session.fitsSessionId}")
-                logger.info(f"Number of files: {len(file_list)}")
-                logger.info(f"Session Date: {session.fitsSessionDate}")
-                logger.info(f"=" * 80)
+                logger.debug(f"=" * 80)
+                logger.debug(f"STARTING MASTER {cal_type.upper()} CREATION (Targeted Session)")
+                logger.debug(f"Session ID: {session.fitsSessionId}")
+                logger.debug(f"Number of files: {len(file_list)}")
+                logger.debug(f"Session Date: {session.fitsSessionDate}")
+                logger.debug(f"=" * 80)
                 
                 # Analyze all files for parameter consistency
                 file_params = []
@@ -1613,18 +1647,18 @@ class fitsProcessing:
                             
                             # Log each file details
                             if cal_type == 'bias':
-                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                logger.debug(f"File {i_file+1:3d}: {params['file']} - "
                                            f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
                                            f"Binning: {params['xbinning']}x{params['ybinning']}, "
                                            f"Gain: {params['gain']}, Offset: {params['offset']}")
                             elif cal_type == 'dark':
-                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                logger.debug(f"File {i_file+1:3d}: {params['file']} - "
                                            f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
                                            f"Binning: {params['xbinning']}x{params['ybinning']}, "
                                            f"Exposure: {params['exptime']}s, Temp: {params['ccd_temp']}°C, "
                                            f"Gain: {params['gain']}, Offset: {params['offset']}")
                             else:  # flat
-                                logger.info(f"File {i_file+1:3d}: {params['file']} - "
+                                logger.debug(f"File {i_file+1:3d}: {params['file']} - "
                                            f"Telescope: {params['telescope']}, Instrument: {params['instrument']}, "
                                            f"Binning: {params['xbinning']}x{params['ybinning']}, "
                                            f"Filter: {params['filter']}, Exposure: {params['exptime']}s")
@@ -1635,8 +1669,8 @@ class fitsProcessing:
                 # Check parameter consistency
                 if len(file_params) > 1:
                     reference = file_params[0]
-                    logger.info(f"-" * 80)
-                    logger.info(f"PARAMETER CONSISTENCY CHECK:")
+                    logger.debug(f"-" * 80)
+                    logger.debug(f"PARAMETER CONSISTENCY CHECK:")
                     
                     # Check critical parameters based on calibration type
                     if cal_type == 'bias':
@@ -1653,7 +1687,7 @@ class fitsProcessing:
                             inconsistent_params.append(f"{param}: Expected {ref_value}, found {different_values}")
                             logger.error(f"INCONSISTENT {param.upper()}: Expected '{ref_value}', but found {different_values}")
                         else:
-                            logger.info(f"✓ {param.upper()}: All files match '{ref_value}'")
+                            logger.debug(f"✓ {param.upper()}: All files match '{ref_value}'")
                 
                 if inconsistent_params:
                     logger.error(f"CRITICAL: Cannot create master - inconsistent parameters detected:")
@@ -1662,9 +1696,9 @@ class fitsProcessing:
                     logger.error(f"Skipping master creation for session {session.fitsSessionId}")
                     continue
                 else:
-                    logger.info(f"✓ All parameters consistent - proceeding with master creation")
+                    logger.debug(f"✓ All parameters consistent - proceeding with master creation")
                 
-                logger.info(f"-" * 80)
+                logger.debug(f"-" * 80)
                 
                 # Get metadata from first file for naming
                 first_file_path = file_list[0]
@@ -1692,7 +1726,7 @@ class fitsProcessing:
                 
                 # Skip if master already exists
                 if os.path.exists(master_path):
-                    logger.info(f"Master {master_filename} already exists, skipping")
+                    logger.debug(f"Master {master_filename} already exists, skipping")
                     continue
                 
                 # Create master using Siril CLI
@@ -1721,7 +1755,7 @@ class fitsProcessing:
                     # Soft delete calibration files used in this master
                     self._soft_delete_calibration_files(session.fitsSessionId, cal_type)
                     
-                    logger.info(f"Created {cal_type} master: {master_filename}")
+                    logger.debug(f"Created {cal_type} master: {master_filename}")
                 else:
                     logger.error(f"Failed to create {cal_type} master for session {session.fitsSessionId}")
                     
@@ -1791,10 +1825,10 @@ class fitsProcessing:
                 script_content += "close\n"
                 
                 # Log the script content for debugging
-                logger.info(f"Generated Siril script for {cal_type} master:")
-                logger.info(f"Script path: {script_path}")
-                logger.info(f"Script content:\n{script_content}")
-                logger.info(f"Processing {len(temp_files)} files in {temp_dir}")
+                logger.debug(f"Generated Siril script for {cal_type} master:")
+                logger.debug(f"Script path: {script_path}")
+                logger.debug(f"Script content:\n{script_content}")
+                logger.debug(f"Processing {len(temp_files)} files in {temp_dir}")
                 
                 # Write script file
                 with open(script_path, 'w') as f:
@@ -1802,33 +1836,33 @@ class fitsProcessing:
                 
                 # Run Siril CLI
                 cmd = [siril_cli_path, '-s', script_path]
-                logger.info(f"Running Siril CLI command: {' '.join(cmd)}")
+                logger.debug(f"Running Siril CLI command: {' '.join(cmd)}")
                 
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                 
                 # Log detailed output for debugging
-                logger.info(f"Siril CLI return code: {result.returncode}")
+                logger.debug(f"Siril CLI return code: {result.returncode}")
                 if result.stdout:
-                    logger.info(f"Siril CLI stdout: {result.stdout}")
+                    logger.debug(f"Siril CLI stdout: {result.stdout}")
                 if result.stderr:
                     logger.warning(f"Siril CLI stderr: {result.stderr}")
                 
                 if result.returncode == 0:
                     # Copy result to final location
                     temp_master = os.path.join(temp_dir, 'master.fits')
-                    logger.info(f"Looking for master file: {temp_master}")
-                    logger.info(f"Files in temp directory: {os.listdir(temp_dir)}")
+                    logger.debug(f"Looking for master file: {temp_master}")
+                    logger.debug(f"Files in temp directory: {os.listdir(temp_dir)}")
                     
                     if os.path.exists(temp_master):
                         logger.info(f"Found master file, copying to: {output_path}")
                         # Ensure output directory exists
                         os.makedirs(os.path.dirname(output_path), exist_ok=True)
                         shutil.copy2(temp_master, output_path)
-                        logger.info(f"Successfully copied master file to: {output_path}")
+                        logger.debug(f"Successfully copied master file to: {output_path}")
                         return True
                     else:
                         logger.error(f"Siril completed but master file not found: {temp_master}")
-                        logger.info(f"Files in temp directory: {os.listdir(temp_dir)}")
+                        logger.debug(f"Files in temp directory: {os.listdir(temp_dir)}")
                         return False
                 else:
                     logger.error(f"Siril CLI failed with return code {result.returncode}")
@@ -1953,7 +1987,7 @@ class fitsProcessing:
                 fitsFileFilter=session.fitsSessionFilter
             )
             
-            logger.info(f"Registered master {cal_type} in database: {master_id}")
+            logger.debug(f"Registered master {cal_type} in database: {master_id}")
             return master_id
             
         except Exception as e:
@@ -1988,7 +2022,7 @@ class fitsProcessing:
                 deleted_count += 1
                 logger.debug(f"Soft deleted {cal_type} file: {file_record.fitsFileName}")
             
-            logger.info(f"Soft deleted {deleted_count} {cal_type} files from session {session_id}")
+            logger.debug(f"Soft deleted {deleted_count} {cal_type} files from session {session_id}")
             return deleted_count
             
         except Exception as e:
@@ -2460,6 +2494,136 @@ class fitsProcessing:
             logger.error(f"Error finding {cal_type} master for session {light_session.fitsSessionId}: {e}")
             return None
 
+    def findMasterFrameByFilePattern(self, light_session, cal_type):
+        """
+        Find matching master frame by scanning Masters folder for applicable files.
+        
+        This method directly scans the Masters folder to find master files that match
+        the light session criteria, which is more robust than relying on database
+        references that may be lost during session regeneration.
+        
+        Args:
+            light_session: The light session to find masters for
+            cal_type: Type of calibration ('bias', 'dark', 'flat')
+            
+        Returns:
+            str or None: Path to matching master frame, or None if not found
+        """
+        try:
+            masters_dir = os.path.join(self.repoFolder, 'Masters')
+            if not os.path.exists(masters_dir):
+                return None
+            
+            # Get light session parameters for matching
+            telescope = light_session.fitsSessionTelescope
+            imager = light_session.fitsSessionImager
+            binning_x = light_session.fitsSessionBinningX
+            binning_y = light_session.fitsSessionBinningY
+            gain = light_session.fitsSessionGain
+            offset = light_session.fitsSessionOffset
+            exposure = light_session.fitsSessionExposure
+            filter_name = light_session.fitsSessionFilter
+            
+            # Scan for master files of the specified type
+            master_files = []
+            for filename in os.listdir(masters_dir):
+                if not filename.lower().endswith(('.fit', '.fits', '.fts')):
+                    continue
+                    
+                # Check if this is a master file of the requested type
+                filename_lower = filename.lower()
+                if cal_type.lower() not in filename_lower or 'master' not in filename_lower:
+                    continue
+                
+                master_path = os.path.join(masters_dir, filename)
+                
+                # Try to get FITS header information to match parameters
+                try:
+                    from astropy.io import fits as astropy_fits
+                    with astropy_fits.open(master_path) as hdul:
+                        header = hdul[0].header
+                        
+                        # Extract parameters from master file header
+                        master_telescope = header.get('TELESCOP', '').strip()
+                        master_imager = header.get('INSTRUME', '').strip()
+                        master_binx = header.get('XBINNING', header.get('BINX', 1))
+                        master_biny = header.get('YBINNING', header.get('BINY', 1))
+                        master_gain = header.get('GAIN', None)
+                        master_offset = header.get('OFFSET', None)
+                        master_exposure = header.get('EXPTIME', None)
+                        master_filter = header.get('FILTER', '').strip()
+                        
+                        # Check matching criteria
+                        matches = True
+                        
+                        # Telescope and imager must match
+                        if telescope and master_telescope and telescope != master_telescope:
+                            matches = False
+                        if imager and master_imager and imager != master_imager:
+                            matches = False
+                            
+                        # Binning must match
+                        if binning_x is not None and master_binx != binning_x:
+                            matches = False
+                        if binning_y is not None and master_biny != binning_y:
+                            matches = False
+                            
+                        # Gain and offset should match (if available)
+                        if gain is not None and master_gain is not None:
+                            try:
+                                gain_val = float(gain) if isinstance(gain, str) else gain
+                                master_gain_val = float(master_gain) if isinstance(master_gain, str) else master_gain
+                                if abs(gain_val - master_gain_val) > 0.1:
+                                    matches = False
+                            except (ValueError, TypeError):
+                                matches = False
+                                
+                        if offset is not None and master_offset is not None:
+                            try:
+                                offset_val = float(offset) if isinstance(offset, str) else offset
+                                master_offset_val = float(master_offset) if isinstance(master_offset, str) else master_offset
+                                if abs(offset_val - master_offset_val) > 0.1:
+                                    matches = False
+                            except (ValueError, TypeError):
+                                matches = False
+                            
+                        # Dark-specific criteria: exposure time must match
+                        if cal_type == 'dark' and exposure is not None and master_exposure is not None:
+                            try:
+                                exposure_val = float(exposure) if isinstance(exposure, str) else exposure
+                                master_exposure_val = float(master_exposure) if isinstance(master_exposure, str) else master_exposure
+                                if abs(exposure_val - master_exposure_val) > 0.1:
+                                    matches = False
+                            except (ValueError, TypeError):
+                                matches = False
+                                
+                        # Flat-specific criteria: filter must match
+                        if cal_type == 'flat' and filter_name and master_filter:
+                            if filter_name != master_filter:
+                                matches = False
+                        
+                        if matches:
+                            # Get the creation/modification time of the master file
+                            file_time = os.path.getmtime(master_path)
+                            master_files.append((master_path, file_time))
+                            
+                except Exception as e:
+                    logger.warning(f"Could not read master file {master_path}: {e}")
+                    continue
+            
+            # Sort by most recent and return the best match
+            if master_files:
+                master_files.sort(key=lambda x: x[1], reverse=True)
+                best_master = master_files[0][0]
+                logger.info(f"Found matching {cal_type} master by file scan: {best_master} for light session {light_session.fitsSessionId}")
+                return best_master
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error scanning for {cal_type} master files for session {light_session.fitsSessionId}: {e}")
+            return None
+
     def linkSessionWithMasterPreference(self, light_session):
         """
         Link a light session with calibration sessions and optionally master frames.
@@ -2507,7 +2671,13 @@ class fitsProcessing:
                 
                 # Additionally try to find master frame if auto-calibration enabled
                 if use_masters:
+                    # Try database-based method first
                     master_path = self.findMatchingMasterFrame(light_session, cal_type)
+                    
+                    # If no master found in database, try scanning Masters folder directly
+                    if not master_path:
+                        master_path = self.findMasterFrameByFilePattern(light_session, cal_type)
+                    
                     if master_path and current_master != master_path:
                         setattr(light_session, master_field, master_path)
                         session_updated = True
@@ -2527,6 +2697,125 @@ class fitsProcessing:
         except Exception as e:
             logger.error(f"Error linking session {light_session.fitsSessionId} with master preference: {e}")
             return False
+
+    def updateLightSessionsWithNewMaster(self, master_path, cal_type):
+        """
+        Update all applicable light sessions with a newly created master frame.
+        
+        This method should be called after a master frame is created to automatically
+        link it to all light sessions that can use it.
+        
+        Args:
+            master_path: Path to the newly created master frame
+            cal_type: Type of calibration ('bias', 'dark', 'flat')
+            
+        Returns:
+            int: Number of light sessions updated
+        """
+        updated_count = 0
+        
+        try:
+            if not os.path.exists(master_path):
+                logger.warning(f"Master file does not exist: {master_path}")
+                return 0
+            
+            # Get master file parameters from FITS header
+            from astropy.io import fits as astropy_fits
+            with astropy_fits.open(master_path) as hdul:
+                master_header = hdul[0].header
+                
+                master_telescope = master_header.get('TELESCOP', '').strip()
+                master_imager = master_header.get('INSTRUME', '').strip()
+                master_binx = master_header.get('XBINNING', master_header.get('BINX', 1))
+                master_biny = master_header.get('YBINNING', master_header.get('BINY', 1))
+                master_gain = master_header.get('GAIN', None)
+                master_offset = master_header.get('OFFSET', None)
+                master_exposure = master_header.get('EXPTIME', None)
+                master_filter = master_header.get('FILTER', '').strip()
+            
+            # Get all light sessions that could use this master
+            light_sessions = (fitsSessionModel
+                             .select()
+                             .where(~fitsSessionModel.fitsSessionObjectName.in_(['Bias', 'Dark', 'Flat'])))
+            
+            master_field_map = {
+                'bias': 'fitsBiasMaster',
+                'dark': 'fitsDarkMaster', 
+                'flat': 'fitsFlatMaster'
+            }
+            
+            if cal_type not in master_field_map:
+                logger.error(f"Invalid calibration type: {cal_type}")
+                return 0
+                
+            master_field = master_field_map[cal_type]
+            
+            for light_session in light_sessions:
+                try:
+                    # Check if this light session can use the master
+                    matches = True
+                    
+                    # Basic matching criteria
+                    if master_telescope and light_session.fitsSessionTelescope != master_telescope:
+                        matches = False
+                    if master_imager and light_session.fitsSessionImager != master_imager:
+                        matches = False
+                    if light_session.fitsSessionBinningX != master_binx:
+                        matches = False
+                    if light_session.fitsSessionBinningY != master_biny:
+                        matches = False
+                        
+                    # Gain and offset matching (if available)
+                    if master_gain is not None and light_session.fitsSessionGain is not None:
+                        try:
+                            master_gain_val = float(master_gain) if isinstance(master_gain, str) else master_gain
+                            if abs(light_session.fitsSessionGain - master_gain_val) > 0.1:
+                                matches = False
+                        except (ValueError, TypeError):
+                            matches = False
+                            
+                    if master_offset is not None and light_session.fitsSessionOffset is not None:
+                        try:
+                            master_offset_val = float(master_offset) if isinstance(master_offset, str) else master_offset
+                            if abs(light_session.fitsSessionOffset - master_offset_val) > 0.1:
+                                matches = False
+                        except (ValueError, TypeError):
+                            matches = False
+                    
+                    # Dark-specific criteria: exposure time must match
+                    if cal_type == 'dark':
+                        if master_exposure is not None and light_session.fitsSessionExposure is not None:
+                            try:
+                                master_exposure_val = float(master_exposure) if isinstance(master_exposure, str) else master_exposure
+                                if abs(light_session.fitsSessionExposure - master_exposure_val) > 0.1:
+                                    matches = False
+                            except (ValueError, TypeError):
+                                matches = False
+                    
+                    # Flat-specific criteria: filter must match  
+                    if cal_type == 'flat':
+                        if master_filter and light_session.fitsSessionFilter != master_filter:
+                            matches = False
+                    
+                    if matches:
+                        # Update the light session with the new master
+                        current_master = getattr(light_session, master_field, None)
+                        if current_master != master_path:
+                            setattr(light_session, master_field, master_path)
+                            light_session.save()
+                            updated_count += 1
+                            logger.info(f"Updated light session {light_session.fitsSessionId} with new {cal_type} master: {master_path}")
+                            
+                except Exception as e:
+                    logger.warning(f"Error updating light session {light_session.fitsSessionId} with master: {e}")
+                    continue
+            
+            logger.info(f"Updated {updated_count} light sessions with new {cal_type} master: {master_path}")
+            return updated_count
+            
+        except Exception as e:
+            logger.error(f"Error updating light sessions with new master {master_path}: {e}")
+            return 0
 
     def _findMatchingCalibrationSession(self, light_session, cal_type):
         """
@@ -3527,191 +3816,6 @@ class fitsProcessing:
                 "masters_relinked": 0,
                 "broken_refs_cleared": 0,
                 "missing_masters_found": 0,
-                "errors": [error_msg]
-            }
-
-    def runMasterMaintenanceWorkflow(self, progress_callback=None, include_cleanup=False, fix_issues=True):
-        """
-        Run comprehensive master file maintenance workflow
-        
-        Combines validation, repair, and optional cleanup in a single operation:
-        1. Validate master file integrity and references
-        2. Repair broken database associations  
-        3. Optionally clean up old/orphaned masters
-        
-        Args:
-            progress_callback: Optional callback for progress updates
-            include_cleanup: Whether to include file cleanup (default: False)
-            fix_issues: Whether to automatically fix detected issues (default: True)
-            
-        Returns:
-            dict: Combined results from all maintenance operations
-        """
-        try:
-            logger.info("Starting comprehensive master file maintenance workflow")
-            
-            workflow_results = {
-                "validation_results": {},
-                "repair_results": {},
-                "cleanup_results": {},
-                "total_issues_found": 0,
-                "total_fixes_applied": 0,
-                "errors": []
-            }
-            
-            # Phase 1: Validation (40% of progress)
-            if progress_callback:
-                should_continue = progress_callback(0, 100, "Phase 1: Validating master files...")
-                if not should_continue:
-                    return {"status": "cancelled", "message": "Maintenance cancelled by user"}
-            
-            def validation_progress(current, total, message):
-                # Map validation progress to 0-40% of overall progress
-                progress_percent = int((current / total) * 40) if total > 0 else 0
-                if progress_callback:
-                    return progress_callback(progress_percent, 100, f"Validation: {message}")
-                return True
-            
-            try:
-                validation_results = self.validateMasterFiles(
-                    progress_callback=validation_progress, 
-                    fix_issues=fix_issues
-                )
-                workflow_results["validation_results"] = validation_results
-                
-                if validation_results.get("status") == "cancelled":
-                    return {"status": "cancelled", "message": "Maintenance cancelled during validation"}
-                
-                # Count issues found
-                issues_found = (len(validation_results.get("missing_files", [])) +
-                              len(validation_results.get("corrupted_files", [])) +
-                              len(validation_results.get("orphaned_files", [])) +
-                              len(validation_results.get("database_issues", [])))
-                
-                workflow_results["total_issues_found"] += issues_found
-                workflow_results["total_fixes_applied"] += validation_results.get("fixes_applied", 0)
-                
-                if validation_results.get("errors"):
-                    workflow_results["errors"].extend(validation_results["errors"])
-                
-            except Exception as e:
-                error_msg = f"Error during validation phase: {e}"
-                logger.error(error_msg)
-                workflow_results["errors"].append(error_msg)
-            
-            # Phase 2: Database Repair (30% of progress)
-            if progress_callback:
-                should_continue = progress_callback(45, 100, "Phase 2: Repairing database associations...")
-                if not should_continue:
-                    return {"status": "cancelled", "message": "Maintenance cancelled by user"}
-            
-            def repair_progress(current, total, message):
-                # Map repair progress to 45-75% of overall progress
-                progress_percent = 45 + int((current / total) * 30) if total > 0 else 45
-                if progress_callback:
-                    return progress_callback(progress_percent, 100, f"Repair: {message}")
-                return True
-            
-            try:
-                repair_results = self.repairMasterFileDatabase(progress_callback=repair_progress)
-                workflow_results["repair_results"] = repair_results
-                
-                if repair_results.get("status") == "cancelled":
-                    return {"status": "cancelled", "message": "Maintenance cancelled during repair"}
-                
-                # Count repairs made
-                repairs_made = (repair_results.get("masters_relinked", 0) +
-                              repair_results.get("broken_refs_cleared", 0))
-                
-                workflow_results["total_fixes_applied"] += repairs_made
-                
-                if repair_results.get("errors"):
-                    workflow_results["errors"].extend(repair_results["errors"])
-                
-            except Exception as e:
-                error_msg = f"Error during repair phase: {e}"
-                logger.error(error_msg)
-                workflow_results["errors"].append(error_msg)
-            
-            # Phase 3: Optional Cleanup (25% of progress)
-            if include_cleanup:
-                if progress_callback:
-                    should_continue = progress_callback(80, 100, "Phase 3: Cleaning up old master files...")
-                    if not should_continue:
-                        return {"status": "cancelled", "message": "Maintenance cancelled by user"}
-                
-                def cleanup_progress(current, total, message):
-                    # Map cleanup progress to 80-95% of overall progress
-                    progress_percent = 80 + int((current / total) * 15) if total > 0 else 80
-                    if progress_callback:
-                        return progress_callback(progress_percent, 100, f"Cleanup: {message}")
-                    return True
-                
-                try:
-                    cleanup_results = self.cleanupMasterFileStorage(progress_callback=cleanup_progress)
-                    workflow_results["cleanup_results"] = cleanup_results
-                    
-                    if cleanup_results.get("status") == "cancelled":
-                        return {"status": "cancelled", "message": "Maintenance cancelled during cleanup"}
-                    
-                    if cleanup_results.get("errors"):
-                        workflow_results["errors"].extend(cleanup_results["errors"])
-                        
-                except Exception as e:
-                    error_msg = f"Error during cleanup phase: {e}"
-                    logger.error(error_msg)
-                    workflow_results["errors"].append(error_msg)
-            else:
-                workflow_results["cleanup_results"] = {"status": "skipped", "message": "Cleanup not requested"}
-            
-            # Finalization
-            if progress_callback:
-                progress_callback(100, 100, "Master maintenance workflow completed!")
-            
-            # Generate summary
-            summary_lines = []
-            summary_lines.append("Master File Maintenance Summary:")
-            
-            if workflow_results["validation_results"]:
-                v_results = workflow_results["validation_results"]
-                summary_lines.append(f"  Validation: {v_results.get('total_masters_checked', 0)} masters checked")
-                summary_lines.append(f"    - Missing files: {len(v_results.get('missing_files', []))}")
-                summary_lines.append(f"    - Corrupted files: {len(v_results.get('corrupted_files', []))}")
-                summary_lines.append(f"    - Orphaned files: {len(v_results.get('orphaned_files', []))}")
-            
-            if workflow_results["repair_results"]:
-                r_results = workflow_results["repair_results"]
-                summary_lines.append(f"  Repair: {r_results.get('sessions_processed', 0)} sessions processed")
-                summary_lines.append(f"    - Masters relinked: {r_results.get('masters_relinked', 0)}")
-                summary_lines.append(f"    - Broken refs cleared: {r_results.get('broken_refs_cleared', 0)}")
-            
-            if workflow_results["cleanup_results"].get("status") != "skipped":
-                c_results = workflow_results["cleanup_results"]
-                summary_lines.append(f"  Cleanup: {c_results.get('files_deleted', 0)} files cleaned up")
-                summary_lines.append(f"    - Space reclaimed: {c_results.get('space_reclaimed', 0) / (1024*1024):.1f} MB")
-            
-            summary_lines.append(f"  Total issues found: {workflow_results['total_issues_found']}")
-            summary_lines.append(f"  Total fixes applied: {workflow_results['total_fixes_applied']}")
-            
-            summary = "\n".join(summary_lines)
-            logger.info(summary)
-            
-            workflow_results["summary"] = summary
-            workflow_results["status"] = "success" if not workflow_results["errors"] else "partial_success"
-            
-            return workflow_results
-            
-        except Exception as e:
-            error_msg = f"Critical error in master maintenance workflow: {e}"
-            logger.error(error_msg)
-            return {
-                "status": "error",
-                "message": error_msg,
-                "validation_results": {},
-                "repair_results": {},
-                "cleanup_results": {},
-                "total_issues_found": 0,
-                "total_fixes_applied": 0,
                 "errors": [error_msg]
             }
 
