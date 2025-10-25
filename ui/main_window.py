@@ -18,7 +18,7 @@ from .download_dialog import SmartTelescopeDownloadDialog
 logger = logging.getLogger(__name__)
 
 # Global version variable
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""

@@ -1,6 +1,6 @@
 # AstroFiler Change Log
 
-## Version 1.1.2 (Current Development)
+## Version 1.1.4 (Current Development)
 
 ### New Features
 - **Duplicate File Reporting**: Enhanced import system to track and report duplicate files during Load New and Sync operations
@@ -9,6 +9,7 @@
 - **DWARF FITS Header Processing**: Comprehensive DWARF folder structure parsing for `DWARF_RAW_*`, `CALI_FRAME`, and `DWARF_DARK` folders with automatic header correction
 - **Automatic Session Regeneration**: Sessions database automatically rebuilds after file imports via "Load New" or telescope downloads
 - **Enhanced File Processing**: DWARF telescope files processed with proper instrument mapping (cam_0→TELE, cam_1→WIDE) and metadata extraction
+- **Filters by Object View**: New sort option showing object > filter > file hierarchy with totals
 
 ### Smart Telescope Enhancements
 - **Dual Protocol Support**: SMB for SeeStar/StellarMate, FTP for DWARF telescopes with automatic protocol selection

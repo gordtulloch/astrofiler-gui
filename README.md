@@ -10,7 +10,7 @@
 
 AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki. Astrofiler is a tool to manage FITS files (currently, XISF files and other non-FITS images are coming in the next version!) using FITS header data. FITS Headers are embedded with the image when created as metadata. Astrofiler reads this information to rename the file and file it appropriately in the Repository.
 
-**Current Status**: Release V1.1.2
+**Current Status**: Release V1.1.4
 
 Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)
 

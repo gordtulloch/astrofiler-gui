@@ -84,7 +84,7 @@ class ImagesWidget(QWidget):
         sort_label = QLabel("Sort by:")
         sort_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Object", "Date", "Filter"])
+        self.sort_combo.addItems(["Object", "Date", "Filter", "Filters by Object"])
         self.sort_combo.setCurrentText("Object")
         self.sort_combo.setToolTip("Choose how to organize the file tree")
         
@@ -175,7 +175,7 @@ class ImagesWidget(QWidget):
             sort_method = self.sort_combo.currentText()
             
             # Show/hide Filter column based on sort method
-            if sort_method == "Filter":
+            if sort_method == "Filter" or sort_method == "Filters by Object":
                 self.file_tree.setColumnHidden(4, True)  # Hide Filter column when sorting by filter
             else:
                 self.file_tree.setColumnHidden(4, False)  # Show Filter column for other sort methods
@@ -187,6 +187,8 @@ class ImagesWidget(QWidget):
                 self._load_fits_data_by_date_paginated()
             elif sort_method == "Filter":
                 self._load_fits_data_by_filter_paginated()
+            elif sort_method == "Filters by Object":
+                self._load_fits_data_by_filters_by_object_paginated()
             else:
                 self._load_fits_data_by_object_paginated()  # Default
                 
@@ -406,6 +408,125 @@ class ImagesWidget(QWidget):
             self.file_tree.addTopLevelItem(parent_item)
             parent_item.setExpanded(False)  # Start collapsed
 
+    def _load_fits_data_by_filters_by_object_paginated(self):
+        """Load FITS file data grouped by object, then by filter with pagination of top-level objects."""
+        from peewee import fn
+        
+        # Get unique objects with search and frame filter applied
+        base_query = self._get_fits_files_query()
+        objects_query = (base_query
+                        .select(FitsFileModel.fitsFileObject)
+                        .distinct()
+                        .order_by(FitsFileModel.fitsFileObject))
+        
+        # Get all unique objects
+        all_objects = [obj.fitsFileObject or "Unknown" for obj in objects_query]
+        self.total_items = len(all_objects)
+        
+        # Calculate pagination
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        page_objects = all_objects[start_idx:end_idx]
+        
+        # Load filters for each object on current page
+        for object_name in page_objects:
+            # Query files for this object
+            if object_name == "Unknown":
+                object_files_query = self._get_fits_files_query().where(FitsFileModel.fitsFileObject.is_null(True))
+            else:
+                object_files_query = self._get_fits_files_query().where(FitsFileModel.fitsFileObject == object_name)
+            
+            # Get unique filters for this object
+            filters_for_object = (object_files_query
+                                .select(FitsFileModel.fitsFileFilter)
+                                .distinct()
+                                .order_by(FitsFileModel.fitsFileFilter))
+            
+            # Get all filters for this object
+            object_filters = [filt.fitsFileFilter or "No Filter" for filt in filters_for_object]
+            
+            # Count total files for this object
+            total_object_files = object_files_query.count()
+            
+            # Create parent item for object
+            object_parent_item = QTreeWidgetItem()
+            object_parent_item.setText(0, object_name)  # Object in first column
+            object_parent_item.setText(1, f"({total_object_files} total files, {len(object_filters)} filters)")  # Summary in Type column
+            object_parent_item.setText(2, "")  # Date
+            object_parent_item.setText(3, "")  # Exposure
+            object_parent_item.setText(4, "")  # Empty for child filter column
+            object_parent_item.setText(5, "")  # Telescope
+            object_parent_item.setText(6, "")  # Instrument
+            object_parent_item.setText(7, "")  # Temperature
+            object_parent_item.setText(8, "")  # Filename
+            
+            # Style object parent item - make object name bold and use different color
+            font = object_parent_item.font(0)
+            font.setBold(True)
+            object_parent_item.setFont(0, font)
+            
+            # Add filter items under each object
+            for filter_name in object_filters:
+                # Query files for this filter within this object
+                if filter_name == "No Filter":
+                    if object_name == "Unknown":
+                        filter_files = (self._get_fits_files_query()
+                                      .where(FitsFileModel.fitsFileObject.is_null(True))
+                                      .where(FitsFileModel.fitsFileFilter.is_null(True)))
+                    else:
+                        filter_files = (self._get_fits_files_query()
+                                      .where(FitsFileModel.fitsFileObject == object_name)
+                                      .where(FitsFileModel.fitsFileFilter.is_null(True)))
+                else:
+                    if object_name == "Unknown":
+                        filter_files = (self._get_fits_files_query()
+                                      .where(FitsFileModel.fitsFileObject.is_null(True))
+                                      .where(FitsFileModel.fitsFileFilter == filter_name))
+                    else:
+                        filter_files = (self._get_fits_files_query()
+                                      .where(FitsFileModel.fitsFileObject == object_name)
+                                      .where(FitsFileModel.fitsFileFilter == filter_name))
+                
+                filter_files = filter_files.order_by(FitsFileModel.fitsFileDate.desc())
+                filter_files_list = list(filter_files)
+                
+                # Create filter item under object
+                filter_item = QTreeWidgetItem()
+                filter_item.setText(0, f"  {filter_name}")  # Indent filter name
+                filter_item.setText(1, f"({len(filter_files_list)} files)")  # File count in Type column
+                filter_item.setText(2, "")  # Date
+                filter_item.setText(3, "")  # Exposure
+                filter_item.setText(4, filter_name)  # Filter in filter column
+                filter_item.setText(5, "")  # Telescope
+                filter_item.setText(6, "")  # Instrument
+                filter_item.setText(7, "")  # Temperature
+                filter_item.setText(8, "")  # Filename
+                
+                # Style filter item
+                font = filter_item.font(0)
+                font.setItalic(True)
+                filter_item.setFont(0, font)
+                
+                # Add individual files under this filter
+                for fits_file in filter_files_list:
+                    child_item = QTreeWidgetItem()
+                    child_item.setText(0, f"    {fits_file.fitsFileObject or 'Unknown'}")  # Double indent for file
+                    child_item.setText(1, fits_file.fitsFileType or "")
+                    child_item.setText(2, str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "")
+                    child_item.setText(3, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "")
+                    child_item.setText(4, "")  # Empty filter for child (parent shows the filter)
+                    child_item.setText(5, fits_file.fitsFileTelescop or "")
+                    child_item.setText(6, fits_file.fitsFileInstrument or "")
+                    child_item.setText(7, str(fits_file.fitsFileCCDTemp) if fits_file.fitsFileCCDTemp else "")
+                    child_item.setText(8, fits_file.fitsFileName or "")
+                    filter_item.addChild(child_item)
+                
+                object_parent_item.addChild(filter_item)
+                filter_item.setExpanded(False)  # Start collapsed
+            
+            self.file_tree.addTopLevelItem(object_parent_item)
+            object_parent_item.setExpanded(False)  # Start collapsed
+
     def _update_pagination_controls(self):
         """Update pagination control states and labels."""
         # Calculate total pages
@@ -425,14 +546,29 @@ class ImagesWidget(QWidget):
         if not item:
             return
         
-        # Only show context menu for child items (actual files), not parent items
-        if item.parent() is None:
-            return
+        # Check if this is an actual file item (not a parent/grouping item)
+        # For "Filters by Object" view: Object > Filter > File (3 levels)
+        # For other views: Object/Date/Filter > File (2 levels)
         
         # Get the filename from the last column
         filename = item.text(8)  # Filename is in column 8
-        if not filename:
+        
+        # Only show context menu for items that have a filename and are not top-level grouping items
+        if not filename or item.parent() is None:
             return
+        
+        # For "Filters by Object" view, files are at third level (have grandparent)
+        # For other views, files are at second level (have parent but no grandparent)
+        sort_method = self.sort_combo.currentText()
+        if sort_method == "Filters by Object":
+            # In this view, actual files should have both parent and grandparent
+            if item.parent() and item.parent().parent() is None:
+                # This is a filter item (second level), not a file item
+                return
+        else:
+            # In other views, actual files should have parent but no grandparent
+            # (already checked that parent is not None above)
+            pass
         
         # Create context menu
         context_menu = QMenu(self)
@@ -579,14 +715,32 @@ class ImagesWidget(QWidget):
     
     def on_item_double_clicked(self, item, column):
         """Handle double-click on tree widget items"""
-        # Only handle double-clicks on child items (actual files), not parent items
-        if item.parent() is None:
-            return
+        # Check if this is an actual file item (not a parent/grouping item)
+        # For "Filters by Object" view: Object > Filter > File (3 levels)
+        # For other views: Object/Date/Filter > File (2 levels)
         
         # Get the filename from the last column
         filename = item.text(8)  # Filename is in column 8
-        if filename:
-            self._view_file(filename)
+        
+        # Only handle double-clicks on items that have a filename and are not top-level grouping items
+        if not filename or item.parent() is None:
+            return
+        
+        # For "Filters by Object" view, files are at third level (have grandparent)
+        # For other views, files are at second level (have parent but no grandparent)
+        sort_method = self.sort_combo.currentText()
+        if sort_method == "Filters by Object":
+            # In this view, actual files should have both parent and grandparent
+            if item.parent() and item.parent().parent() is None:
+                # This is a filter item (second level), not a file item
+                return
+        else:
+            # In other views, actual files should have parent but no grandparent
+            # (already checked that parent is not None above)
+            pass
+        
+        # Open the file
+        self._view_file(filename)
     
     def perform_search(self):
         """Perform search and reset to first page."""
