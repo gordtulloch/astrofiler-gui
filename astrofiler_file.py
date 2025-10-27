@@ -637,6 +637,50 @@ class fitsProcessing:
         return newFitsFileId
 
     #################################################################################################################
+    ## convertXisfToFits - Convert an XISF file to FITS format for processing                                     ##
+    #################################################################################################################
+    def convertXisfToFits(self, xisf_file_path):
+        """
+        Convert an XISF file to FITS format using the XISF converter.
+        Places the converted FITS file in the source (incoming) folder and leaves the original XISF file in place.
+        
+        Args:
+            xisf_file_path (str): Full path to the XISF file
+            
+        Returns:
+            str: Path to the created FITS file in the source folder, or None if conversion failed
+        """
+        try:
+            # Import the XISF converter
+            from xisfFile import XISFConverter
+            
+            # Create converter instance
+            converter = XISFConverter(xisf_file_path)
+            
+            # Generate output path in the source (incoming) folder
+            xisf_filename = os.path.basename(xisf_file_path)
+            base_filename = os.path.splitext(xisf_filename)[0]
+            fits_filename = f"{base_filename}.fits"
+            fits_output_path = os.path.join(self.sourceFolder, fits_filename)
+            
+            # Convert to FITS
+            logger.info(f"Converting XISF file: {xisf_file_path}")
+            logger.info(f"Output FITS file will be placed in: {fits_output_path}")
+            created_fits_path = converter.convert_to_fits(fits_output_path)
+            
+            logger.info(f"Successfully converted XISF to FITS: {created_fits_path}")
+            logger.info(f"Original XISF file remains at: {xisf_file_path}")
+            return created_fits_path
+            
+        except ImportError as e:
+            logger.error(f"XISF converter not available: {e}")
+            logger.error("Please ensure the xisfFile package is properly installed")
+            return None
+        except Exception as e:
+            logger.error(f"Error converting XISF file {xisf_file_path}: {e}")
+            return None
+
+    #################################################################################################################
     ## registerFitsImages - this function scans the images folder and registers all fits files in the database     ##
     #################################################################################################################
     def registerFitsImages(self,moveFiles=True, progress_callback=None):
@@ -658,16 +702,17 @@ class fitsProcessing:
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                if "fit" in file_extension.lower():
+                # Check for FITS files (.fit, .fits) and XISF files (.xisf)
+                if "fit" in file_extension.lower() or file_extension.lower() == ".xisf":
                     total_files += 1
         
-        logger.info(f"Found {total_files} FITS files to process")
+        logger.info(f"Found {total_files} FITS and XISF files to process")
         
         # If no files found, return early
         if total_files == 0:
-            logger.info("No FITS files found to process")
+            logger.info("No FITS or XISF files found to process")
             if progress_callback:
-                progress_callback(0, 0, "No FITS files found")
+                progress_callback(0, 0, "No FITS or XISF files found")
             return registeredFiles
         
         # Second pass: process files with progress tracking
@@ -682,9 +727,11 @@ class fitsProcessing:
             logger.debug(f"Processing directory: {root} with {len(files)} files")
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                if "fit" in file_extension.lower():
+                # Check for FITS files (.fit, .fits) and XISF files (.xisf)
+                if "fit" in file_extension.lower() or file_extension.lower() == ".xisf":
                     currCount += 1
-                    logger.debug(f"Found FITS file #{currCount}: {file}")
+                    file_type = "XISF" if file_extension.lower() == ".xisf" else "FITS"
+                    logger.debug(f"Found {file_type} file #{currCount}: {file}")
                     
                     # Call progress callback if provided
                     if progress_callback:
@@ -710,27 +757,73 @@ class fitsProcessing:
                     
                     logger.debug(f"Processing file {currCount}/{total_files} ({progress_percent:.1f}%): {file}{eta_str}")
                     
-                    # Try to register the file
+                    # Handle XISF files by converting them to FITS first
+                    actual_file = file
+                    actual_root = root
+                    converted_file = None
+                    
+                    if file_extension.lower() == ".xisf":
+                        logger.info(f"Converting XISF file to FITS: {file}")
+                        xisf_path = os.path.join(root, file)
+                        fits_path = self.convertXisfToFits(xisf_path)
+                        
+                        if fits_path is None:
+                            logger.error(f"Failed to convert XISF file: {file}")
+                            failed_files += 1
+                            continue
+                        
+                        # Update file info to point to the converted FITS file
+                        actual_root = os.path.dirname(fits_path)
+                        actual_file = os.path.basename(fits_path)
+                        converted_file = fits_path
+                        logger.info(f"Successfully converted XISF to FITS: {actual_file}")
+                    
+                    # Try to register the file (original FITS or converted from XISF)
                     try:
-                        newFitsFileId = self.registerFitsImage(root, file, moveFiles)
+                        newFitsFileId = self.registerFitsImage(actual_root, actual_file, moveFiles)
                     except Exception as e:
-                        logger.error(f"Exception registering file {file}: {str(e)}")
+                        logger.error(f"Exception registering file {actual_file}: {str(e)}")
                         newFitsFileId=None
+                        
+                        # Clean up converted file if registration failed
+                        if converted_file and os.path.exists(converted_file):
+                            try:
+                                os.remove(converted_file)
+                                logger.info(f"Cleaned up failed conversion: {converted_file}")
+                            except Exception as cleanup_e:
+                                logger.warning(f"Failed to clean up converted file {converted_file}: {cleanup_e}")
 
                     if newFitsFileId == "DUPLICATE":
                         # File was skipped because it's a duplicate
                         duplicate_files += 1
-                        logger.debug(f"Skipped duplicate file: {file}")
+                        logger.debug(f"Skipped duplicate file: {actual_file}")
+                        
+                        # Clean up converted file if it's a duplicate
+                        if converted_file and os.path.exists(converted_file):
+                            try:
+                                os.remove(converted_file)
+                                logger.info(f"Cleaned up duplicate conversion: {converted_file}")
+                            except Exception as cleanup_e:
+                                logger.warning(f"Failed to clean up converted file {converted_file}: {cleanup_e}")
+                                
                     elif newFitsFileId is not None:
                         # Add the file to the list of registered files
                         registeredFiles.append(newFitsFileId)
                         successful_files += 1
-                        logger.debug(f"Successfully registered file: {file}")
+                        logger.debug(f"Successfully registered file: {actual_file}")
                     else:
                         failed_files += 1
-                        logger.warning(f"Failed to register file: {file}")
+                        logger.warning(f"Failed to register file: {actual_file}")
+                        
+                        # Clean up converted file if registration failed
+                        if converted_file and os.path.exists(converted_file):
+                            try:
+                                os.remove(converted_file)
+                                logger.info(f"Cleaned up failed conversion: {converted_file}")
+                            except Exception as cleanup_e:
+                                logger.warning(f"Failed to clean up converted file {converted_file}: {cleanup_e}")
                 else:
-                    logger.debug("Ignoring non-FITS file: "+file)
+                    logger.debug("Ignoring non-FITS/XISF file: "+file)
             
             # Check if processing was cancelled
             if cancelled_by_user:

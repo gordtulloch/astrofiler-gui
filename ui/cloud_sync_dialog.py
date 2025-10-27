@@ -1016,7 +1016,7 @@ class CloudSyncDialog(QDialog):
                             # Look for any file with this timestamp
                             existing_file = fitsFile.get(fitsFile.fitsFileName.contains(timestamp))
                             logger.info(f"File already exists in repository (by timestamp {timestamp}): {filename_only}")
-                        except (fitsFile.DoesNotExist, fitsFile.MultipleObjectsReturned):
+                        except fitsFile.DoesNotExist:
                             pass
                 
                 if existing_file is None:

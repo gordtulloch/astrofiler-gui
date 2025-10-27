@@ -9,3 +9,4 @@ Pillow
 pysmb
 google-cloud-storage
 scipy
+lz4>=3.0.0

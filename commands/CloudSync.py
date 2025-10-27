@@ -583,7 +583,7 @@ def perform_complete_sync_cli(cloud_config, repo_path):
                     # Look for any file with this timestamp
                     existing_file = fitsFile.get(fitsFile.fitsFileName.contains(timestamp))
                     print(f"    → File already exists in repository (by timestamp {timestamp}): {filename_only}")
-                except (fitsFile.DoesNotExist, fitsFile.MultipleObjectsReturned):
+                except fitsFile.DoesNotExist:
                     pass
         
         if existing_file is None:

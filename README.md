@@ -20,6 +20,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 
 ### � **Smart Telescope Integration**
 - **SEESTAR Support**: Direct connection to SEESTAR smart telescopes via SMB/CIFS protocol
+- **StellarMate Support**: Direct connection to StellarMate systems via SMB/CIFS protocol
 - **DWARF Support**: Direct connection to DWARF smart telescopes via FTP protocol (experimental)
 - **Network Discovery**: Automatic scanning of local network to locate telescopes
 - **Remote File Access**: Browse and download FITS files directly from telescope storage
@@ -71,7 +72,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **File Integrity**: SHA-256 hashing for duplicate detection and verification
 
 ### 🛠️ **Tools & Integration**
-- **Smart Telescope Downloads**: Direct FITS file acquisition from SEESTAR telescopes
+- **Smart Telescope Downloads**: Direct FITS file acquisition from SEESTAR and StellarMate telescopes
   - One-click network scanning and connection
   - Batch download with progress monitoring
   - Optional remote file deletion after successful processing
@@ -132,7 +133,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 ### Network Requirements (for Smart Telescope Features)
 - **SMB/CIFS Protocol**: Port 445 access to telescope network
 - **Local Network**: Telescope and computer on same network segment
-- **Supported Telescopes**: SEESTAR, DWARF 3 (experimental)
+- **Supported Telescopes**: SEESTAR, StellarMate, DWARF 3 (experimental)
 
 ### Key Dependencies
 - **PySide6**: Modern Qt6-based GUI framework

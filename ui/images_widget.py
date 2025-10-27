@@ -72,7 +72,7 @@ class ImagesWidget(QWidget):
         self.load_new_button = QPushButton("Load New")
         self.load_new_button.setMaximumSize(100, 28)
         self.load_new_button.setStyleSheet("QPushButton { font-size: 10px; }")
-        self.load_new_button.setToolTip("Load new files from incoming directory")
+        self.load_new_button.setToolTip("Load new FITS and XISF files from incoming directory")
         self.load_new_button.clicked.connect(self.load_repo)
         
         # Add download button after load new
@@ -690,7 +690,8 @@ class ImagesWidget(QWidget):
             # Show warning dialog first
             warning_msg = ("This function creates folders, renames files, and moves them into the folder structure.\n\n"
                           "This operation will:\n"
-                          "• Scan your source directory for FITS files\n"
+                          "• Scan your source directory for FITS and XISF files\n"
+                          "• Convert XISF files to FITS format automatically\n"
                           "• Create an organized folder structure\n"
                           "• Move and rename files according to their metadata\n\n"
                           "Do you want to continue?")
@@ -710,7 +711,7 @@ class ImagesWidget(QWidget):
             was_cancelled = False
             
             # Create progress dialog
-            progress_dialog = QProgressDialog("Scanning for FITS files...", "Cancel", 0, 100, self)
+            progress_dialog = QProgressDialog("Scanning for FITS and XISF files...", "Cancel", 0, 100, self)
             progress_dialog.setWindowTitle("Loading Repository")
             progress_dialog.setWindowModality(Qt.WindowModal)
             progress_dialog.setMinimumDuration(0)  # Show immediately

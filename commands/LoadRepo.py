@@ -2,8 +2,9 @@
 """
 LoadRepo.py - Command line utility to load repository from incoming folder
 
-This script scans the source folder for FITS files and processes them into the repository.
+This script scans the source folder for FITS and XISF files and processes them into the repository.
 It moves files from the source folder to the repository structure and registers them in the database.
+XISF files are automatically converted to FITS format during processing.
 
 Usage:
     python LoadRepo.py [options]
@@ -94,7 +95,7 @@ def validate_paths(source_folder, repo_folder):
 def main():
     """Main function to load repository from command line."""
     parser = argparse.ArgumentParser(
-        description="Load FITS files from source folder into repository",
+        description="Load FITS and XISF files from source folder into repository",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -184,9 +185,9 @@ Examples:
         
         if len(registered_files) == 0:
             if duplicate_count > 0:
-                logger.warning(f"No new FITS files processed! {duplicate_count} duplicate files were skipped.")
+                logger.warning(f"No new FITS/XISF files processed! {duplicate_count} duplicate files were skipped.")
             else:
-                logger.warning("No FITS files found to process!")
+                logger.warning("No FITS or XISF files found to process!")
             return 1
         else:
             logger.info("Repository load completed successfully!")
