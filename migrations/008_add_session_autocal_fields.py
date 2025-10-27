@@ -1,50 +1,45 @@
-"""Peewee migrations -- 008_migration_placeholder.py.
+"""
+Migration 008: Add auto-calibration tracking fields to fitsSession table
 
-Some examples (model - class or model name)::
-
-    > Model = migrator.orm['table_name']            # Return model in current state by name
-    > Model = migrator.ModelClass                   # Return model in current state by name
-
-    > migrator.sql(sql)                             # Run custom SQL
-    > migrator.run(func, *args, **kwargs)           # Run python function with the given args
-    > migrator.create_model(Model)                  # Create a model (could be used as decorator)
-    > migrator.remove_model(model, cascade=True)    # Remove a model
-    > migrator.add_fields(model, **fields)          # Add fields to a model
-    > migrator.change_fields(model, **fields)       # Change fields
-    > migrator.remove_fields(model, *field_names, cascade=True)
-    > migrator.rename_field(model, old_field_name, new_field_name)
-    > migrator.rename_table(model, new_table_name)
-    > migrator.add_index(model, *col_names, unique=False)
-    > migrator.drop_index(model, *col_names)
-    > migrator.add_not_null(model, *field_names)
-    > migrator.add_default(model, field_name, default)
-    > migrator.add_constraint(model, name, sql)
-    > migrator.drop_index(model, *col_names)
-    > migrator.drop_not_null(model, *field_names)
-    > migrator.drop_constraints(model, *constraints)
-
+This migration adds new fields to track auto-calibration status and relationships
+for sessions in the auto-calibration system:
+- is_auto_calibration: Flag indicating if session uses auto-calibration
+- auto_calibration_dark_session_id: ID of dark session used for calibration
+- auto_calibration_flat_session_id: ID of flat session used for calibration  
+- auto_calibration_bias_session_id: ID of bias session used for calibration
+- master_dark_created: Flag indicating if master dark was created for this session
+- master_flat_created: Flag indicating if master flat was created for this session
+- master_bias_created: Flag indicating if master bias was created for this session
 """
 
-from contextlib import suppress
-
 import peewee as pw
-from peewee_migrate import Migrator
 
+def migrate(migrator, database, fake=False, **kwargs):
+    """
+    Add auto-calibration tracking fields to fitsSession table
+    """
+    # Add auto-calibration tracking fields
+    migrator.add_columns('fitssession', 
+        is_auto_calibration=pw.BooleanField(null=True, default=False),
+        auto_calibration_dark_session_id=pw.TextField(null=True),
+        auto_calibration_flat_session_id=pw.TextField(null=True),
+        auto_calibration_bias_session_id=pw.TextField(null=True),
+        master_dark_created=pw.BooleanField(null=True, default=False),
+        master_flat_created=pw.BooleanField(null=True, default=False),
+        master_bias_created=pw.BooleanField(null=True, default=False)
+    )
 
-with suppress(ImportError):
-    import playhouse.postgres_ext as pw_pext
-
-
-def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
-    """Write your migrations here."""
-    
-    # This migration is a placeholder - schema changes may have been
-    # handled in other migrations or the database is already current
-    pass
-
-
-def rollback(migrator: Migrator, database: pw.Database, *, fake=False):
-    """Write your rollback migrations here."""
-    
-    # No changes to rollback
-    pass
+def rollback(migrator, database, fake=False, **kwargs):
+    """
+    Remove auto-calibration tracking fields from fitsSession table
+    """
+    # Remove the auto-calibration tracking fields
+    migrator.drop_columns('fitssession', 
+        'is_auto_calibration',
+        'auto_calibration_dark_session_id',
+        'auto_calibration_flat_session_id',
+        'auto_calibration_bias_session_id',
+        'master_dark_created',
+        'master_flat_created',
+        'master_bias_created'
+    )
