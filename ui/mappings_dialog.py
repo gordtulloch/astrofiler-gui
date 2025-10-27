@@ -23,7 +23,8 @@ class MappingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Mappings")
         self.setModal(True)
-        self.resize(800, 600)
+        self.resize(1200, 600)
+        self.setMinimumSize(1000, 500)  # Set minimum size to prevent making it too small
         
         # Store mapping rows for dynamic management
         self.mapping_rows = []
@@ -132,8 +133,8 @@ class MappingsDialog(QDialog):
         
         # Set column stretch factors for consistent alignment
         row_layout.setColumnStretch(1, 2)  # Card combo
-        row_layout.setColumnStretch(3, 3)  # Current combo
-        row_layout.setColumnStretch(5, 3)  # Replace combo
+        row_layout.setColumnStretch(3, 4)  # Current combo (increased from 3)
+        row_layout.setColumnStretch(5, 4)  # Replace combo (increased from 3)
         
         # Card dropdown
         card_combo = QComboBox()
@@ -428,15 +429,23 @@ class MappingsDialog(QDialog):
                 total_updates = 0
                 files_moved = 0
                 
-                if mapping_to_apply['card'] in ['TELESCOP', 'INSTRUME']:
-                    field_name = 'fitsFileTelescop' if mapping_to_apply['card'] == 'TELESCOP' else 'fitsFileInstrument'
+                if mapping_to_apply['card'] in ['TELESCOP', 'INSTRUME', 'FILTER', 'OBSERVER', 'NOTES']:
+                    # Map card names to database field names
+                    field_mapping = {
+                        'TELESCOP': 'fitsFileTelescop',
+                        'INSTRUME': 'fitsFileInstrument', 
+                        'FILTER': 'fitsFileFilter',
+                        'OBSERVER': 'fitsFileObserver',
+                        'NOTES': 'fitsFileNotes'
+                    }
+                    field_name = field_mapping[mapping_to_apply['card']]
                     
                     # Find files that match the current value
                     if mapping_to_apply['current']:
                         # Specific value mapping
                         query = FitsFileModel.select().where(getattr(FitsFileModel, field_name) == mapping_to_apply['current'])
                     else:
-                        # Default mapping for null/empty values
+                        # Default mapping for null/empty values - matches both NULL and empty string
                         query = FitsFileModel.select().where(
                             (getattr(FitsFileModel, field_name).is_null()) |
                             (getattr(FitsFileModel, field_name) == '')

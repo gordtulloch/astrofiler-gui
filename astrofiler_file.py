@@ -302,6 +302,7 @@ def mapFitsHeader(hdr, file_path):
             card = mapping.card
             current = mapping.current
             replace = mapping.replace
+            
             # Skip mappings without a replacement value
             if not replace:
                 continue
@@ -316,7 +317,19 @@ def mapFitsHeader(hdr, file_path):
                         hdr[card] = replace
                         header_modified = True
                         logger.info(f"Applied mapping for {card}: '{current}' → '{replace}' in {file_path}")
-            # No default mapping logic
+                else:
+                    # Empty/blank current value - match NULL, empty string, or missing header
+                    if not header_value:  # Matches empty string, None converted to string, etc.
+                        hdr[card] = replace
+                        header_modified = True
+                        logger.info(f"Applied default mapping for {card}: empty/null → '{replace}' in {file_path}")
+            else:
+                # Card doesn't exist in header
+                if not current:
+                    # Empty current value mapping - add the header with replacement value
+                    hdr[card] = replace
+                    header_modified = True
+                    logger.info(f"Added missing header {card} with default value '{replace}' in {file_path}")
         
         return header_modified
         
@@ -427,6 +440,13 @@ class fitsProcessing:
                 telescope=hdr["TELESCOP"]
             else:
                 telescope="Unknown"
+            
+            # Special handling for SeeStar telescopes - set FILTER to RGB if missing or empty
+            if telescope and ("seestar" in telescope.lower()):
+                if "FILTER" not in hdr or not hdr["FILTER"]:
+                    hdr["FILTER"] = "RGB"
+                    header_modified = True
+                    logger.info(f"Set FILTER to RGB for SeeStar telescope in {file}")
             
             # Fix calibration frames where OBJECT is set to an object rather than the frametype
             if "DARK" in hdr["IMAGETYP"].upper():
@@ -943,12 +963,14 @@ class fitsProcessing:
                             fitsFileObject=hdr["OBJECT"],fitsFileExpTime=exposure,fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=telescope,
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", None),
+                            fitsFileObserver=hdr.get("OBSERVER", None),fitsFileNotes=hdr.get("NOTES", None),
                             fitsFileHash=fileHash,fitsFileSession=None)
             else:
                 newfile=FitsFileModel.create(fitsFileId=uuid.uuid4(),fitsFileName=normalize_file_path(fileName),fitsFileDate=hdr["DATE-OBS"],fitsFileType=hdr["IMAGETYP"].upper(),
                             fitsFileExpTime=exposure,fitsFileXBinning=hdr["XBINNING"],
                             fitsFileYBinning=hdr["YBINNING"],fitsFileCCDTemp=hdr["CCD-TEMP"],fitsFileTelescop=telescope,
                             fitsFileInstrument=hdr["INSTRUME"],fitsFileFilter=hdr.get("FILTER", "OSC"),
+                            fitsFileObserver=hdr.get("OBSERVER", None),fitsFileNotes=hdr.get("NOTES", None),
                             fitsFileHash=fileHash,fitsFileSession=None)
             return newfile.fitsFileId
         else:

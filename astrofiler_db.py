@@ -33,6 +33,8 @@ class fitsFile(BaseModel):
     fitsFileGain = pw.TextField(null=True)
     fitsFileOffset = pw.TextField(null=True)
     fitsFileFilter = pw.TextField(null=True)
+    fitsFileObserver = pw.TextField(null=True)
+    fitsFileNotes = pw.TextField(null=True)
     fitsFileHash = pw.TextField(null=True)
     fitsFileSession = pw.TextField(null=True)
 

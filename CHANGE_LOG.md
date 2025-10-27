@@ -1,6 +1,6 @@
 # AstroFiler Change Log
 
-## Version 1.1.4 (Current Development)
+## Version 1.1.5 (Current Development)
 
 ### New Features
 - **Duplicate File Reporting**: Enhanced import system to track and report duplicate files during Load New and Sync operations
@@ -10,6 +10,7 @@
 - **Automatic Session Regeneration**: Sessions database automatically rebuilds after file imports via "Load New" or telescope downloads
 - **Enhanced File Processing**: DWARF telescope files processed with proper instrument mapping (cam_0→TELE, cam_1→WIDE) and metadata extraction
 - **Filters by Object View**: New sort option showing object > filter > file hierarchy with totals
+- **Command Line Telescope Downloads**: New DownloadImages.py command for downloading telescope images from command line with full GUI feature parity
 
 ### Smart Telescope Enhancements
 - **Dual Protocol Support**: SMB for SeeStar/StellarMate, FTP for DWARF telescopes with automatic protocol selection
@@ -17,6 +18,7 @@
 - **Telescope-Specific Processing**: Different scanning and processing logic for each telescope type
 - **Network Discovery**: Enhanced hostname resolution with telescope-specific patterns and default hostnames
 - **Download Progress**: Dynamic protocol indicators (SMB vs FTP) in download progress messages
+- **SeeStar Filter Enhancement**: Automatically sets FILTER header to "RGB" for SeeStar telescope images when missing
 
 ### UI/UX Improvements  
 - **Mapping Dialog Defaults**: All checkboxes now enabled by default ("Update FITS headers", "Apply to database", "Reorganize folders")
@@ -36,6 +38,14 @@
 - **Smart Telescope Manager**: Enhanced with FTP support, folder validation, and telescope-specific configuration
 - **File Registration**: Downloaded files automatically registered in database with proper metadata and folder organization
 - **Progress Tracking**: Enhanced progress dialogs with granular updates and metadata extraction feedback
+- **Enhanced Mapping System**: Improved FITS header mappings to handle NULL database values and support FILTER field
+  - Empty/blank mapping values now match both NULL and empty string database fields
+  - FILTER field mappings now supported with database update functionality
+  - Automatic application to missing headers during file registration
+- **Database Schema Enhancement**: Added OBSERVER and NOTES fields to FITS file database
+  - New fitsFileObserver and fitsFileNotes columns for complete metadata storage
+  - Full mapping support for OBSERVER and NOTES cards with database updates
+  - Automatic extraction and storage during file registration
 
 ### Bug Fixes
 - Fixed missing accept_mappings method in MappingsDialog

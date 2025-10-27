@@ -57,6 +57,12 @@ class TelescopeDownloadWorker(QThread):
                 else:
                     header['MOSAIC'] = False
                 
+                # Special handling for SeeStar telescopes - set FILTER to RGB if not present
+                if self.telescope_type == "SeeStar":
+                    if "FILTER" not in header or not header["FILTER"]:
+                        header["FILTER"] = "RGB"
+                        logger.info(f"Set FILTER to RGB for SeeStar telescope in {os.path.basename(fits_path)}")
+                
                 hdul.flush()
                 
         except Exception as e:
