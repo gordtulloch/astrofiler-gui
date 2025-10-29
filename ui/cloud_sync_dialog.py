@@ -1,12 +1,22 @@
 import os
 import logging
 import configparser
+import base64
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QLabel, QFrame, QMessageBox, QGroupBox, QApplication)
 from PySide6.QtGui import QFont
 
 logger = logging.getLogger(__name__)
+
+# Import hash functions from astrofiler_cloud for duplicate detection
+try:
+    from astrofiler_cloud import _calculate_md5_hash, _get_cloud_file_hashes
+except ImportError:
+    # Fallback in case of import issues
+    logger.warning("Could not import hash functions from astrofiler_cloud")
+    _calculate_md5_hash = None
+    _get_cloud_file_hashes = None
 
 
 # Cloud Sync Helper Functions
@@ -160,13 +170,24 @@ def list_gcs_bucket_files(bucket_name, auth_info, prefix=""):
             # Skip directory markers (objects ending with /)
             if blob.name.endswith('/'):
                 continue
+            
+            # Convert MD5 hash from base64 to hex format for comparison
+            md5_hash_hex = None
+            if blob.md5_hash:
+                try:
+                    # GCS returns MD5 as base64, convert to hex for comparison
+                    md5_hash_hex = base64.b64decode(blob.md5_hash).hex()
+                except Exception as e:
+                    logger.warning(f"Failed to convert MD5 hash for {blob.name}: {e}")
+                    md5_hash_hex = None
                 
             file_info = {
                 'name': blob.name,
                 'size': blob.size,
                 'created': blob.time_created.isoformat() if blob.time_created else None,
                 'updated': blob.updated.isoformat() if blob.updated else None,
-                'md5_hash': blob.md5_hash,
+                'md5_hash': md5_hash_hex,  # Now in hex format for easy comparison
+                'md5_hash_base64': blob.md5_hash,  # Keep original for reference
                 'crc32c': blob.crc32c,
                 'content_type': blob.content_type,
                 'url': f"gs://{bucket_name}/{blob.name}",
@@ -226,6 +247,83 @@ def download_file_from_gcs(bucket_name, auth_info, gcs_object_name, local_file_p
     except Exception as e:
         logger.error(f"Failed to download gs://{bucket_name}/{gcs_object_name}: {e}")
         return False, str(e)
+
+
+def find_cloud_duplicates(cloud_files):
+    """
+    Find duplicate files in cloud storage based on MD5 hash.
+    
+    Args:
+        cloud_files (list): List of cloud file dictionaries
+        
+    Returns:
+        dict: Dictionary with duplicate statistics and details
+    """
+    try:
+        hash_groups = {}
+        files_with_hashes = 0
+        
+        # Group files by MD5 hash
+        for file_info in cloud_files:
+            md5_hash = file_info.get('md5_hash')
+            if md5_hash:
+                files_with_hashes += 1
+                if md5_hash not in hash_groups:
+                    hash_groups[md5_hash] = []
+                hash_groups[md5_hash].append(file_info)
+        
+        # Find duplicates (hash groups with more than one file)
+        duplicates = {}
+        total_duplicate_files = 0
+        total_wasted_space = 0
+        
+        for hash_value, files in hash_groups.items():
+            if len(files) > 1:
+                duplicates[hash_value] = {
+                    'files': files,
+                    'count': len(files),
+                    'size': files[0].get('size', 0),  # All files with same hash have same size
+                    'wasted_space': (len(files) - 1) * files[0].get('size', 0)
+                }
+                total_duplicate_files += len(files)
+                total_wasted_space += duplicates[hash_value]['wasted_space']
+        
+        return {
+            'total_files': len(cloud_files),
+            'files_with_hashes': files_with_hashes,
+            'duplicate_groups': len(duplicates),
+            'duplicate_files': total_duplicate_files,
+            'unique_duplicates': len(duplicates),  # Number of unique content duplicated
+            'wasted_space_bytes': total_wasted_space,
+            'details': duplicates
+        }
+        
+    except Exception as e:
+        logger.error(f"Error finding cloud duplicates: {e}")
+        return {
+            'total_files': len(cloud_files) if cloud_files else 0,
+            'files_with_hashes': 0,
+            'duplicate_groups': 0,
+            'duplicate_files': 0,
+            'unique_duplicates': 0,
+            'wasted_space_bytes': 0,
+            'details': {},
+            'error': str(e)
+        }
+
+
+def format_file_size(size_bytes):
+    """Convert bytes to human readable format."""
+    if size_bytes == 0:
+        return "0 B"
+    
+    size_names = ["B", "KB", "MB", "GB", "TB"]
+    import math
+    i = int(math.floor(math.log(size_bytes, 1024)))
+    p = math.pow(1024, i)
+    s = round(size_bytes / p, 2)
+    return f"{s} {size_names[i]}"
+
 
 class CloudSyncDialog(QDialog):
     """Dialog for Cloud Sync operations"""
@@ -541,23 +639,36 @@ class CloudSyncDialog(QDialog):
             if progress.wasCanceled():
                 return
             
+            # Analyze for duplicates in cloud storage
+            progress.setLabelText("Analyzing cloud storage for duplicates...")
+            QApplication.processEvents()
+            
+            duplicate_analysis = find_cloud_duplicates(cloud_files)
+            
+            if progress.wasCanceled():
+                return
+            
             # Update progress
-            progress.setLabelText("Comparing with local files...")
+            progress.setLabelText("Analyzing matches with local files...")
             progress.setMaximum(len(cloud_files))
             QApplication.processEvents()
             
-            # Compare with local files and update URLs
+            # Track different types of matches
             matches_found = 0
+            filename_matches = 0
+            hash_matches = 0
+            partial_matches = 0
+            
             for i, cloud_file in enumerate(cloud_files):
                 if progress.wasCanceled():
                     break
                     
                 progress.setValue(i)
-                progress.setLabelText(f"Processing: {cloud_file['name']}")
+                filename = cloud_file.get('name', '').split('/')[-1]
+                progress.setLabelText(f"Analyzing: {filename}")
                 QApplication.processEvents()
                 
-                # Try to find matching local file
-                # This is a simplified match - you might want to implement more sophisticated matching
+                # Try to find matching local file using enhanced matching
                 local_file = self.find_matching_local_file(cloud_file)
                 
                 if local_file:
@@ -567,25 +678,156 @@ class CloudSyncDialog(QDialog):
                         fitsFile.fitsFileId == local_file.fitsFileId
                     ).execute()
                     matches_found += 1
+                    
+                    # Track match type for reporting
+                    if local_file.fitsFileName == filename:
+                        filename_matches += 1
+                    elif cloud_file.get('md5_hash') and _calculate_md5_hash:
+                        try:
+                            local_hash = _calculate_md5_hash(local_file.fitsFilePath)
+                            if local_hash == cloud_file['md5_hash']:
+                                hash_matches += 1
+                            else:
+                                partial_matches += 1
+                        except:
+                            partial_matches += 1
+                    else:
+                        partial_matches += 1
                     logger.info(f"Updated cloud URL for file: {local_file.fitsFileName}")
             
             progress.close()
             
-            # Show results
-            QMessageBox.information(
+            # Build detailed results message
+            hash_function_available = _calculate_md5_hash is not None
+            results_message = (
+                f"Cloud analysis completed successfully!\n\n"
+                f"📊 Analysis Results:\n"
+                f"• Cloud files found: {len(cloud_files)}\n"
+                f"• Total local matches: {matches_found}\n"
+                f"• Database records updated: {matches_found}\n\n"
+            )
+            
+            # Add duplicate analysis results
+            if duplicate_analysis.get('duplicate_groups', 0) > 0:
+                wasted_space = duplicate_analysis.get('wasted_space_bytes', 0)
+                results_message += (
+                    f"🔍 Duplicate Detection:\n"
+                    f"• Duplicate file groups: {duplicate_analysis['duplicate_groups']}\n"
+                    f"• Total duplicate files: {duplicate_analysis['duplicate_files']}\n"
+                    f"• Wasted storage space: {format_file_size(wasted_space)}\n\n"
+                )
+            else:
+                results_message += (
+                    f"✅ No duplicates found in cloud storage!\n\n"
+                )
+            
+            if hash_function_available and matches_found > 0:
+                results_message += (
+                    f"🔍 Local Match Breakdown:\n"
+                    f"• Exact filename matches: {filename_matches}\n"
+                    f"• Hash-verified matches: {hash_matches}\n"
+                    f"• Partial/fallback matches: {partial_matches}\n\n"
+                )
+            
+            results_message += (
+                f"✅ Files with cloud URLs can now be synchronized.\n"
+                f"💡 Use the Sync button to upload/download files."
+            )
+            
+            # Show results with option to view duplicate details
+            result = QMessageBox.information(
                 self,
                 "Analysis Complete",
-                f"Cloud analysis completed successfully!\n\n"
-                f"• Cloud files found: {len(cloud_files)}\n"
-                f"• Local matches found: {matches_found}\n"
-                f"• Database records updated: {matches_found}\n\n"
-                f"Files with cloud URLs can now be synchronized."
+                results_message,
+                QMessageBox.Ok | (QMessageBox.Help if duplicate_analysis.get('duplicate_groups', 0) > 0 else QMessageBox.Ok)
             )
+            
+            # If user clicked Help and there are duplicates, show detailed report
+            if (result == QMessageBox.Help and 
+                duplicate_analysis.get('duplicate_groups', 0) > 0):
+                self.show_duplicate_details(duplicate_analysis)
             
         except Exception as e:
             if 'progress' in locals():
                 progress.close()
             raise e
+    
+    def show_duplicate_details(self, duplicate_analysis):
+        """Show detailed duplicate file report in a separate dialog"""
+        try:
+            details = duplicate_analysis.get('details', {})
+            if not details:
+                QMessageBox.information(self, "No Details", "No duplicate details available.")
+                return
+            
+            # Create detailed report text
+            report_lines = [
+                "🔍 Detailed Duplicate Analysis Report",
+                "=" * 50,
+                "",
+                f"Summary:",
+                f"• Total cloud files: {duplicate_analysis.get('total_files', 0)}",
+                f"• Files with hash data: {duplicate_analysis.get('files_with_hashes', 0)}",
+                f"• Duplicate groups found: {duplicate_analysis.get('duplicate_groups', 0)}",
+                f"• Total duplicate files: {duplicate_analysis.get('duplicate_files', 0)}",
+                f"• Wasted storage space: {format_file_size(duplicate_analysis.get('wasted_space_bytes', 0))}",
+                "",
+                "Duplicate Groups:",
+                "-" * 30
+            ]
+            
+            # Add details for each duplicate group
+            for i, (hash_value, group_info) in enumerate(details.items(), 1):
+                files = group_info.get('files', [])
+                file_size = group_info.get('size', 0)
+                wasted_space = group_info.get('wasted_space', 0)
+                
+                report_lines.extend([
+                    "",
+                    f"Group {i}: {len(files)} identical files",
+                    f"  File size: {format_file_size(file_size)}",
+                    f"  Wasted space: {format_file_size(wasted_space)}",
+                    f"  MD5 hash: {hash_value[:16]}...",
+                    "  Files:"
+                ])
+                
+                for file_info in files:
+                    file_name = file_info.get('name', 'Unknown')
+                    file_path = file_name.split('/')[-1] if '/' in file_name else file_name
+                    report_lines.append(f"    • {file_path}")
+                    if len(file_name) > 50:  # Show full path for long names
+                        report_lines.append(f"      Path: {file_name}")
+            
+            # Join all lines into report text
+            report_text = "\n".join(report_lines)
+            
+            # Create and show dialog
+            from PySide6.QtWidgets import QTextEdit, QVBoxLayout, QPushButton
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Cloud Storage Duplicate Analysis")
+            dialog.setModal(True)
+            dialog.resize(700, 500)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Add text area
+            text_edit = QTextEdit()
+            text_edit.setReadOnly(True)
+            text_edit.setPlainText(report_text)
+            text_edit.setFont(QFont("Courier", 10))
+            layout.addWidget(text_edit)
+            
+            # Add close button
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            logger.error(f"Error showing duplicate details: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to show duplicate details: {str(e)}")
     
     def get_cloud_file_list(self, bucket_name, auth_info):
         """Get list of files from cloud storage"""
@@ -603,7 +845,7 @@ class CloudSyncDialog(QDialog):
             raise Exception(f"Failed to get cloud file listing: {str(e)}")
     
     def find_matching_local_file(self, cloud_file):
-        """Find local file that matches the cloud file"""
+        """Find local file that matches the cloud file using filename and hash-based matching"""
         from astrofiler_db import fitsFile
         
         try:
@@ -613,36 +855,84 @@ class CloudSyncDialog(QDialog):
             if not filename:
                 return None
             
-            # Try to match by filename first
+            # Try to match by filename first (fastest method)
+            filename_match = None
             try:
-                local_file = fitsFile.get(fitsFile.fitsFileName == filename)
+                filename_match = fitsFile.get(fitsFile.fitsFileName == filename)
                 logger.debug(f"Found exact filename match: {filename}")
-                return local_file
+                
+                # If we have a filename match and hash functions are available,
+                # verify content matches using hash comparison
+                if _calculate_md5_hash and cloud_file.get('md5_hash'):
+                    try:
+                        local_hash = _calculate_md5_hash(filename_match.fitsFilePath)
+                        cloud_hash = cloud_file['md5_hash']
+                        
+                        if local_hash == cloud_hash:
+                            logger.debug(f"Hash verification successful for {filename}")
+                            return filename_match
+                        else:
+                            logger.info(f"Filename match but content differs for {filename} (hash mismatch)")
+                            # Continue to other matching methods
+                    except Exception as e:
+                        logger.warning(f"Could not verify hash for {filename}: {e}")
+                        # Return filename match as fallback
+                        return filename_match
+                else:
+                    # No hash available, trust filename match
+                    return filename_match
+                    
             except fitsFile.DoesNotExist:
                 pass
             
             # Try to match by partial filename (without extension)
-            base_filename = filename.rsplit('.', 1)[0]  # Remove extension
             try:
-                local_file = fitsFile.get(fitsFile.fitsFileName.contains(base_filename))
+                base_filename = filename.rsplit('.', 1)[0]  # Remove extension
+                partial_match = fitsFile.get(fitsFile.fitsFileName.contains(base_filename))
                 logger.debug(f"Found partial filename match: {base_filename}")
-                return local_file
+                
+                # If we have a partial match and hash functions are available, verify with hash
+                if _calculate_md5_hash and cloud_file.get('md5_hash'):
+                    try:
+                        local_hash = _calculate_md5_hash(partial_match.fitsFilePath)
+                        cloud_hash = cloud_file['md5_hash']
+                        
+                        if local_hash == cloud_hash:
+                            logger.debug(f"Hash verification successful for partial match {base_filename}")
+                            return partial_match
+                        else:
+                            logger.debug(f"Partial filename match but content differs for {base_filename}")
+                    except Exception as e:
+                        logger.warning(f"Could not verify hash for partial match {base_filename}: {e}")
+                        return partial_match
+                else:
+                    return partial_match
+                    
             except fitsFile.DoesNotExist:
                 pass
             
-            # Could add more sophisticated matching here:
-            # - Match by MD5 hash if available
-            # - Match by file size
-            # - Match by FITS header metadata
-            
-            # Try hash matching if available
-            if 'md5_hash' in cloud_file and cloud_file['md5_hash']:
+            # Try hash-based matching across all local files (most thorough but slower)
+            if _calculate_md5_hash and cloud_file.get('md5_hash'):
                 try:
-                    # Note: This would require storing MD5 hashes in the local database
-                    # For now, we'll skip this matching method
-                    pass
-                except:
-                    pass
+                    cloud_hash = cloud_file['md5_hash']
+                    logger.debug(f"Attempting hash-based matching for {filename}")
+                    
+                    # Get all local files and check their hashes
+                    # Note: This could be optimized by storing hashes in the database
+                    local_files = fitsFile.select()
+                    for local_file in local_files:
+                        try:
+                            if os.path.exists(local_file.fitsFilePath):
+                                local_hash = _calculate_md5_hash(local_file.fitsFilePath)
+                                if local_hash == cloud_hash:
+                                    logger.info(f"Found hash-based match: {local_file.fitsFileName} matches cloud file {filename}")
+                                    return local_file
+                        except Exception as e:
+                            logger.debug(f"Could not calculate hash for {local_file.fitsFilePath}: {e}")
+                            continue
+                            
+                except Exception as e:
+                    logger.warning(f"Error during hash-based matching: {e}")
             
             logger.debug(f"No local match found for cloud file: {filename}")
             return None

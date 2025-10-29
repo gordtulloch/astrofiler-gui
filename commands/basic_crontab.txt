@@ -1,0 +1,59 @@
+# AstroFiler Basic Automation Crontab
+#
+# This is a simplified crontab for basic AstroFiler automation.
+# Perfect for users who want essential automation without complexity.
+#
+# SETUP INSTRUCTIONS:
+# 1. Replace /home/user/astrofiler-gui with your actual AstroFiler path
+# 2. Create logs directory: mkdir -p /home/user/astrofiler-gui/logs
+# 3. Test commands manually first
+# 4. Save this file as basic_crontab.txt
+# 5. Install with: crontab basic_crontab.txt
+# 6. Verify with: crontab -l
+#
+
+# =============================================================================
+# ESSENTIAL DAILY OPERATIONS
+# =============================================================================
+
+# 2:00 AM - Daily cloud backup (if cloud sync is configured)
+0 2 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py -p backup --yes >> /home/user/astrofiler-gui/logs/cloud_backup.log 2>&1
+
+# 10:00 AM - Load new files into repository
+0 10 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -v >> /home/user/astrofiler-gui/logs/loadrepo.log 2>&1
+
+# 10:30 AM - Create sessions for new files
+30 10 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CreateSessions.py -v >> /home/user/astrofiler-gui/logs/sessions.log 2>&1
+
+# 11:00 AM - Link calibration sessions to light sessions
+0 11 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LinkSessions.py -v >> /home/user/astrofiler-gui/logs/link.log 2>&1
+
+# =============================================================================
+# WEEKLY OPERATIONS
+# =============================================================================
+
+# Sunday 1:00 AM - Weekly cloud analysis (if cloud sync is configured)
+0 1 * * 0 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py --analyze --yes >> /home/user/astrofiler-gui/logs/cloud_analysis.log 2>&1
+
+# Sunday 3:00 AM - Weekly auto-calibration (if calibration is set up)
+0 3 * * 0 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/AutoCalibration.py >> /home/user/astrofiler-gui/logs/calibration.log 2>&1
+
+# =============================================================================
+# OPTIONAL: Enable these if you want more frequent processing
+# =============================================================================
+
+# Uncomment for evening file processing:
+# 18:00 PM - Evening repository check
+# 0 18 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -v >> /home/user/astrofiler-gui/logs/evening.log 2>&1
+
+# Uncomment for hourly repository sync (no file movement):
+# 0 * * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -n >> /home/user/astrofiler-gui/logs/sync.log 2>&1
+
+# =============================================================================
+# NOTES:
+# - All times are in 24-hour format
+# - Logs are saved to /home/user/astrofiler-gui/logs/
+# - Commands will only work if AstroFiler is properly configured
+# - Cloud sync commands require Google Cloud Storage setup
+# - Calibration commands require Siril installation
+# =============================================================================

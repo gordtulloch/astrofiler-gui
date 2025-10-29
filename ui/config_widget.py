@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, 
                                QGroupBox, QLineEdit, QPushButton, QCheckBox, 
                                QComboBox, QSpinBox, QFileDialog, QMessageBox,
-                               QApplication)
+                               QApplication, QTabWidget)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,39 @@ class ConfigWidget(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        
+        # Create individual tabs
+        self.create_general_tab()
+        self.create_cloud_sync_tab()
+        self.create_calibration_tab()
+        self.create_smart_telescopes_tab()
+        
+        # Add action buttons
+        button_layout = QHBoxLayout()
+        self.save_button = QPushButton("Save Settings")
+        self.save_button.setStyleSheet("QPushButton { font-size: 11px; }")
+        self.reset_button = QPushButton("Reset to Defaults")
+        self.reset_button.setStyleSheet("QPushButton { font-size: 11px; }")
+
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.reset_button)
+        button_layout.addStretch()
+
+        layout.addWidget(self.tab_widget)
+        layout.addLayout(button_layout)
+
+        # Connect signals
+        self.save_button.clicked.connect(self.save_settings)
+        self.reset_button.clicked.connect(self.reset_settings)
+        self.theme.currentTextChanged.connect(self.on_theme_changed)
+
+    def create_general_tab(self):
+        """Create the General tab with General Settings, Display Settings, External Tools, and Suppress Warnings."""
+        general_tab = QWidget()
+        layout = QVBoxLayout(general_tab)
 
         # General settings group
         general_group = QGroupBox("General Settings")
@@ -119,6 +152,20 @@ class ConfigWidget(QWidget):
 
         warnings_layout.addRow("Suppress Delete Warnings:", self.suppress_delete_warnings)
 
+        # Add groups to tab layout
+        layout.addWidget(general_group)
+        layout.addWidget(display_group)
+        layout.addWidget(tools_group)
+        layout.addWidget(warnings_group)
+        layout.addStretch()
+
+        self.tab_widget.addTab(general_tab, "General")
+
+    def create_cloud_sync_tab(self):
+        """Create the Cloud Sync tab."""
+        cloud_tab = QWidget()
+        layout = QVBoxLayout(cloud_tab)
+
         # Cloud Sync settings group
         cloud_sync_group = QGroupBox("Cloud Sync")
         cloud_sync_layout = QFormLayout(cloud_sync_group)
@@ -191,6 +238,16 @@ class ConfigWidget(QWidget):
         cloud_sync_layout.addRow("Sync Profile:", self.sync_profile)
         cloud_sync_layout.addRow("Auto-cleanup Backed Files:", self.auto_cleanup_backed_files)
 
+        layout.addWidget(cloud_sync_group)
+        layout.addStretch()
+
+        self.tab_widget.addTab(cloud_tab, "Cloud Sync")
+
+    def create_calibration_tab(self):
+        """Create the Calibration tab with Auto-Calibration settings."""
+        calibration_tab = QWidget()
+        layout = QVBoxLayout(calibration_tab)
+
         # Auto-Calibration settings group
         auto_cal_group = QGroupBox("Auto-Calibration")
         auto_cal_layout = QFormLayout(auto_cal_group)
@@ -258,30 +315,46 @@ class ConfigWidget(QWidget):
         auto_cal_layout.addRow("Master Retention (days):", self.master_retention_days)
         auto_cal_layout.addRow("Show Progress Dialogs:", self.auto_calibration_progress)
 
-        # Action buttons
-        button_layout = QHBoxLayout()
-        self.save_button = QPushButton("Save Settings")
-        self.save_button.setStyleSheet("QPushButton { font-size: 11px; }")
-        self.reset_button = QPushButton("Reset to Defaults")
-        self.reset_button.setStyleSheet("QPushButton { font-size: 11px; }")
-
-        button_layout.addWidget(self.save_button)
-        button_layout.addWidget(self.reset_button)
-        button_layout.addStretch()
-
-        layout.addWidget(general_group)
-        layout.addWidget(display_group)
-        layout.addWidget(tools_group)
-        layout.addWidget(warnings_group)
-        layout.addWidget(cloud_sync_group)
         layout.addWidget(auto_cal_group)
         layout.addStretch()
-        layout.addLayout(button_layout)
 
-        # Connect signals
-        self.save_button.clicked.connect(self.save_settings)
-        self.reset_button.clicked.connect(self.reset_settings)
-        self.theme.currentTextChanged.connect(self.on_theme_changed)
+        self.tab_widget.addTab(calibration_tab, "Calibration")
+
+    def create_smart_telescopes_tab(self):
+        """Create the Smart Telescopes tab with iTelescope Configuration."""
+        smart_telescopes_tab = QWidget()
+        layout = QVBoxLayout(smart_telescopes_tab)
+
+        # iTelescope settings group
+        itelescope_group = QGroupBox("iTelescope Configuration")
+        itelescope_layout = QFormLayout(itelescope_group)
+
+        # iTelescope Username
+        self.itelescope_username = QLineEdit()
+        self.itelescope_username.setPlaceholderText("Your iTelescope username")
+        self.itelescope_username.setToolTip(
+            "Username for your iTelescope account.\n\n"
+            "This is required to connect to data.itelescope.net via FTPS\n"
+            "and download calibrated files from your iTelescope sessions."
+        )
+
+        # iTelescope Password
+        self.itelescope_password = QLineEdit()
+        self.itelescope_password.setPlaceholderText("Your iTelescope password")
+        self.itelescope_password.setEchoMode(QLineEdit.Password)
+        self.itelescope_password.setToolTip(
+            "Password for your iTelescope account.\n\n"
+            "This is securely stored and used for FTPS authentication\n"
+            "to download calibrated files from iTelescope."
+        )
+
+        itelescope_layout.addRow("Username:", self.itelescope_username)
+        itelescope_layout.addRow("Password:", self.itelescope_password)
+
+        layout.addWidget(itelescope_group)
+        layout.addStretch()
+
+        self.tab_widget.addTab(smart_telescopes_tab, "Smart Telescopes")
     
     def save_settings(self):
         """Save configuration settings to astrofiler.ini file"""
@@ -328,6 +401,10 @@ class ConfigWidget(QWidget):
             config.set('DEFAULT', 'auto_create_triggers', self.auto_create_triggers.currentData())
             config.set('DEFAULT', 'master_retention_days', str(self.master_retention_days.value()))
             config.set('DEFAULT', 'auto_calibration_progress', str(self.auto_calibration_progress.isChecked()))
+            
+            # iTelescope settings
+            config.set('DEFAULT', 'itelescope_username', self.itelescope_username.text().strip())
+            config.set('DEFAULT', 'itelescope_password', self.itelescope_password.text().strip())
             
             # Write to the astrofiler.ini file
             with open('astrofiler.ini', 'w') as configfile:
@@ -462,6 +539,15 @@ class ConfigWidget(QWidget):
                 progress_str = config.get('DEFAULT', 'auto_calibration_progress')
                 progress_value = progress_str.lower() in ('true', '1', 'yes', 'on')
                 self.auto_calibration_progress.setChecked(progress_value)
+            
+            # Load iTelescope settings
+            if config.has_option('DEFAULT', 'itelescope_username'):
+                itelescope_username = config.get('DEFAULT', 'itelescope_username')
+                self.itelescope_username.setText(itelescope_username)
+            
+            if config.has_option('DEFAULT', 'itelescope_password'):
+                itelescope_password = config.get('DEFAULT', 'itelescope_password')
+                self.itelescope_password.setText(itelescope_password)
                 
             logger.debug("Settings loaded from astrofiler.ini!")
             
@@ -494,6 +580,10 @@ class ConfigWidget(QWidget):
         self.auto_create_triggers.setCurrentIndex(3)  # Import + Session Creation
         self.master_retention_days.setValue(365)
         self.auto_calibration_progress.setChecked(True)
+        
+        # iTelescope defaults
+        self.itelescope_username.setText("")
+        self.itelescope_password.setText("")
     
     def browse_source_path(self):
         """Open directory dialog for source path"""

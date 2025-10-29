@@ -1,11 +1,151 @@
 import os
 import logging
+import hashlib
 from pathlib import Path
 
 # Debug flag: if True, only report actions; if False, perform sync
 DEBUG = False
 
 logger = logging.getLogger(__name__)
+
+def _calculate_md5_hash(file_path):
+    """
+    Calculate MD5 hash of a local file.
+    
+    Args:
+        file_path (str): Path to the file
+        
+    Returns:
+        str: MD5 hash as hexadecimal string, or None if error
+    """
+    try:
+        hash_md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    except Exception as e:
+        logger.error(f"Error calculating MD5 hash for {file_path}: {e}")
+        return None
+
+def _should_upload_file(client, bucket_name, gcs_object_name, local_file_path):
+    """
+    Determine if a file should be uploaded to GCS by comparing MD5 hashes.
+    
+    Args:
+        client: GCS client
+        bucket_name (str): Name of the GCS bucket
+        gcs_object_name (str): Object name in GCS
+        local_file_path (str): Path to local file
+        
+    Returns:
+        tuple: (should_upload: bool, reason: str)
+    """
+    try:
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(gcs_object_name)
+        
+        # Check if the blob exists in GCS
+        if not blob.exists():
+            return True, "file does not exist in cloud"
+        
+        # Refresh blob metadata to get current information
+        blob.reload()
+        
+        # Get the GCS file's MD5 hash
+        gcs_md5 = blob.md5_hash
+        if not gcs_md5:
+            return True, "cloud file has no MD5 hash available"
+        
+        # Calculate local file's MD5 hash
+        local_md5 = _calculate_md5_hash(local_file_path)
+        if not local_md5:
+            return True, "could not calculate local file hash"
+        
+        # Convert GCS MD5 from base64 to hex for comparison
+        import base64
+        try:
+            gcs_md5_hex = base64.b64decode(gcs_md5).hex()
+        except Exception as e:
+            logger.warning(f"Could not decode GCS MD5 hash for {gcs_object_name}: {e}")
+            return True, "could not decode cloud file hash"
+        
+        # Compare hashes
+        if local_md5 == gcs_md5_hex:
+            return False, "file already exists with same content (MD5 match)"
+        else:
+            return True, f"file content differs (local MD5: {local_md5}, cloud MD5: {gcs_md5_hex})"
+            
+    except Exception as e:
+        logger.warning(f"Error checking if {gcs_object_name} should be uploaded: {e}")
+        # If we can't check, err on the side of uploading
+        return True, f"error checking cloud file: {e}"
+
+def _get_cloud_file_hashes(client, bucket_name, prefix):
+    """
+    Get MD5 hashes for all files in the cloud bucket with the given prefix.
+    This is more efficient than checking files individually.
+    
+    Args:
+        client: GCS client
+        bucket_name (str): Name of the GCS bucket
+        prefix (str): Prefix to filter objects
+        
+    Returns:
+        dict: Dictionary mapping object names to MD5 hashes (hex format)
+    """
+    try:
+        bucket = client.bucket(bucket_name)
+        blobs = bucket.list_blobs(prefix=prefix)
+        
+        cloud_hashes = {}
+        for blob in blobs:
+            if blob.md5_hash:
+                try:
+                    # Convert from base64 to hex
+                    import base64
+                    md5_hex = base64.b64decode(blob.md5_hash).hex()
+                    cloud_hashes[blob.name] = md5_hex
+                except Exception as e:
+                    logger.warning(f"Could not decode MD5 for {blob.name}: {e}")
+            else:
+                logger.debug(f"No MD5 hash available for {blob.name}")
+        
+        logger.info(f"Retrieved hashes for {len(cloud_hashes)} cloud files")
+        return cloud_hashes
+        
+    except Exception as e:
+        logger.error(f"Error retrieving cloud file hashes: {e}")
+        return {}
+
+def _should_upload_file_bulk(cloud_hashes, gcs_object_name, local_file_path):
+    """
+    Determine if a file should be uploaded using pre-fetched cloud hashes.
+    This is more efficient than checking files individually.
+    
+    Args:
+        cloud_hashes (dict): Dictionary of cloud object names to MD5 hashes
+        gcs_object_name (str): Object name in GCS
+        local_file_path (str): Path to local file
+        
+    Returns:
+        tuple: (should_upload: bool, reason: str)
+    """
+    # Check if file exists in cloud
+    if gcs_object_name not in cloud_hashes:
+        return True, "file does not exist in cloud"
+    
+    # Calculate local file hash
+    local_md5 = _calculate_md5_hash(local_file_path)
+    if not local_md5:
+        return True, "could not calculate local file hash"
+    
+    # Compare hashes
+    cloud_md5 = cloud_hashes[gcs_object_name]
+    if local_md5 == cloud_md5:
+        return False, "file already exists with same content (MD5 match)"
+    else:
+        return True, f"file content differs (local MD5: {local_md5}, cloud MD5: {cloud_md5})"
 
 def _get_gcs_client(auth_info):
     """
@@ -71,6 +211,7 @@ def _parse_gcs_path(gcs_path):
 def _upload_file_to_gcs(client, bucket_name, local_file_path, gcs_object_name):
     """
     Upload a file to Google Cloud Storage, preserving the local directory structure.
+    This will overwrite any existing file with the same object name.
     
     Args:
         client: GCS client
@@ -82,8 +223,15 @@ def _upload_file_to_gcs(client, bucket_name, local_file_path, gcs_object_name):
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(gcs_object_name)
         
+        # Check if file already exists for logging purposes
+        exists_before = blob.exists()
+        if exists_before:
+            logger.debug(f"Overwriting existing cloud file: gs://{bucket_name}/{gcs_object_name}")
+        
         blob.upload_from_filename(local_file_path)
-        logger.debug(f"Successfully uploaded: {local_file_path} -> gs://{bucket_name}/{gcs_object_name}")
+        
+        action = "overwrote" if exists_before else "uploaded"
+        logger.debug(f"Successfully {action}: {local_file_path} -> gs://{bucket_name}/{gcs_object_name}")
         
     except Exception as e:
         logger.error(f"Failed to upload {local_file_path}: {e}")
@@ -205,24 +353,6 @@ def sync_with_google_cloud_repo(gcs_repo_path, auth_info, local_repo_path, sync_
         logger.warning(f"Local repository path does not exist: {local_repo_path}")
         return
     
-        # Find all files in the local repository
-    local_files = []
-    for root, dirs, files in os.walk(local_repo_path):
-        # Skip hidden directories and __pycache__
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
-        for file in files:
-            if not file.startswith('.') and not file.endswith('.pyc'):
-                file_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_path, local_repo_path)
-                local_files.append(relative_path)
-    
-    total_local_files = len(local_files)
-    logger.info(f"Found {total_local_files} local files to potentially sync")
-    
-    # Initialize progress
-    if progress_callback:
-        progress_callback(0, total_local_files, "scan", "Completed local file scan")
-        
     try:
         # Initialize GCS client (in both debug and live modes)
         client = _get_gcs_client(auth_info)
@@ -234,46 +364,16 @@ def sync_with_google_cloud_repo(gcs_repo_path, auth_info, local_repo_path, sync_
         if progress_callback:
             progress_callback(5, 100, "connect", f"Connected to GCS bucket: {bucket_name}")
         
-        # Upload local files to GCS
-        if debug:
-            logger.info("DEBUG MODE: Starting UPLOAD analysis:")
-        else:
-            logger.info("LIVE MODE: Starting UPLOAD operations:")
-            
-        upload_count = 0
-        for i, file_path in enumerate(local_files):
-            try:
-                full_local_path = os.path.join(local_repo_path, file_path)
-                # Preserve the complete local directory structure in GCS
-                # Convert backslashes to forward slashes for GCS compatibility
-                gcs_object_name = prefix + file_path.replace('\\', '/')
-                
-                # Update progress
-                if progress_callback:
-                    continue_operation = progress_callback(i, total_local_files, "upload", f"Processing {file_path}")
-                    # If the callback returns False, it means the operation was cancelled
-                    if continue_operation is False:
-                        logger.info("Google Sync operation was cancelled by user")
-                        return
-                
-                if debug:
-                    logger.info(f"[DEBUG] Would upload: {file_path} -> gs://{bucket_name}/{gcs_object_name}")
-                else:
-                    logger.info(f"Uploading: {file_path} -> gs://{bucket_name}/{gcs_object_name}")
-                    _upload_file_to_gcs(client, bucket_name, full_local_path, gcs_object_name)
-                    
-                upload_count += 1
-                
-            except Exception as e:
-                logger.error(f"Failed to upload {file_path}: {e}")
+        # Get cloud file hashes for efficient duplicate checking
+        logger.info("Retrieving cloud file hashes for duplicate detection...")
+        if progress_callback:
+            progress_callback(10, 100, "scan", "Retrieving cloud file metadata...")
+        cloud_hashes = _get_cloud_file_hashes(client, bucket_name, prefix)
         
-        if debug:
-            logger.info(f"DEBUG MODE: Would upload {upload_count} files to GCS")
-        else:
-            logger.info(f"Uploaded {upload_count} files to GCS")
-            
+        # Track downloaded files to avoid re-uploading them
+        downloaded_files = set()
         
-        # Download missing files from GCS if enabled
+        # PHASE 1: Download missing files from GCS if enabled (Complete sync)
         if sync_to_local:
             if debug:
                 logger.info("DEBUG MODE: Starting DOWNLOAD analysis:")
@@ -291,7 +391,7 @@ def sync_with_google_cloud_repo(gcs_repo_path, auth_info, local_repo_path, sync_
                 total_gcs_files = len(blobs)
                 
                 if progress_callback:
-                    progress_callback(0, total_gcs_files, "download_prepare", "Starting download operations")
+                    progress_callback(15, 100, "download_prepare", "Starting download operations")
                 
                 for i, blob in enumerate(blobs):
                     # Calculate relative path by removing prefix
@@ -312,7 +412,7 @@ def sync_with_google_cloud_repo(gcs_repo_path, auth_info, local_repo_path, sync_
                             try:
                                 # Update progress callback
                                 if progress_callback:
-                                    continue_operation = progress_callback(i, total_gcs_files, "download", f"Processing {relative_path}")
+                                    continue_operation = progress_callback(15 + (i * 35 // total_gcs_files), 50, "download", f"Processing {relative_path}")
                                     # If the callback returns False, it means the operation was cancelled
                                     if continue_operation is False:
                                         logger.info("Google Sync download operation was cancelled by user")
@@ -327,6 +427,8 @@ def sync_with_google_cloud_repo(gcs_repo_path, auth_info, local_repo_path, sync_
                                     # Register FITS files in database
                                     _register_fits_file(local_file_path)
                                 
+                                # Track this file as downloaded to avoid re-uploading
+                                downloaded_files.add(relative_path.replace(os.path.sep, '/'))
                                 download_count += 1
                                 
                             except Exception as e:
@@ -340,8 +442,115 @@ def sync_with_google_cloud_repo(gcs_repo_path, auth_info, local_repo_path, sync_
                 else:
                     logger.info(f"Downloaded {download_count} files from GCS, skipped {skip_count} up-to-date files")
                 
+                # Log downloaded files tracking for debugging
+                logger.info(f"Tracking {len(downloaded_files)} downloaded files to exclude from upload phase")
+                if debug and len(downloaded_files) > 0:
+                    logger.debug(f"First few downloaded files: {list(downloaded_files)[:5]}...")
+                
             except Exception as e:
-                logger.error(f"Failed to list/download files from GCS: {e}")
+                logger.error(f"Failed to list GCS objects: {e}")
+                
+        # PHASE 2: Find all local files and upload those that aren't from download phase
+        logger.info("Scanning local repository for files to upload...")
+        if progress_callback:
+            progress_callback(50, 100, "scan", "Scanning local files for upload")
+            
+        local_files = []
+        for root, dirs, files in os.walk(local_repo_path):
+            # Skip hidden directories and __pycache__
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
+            for file in files:
+                if not file.startswith('.') and not file.endswith('.pyc'):
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, local_repo_path)
+                    local_files.append(relative_path)
+        
+        total_local_files = len(local_files)
+        logger.info(f"Found {total_local_files} local files to potentially sync")
+        
+        # Upload local files to GCS (excluding files we just downloaded)
+        if debug:
+            logger.info("DEBUG MODE: Starting UPLOAD analysis:")
+        else:
+            logger.info("LIVE MODE: Starting UPLOAD operations:")
+            
+        upload_count = 0
+        skipped_count = 0
+        excluded_count = 0
+        replaced_count = 0  # Files replaced due to header modifications
+        
+        for i, file_path in enumerate(local_files):
+            try:
+                full_local_path = os.path.join(local_repo_path, file_path)
+                # Preserve the complete local directory structure in GCS
+                # Convert backslashes to forward slashes for GCS compatibility
+                gcs_object_name = prefix + file_path.replace('\\', '/')
+                
+                # Create normalized path for comparison (should match what was stored in downloaded_files)
+                normalized_file_path = file_path.replace('\\', '/')
+                
+                # Skip files that were just downloaded to avoid circular uploads
+                if normalized_file_path in downloaded_files:
+                    logger.debug(f"Excluding recently downloaded file from upload: {file_path}")
+                    excluded_count += 1
+                    continue
+                
+                # Debug: Log first few exclusion checks if in debug mode
+                if debug and i < 5:
+                    logger.debug(f"Upload check for '{normalized_file_path}': in downloaded_files = {normalized_file_path in downloaded_files}")
+                
+                # Update progress
+                if progress_callback:
+                    continue_operation = progress_callback(50 + (i * 45 // total_local_files), 95, "checking", f"Checking {file_path}")
+                    # If the callback returns False, it means the operation was cancelled
+                    if continue_operation is False:
+                        logger.info("Google Sync operation was cancelled by user")
+                        return
+                
+                # Check if file should be uploaded (compare hashes using bulk method)
+                should_upload, reason = _should_upload_file_bulk(cloud_hashes, gcs_object_name, full_local_path)
+                
+                # Special case: If this file was downloaded but now has a different hash due to
+                # header modifications during registration, we should replace the cloud version
+                # rather than create a duplicate
+                was_downloaded = normalized_file_path in downloaded_files
+                
+                if should_upload:
+                    if was_downloaded and "file content differs" in reason:
+                        # This file was downloaded but modified during registration - replace cloud version
+                        upload_reason = f"replacing modified file after download ({reason})"
+                        logger.info(f"File was modified after download (likely header fixes): {file_path}")
+                        replaced_count += 1
+                    else:
+                        upload_reason = reason
+                    
+                    if debug:
+                        logger.info(f"[DEBUG] Would upload: {file_path} -> gs://{bucket_name}/{gcs_object_name} ({upload_reason})")
+                    else:
+                        logger.info(f"Uploading: {file_path} -> gs://{bucket_name}/{gcs_object_name} ({upload_reason})")
+                        if progress_callback:
+                            progress_callback(50 + (i * 45 // total_local_files), 95, "upload", f"Uploading {file_path}")
+                        _upload_file_to_gcs(client, bucket_name, full_local_path, gcs_object_name)
+                    upload_count += 1
+                else:
+                    logger.debug(f"Skipping upload: {file_path} ({reason})")
+                    skipped_count += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to process {file_path}: {e}")
+        
+        if debug:
+            logger.info(f"DEBUG MODE: Would upload {upload_count} files to GCS, skip {skipped_count} duplicates, exclude {excluded_count} recently downloaded")
+            if replaced_count > 0:
+                logger.info(f"DEBUG MODE: Would replace {replaced_count} files modified during download (header fixes)")
+            if upload_count + skipped_count > 0:
+                logger.info(f"DEBUG MODE: Efficiency gain: {skipped_count}/{upload_count + skipped_count} files ({100*skipped_count/(upload_count + skipped_count):.1f}%) already exist")
+        else:
+            logger.info(f"Uploaded {upload_count} files to GCS, skipped {skipped_count} duplicates, excluded {excluded_count} recently downloaded")
+            if replaced_count > 0:
+                logger.info(f"Replaced {replaced_count} files modified during download (header fixes)")
+            if upload_count + skipped_count > 0:
+                logger.info(f"Efficiency gain: {skipped_count}/{upload_count + skipped_count} files ({100*skipped_count/(upload_count + skipped_count):.1f}%) already exist")
         
         if debug:
             logger.info("DEBUG MODE: Synchronization analysis completed successfully")

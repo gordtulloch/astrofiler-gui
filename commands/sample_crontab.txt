@@ -1,0 +1,220 @@
+# AstroFiler Complete Automation Crontab
+# 
+# This sample crontab demonstrates a complete automated workflow for AstroFiler
+# including file processing, session management, calibration, and cloud sync.
+#
+# IMPORTANT: Before using this crontab:
+# 1. Replace /home/user/astrofiler-gui with your actual AstroFiler installation path
+# 2. Ensure all command line scripts are executable (chmod +x commands/*.sh)
+# 3. Verify your AstroFiler configuration (astrofiler.ini) is properly set up
+# 4. Test each command manually before adding to cron
+# 5. Configure cloud sync if using cloud features
+# 6. Install Siril and PySiril if using calibration features
+#
+# To install this crontab:
+# 1. Save this file as astrofiler_crontab.txt
+# 2. Run: crontab astrofiler_crontab.txt
+# 3. Verify with: crontab -l
+#
+# Cron time format: minute hour day month day_of_week command
+# * = any value, */n = every n units, n,m = specific values n and m
+# 0-6 for days: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
+
+# =============================================================================
+# EARLY MORNING OPERATIONS (1:00 AM - 6:00 AM)
+# Run maintenance and intensive operations during off-peak hours
+# =============================================================================
+
+# 1:00 AM - Weekly cloud storage analysis (Sundays)
+# Analyze cloud storage for duplicates and optimization opportunities
+0 1 * * 0 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py --analyze --yes -v >> /home/user/astrofiler-gui/logs/cron_cloudsync_analysis.log 2>&1
+
+# 2:00 AM - Daily cloud backup
+# Upload any new local files to cloud storage (backup profile)
+0 2 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py -p backup --yes -v >> /home/user/astrofiler-gui/logs/cron_cloudsync_backup.log 2>&1
+
+# 3:00 AM - Bidirectional cloud sync (Tuesdays and Saturdays)
+# Complete sync: download missing files from cloud AND upload local files
+0 3 * * 2,6 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py -p complete --yes -v >> /home/user/astrofiler-gui/logs/cron_cloudsync_complete.log 2>&1
+
+# 3:30 AM - Daily auto-calibration
+# Create master calibration frames and perform automated calibration
+30 3 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/AutoCalibration.py -v >> /home/user/astrofiler-gui/logs/cron_autocalibration.log 2>&1
+
+# 4:00 AM - Light calibration for major objects
+# Calibrate light frames for popular deep-sky objects
+0 4 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py -o M31 -v >> /home/user/astrofiler-gui/logs/cron_calibrate_m31.log 2>&1
+15 4 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py -o M42 -v >> /home/user/astrofiler-gui/logs/cron_calibrate_m42.log 2>&1
+30 4 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py -o NGC7000 -v >> /home/user/astrofiler-gui/logs/cron_calibrate_ngc7000.log 2>&1
+
+# 5:00 AM - Weekly quality assessment (Sundays)
+# Comprehensive quality assessment of all processed files
+0 5 * * 0 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/AutoCalibration.py --mode quality -v >> /home/user/astrofiler-gui/logs/cron_quality_assessment.log 2>&1
+
+# =============================================================================
+# MORNING OPERATIONS (10:00 AM - 12:00 PM)
+# Primary file processing and session management
+# =============================================================================
+
+# 10:00 AM - Load repository
+# Process new FITS files from source folder into repository
+0 10 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -v >> /home/user/astrofiler-gui/logs/cron_loadrepo.log 2>&1
+
+# 10:30 AM - Create sessions
+# Create light and calibration sessions for newly processed files
+30 10 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CreateSessions.py -v >> /home/user/astrofiler-gui/logs/cron_createsessions.log 2>&1
+
+# 11:00 AM - Link sessions
+# Link calibration sessions to light sessions based on equipment matching
+0 11 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LinkSessions.py -v >> /home/user/astrofiler-gui/logs/cron_linksessions.log 2>&1
+
+# 11:30 AM - Create master calibration frames
+# Create master frames after session linking is complete
+30 11 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/AutoCalibration.py --mode masters -v >> /home/user/astrofiler-gui/logs/cron_masters.log 2>&1
+
+# =============================================================================
+# AFTERNOON OPERATIONS (12:00 PM - 6:00 PM)
+# Object-specific processing and quality control
+# =============================================================================
+
+# 12:00 PM - Calibrate recently acquired light frames
+# Process light frames for objects observed in the last few days
+0 12 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py --recent-days 3 -v >> /home/user/astrofiler-gui/logs/cron_calibrate_recent.log 2>&1
+
+# 1:00 PM - Sync repository (no file movement)
+# Register any files that may have been added directly to repository
+0 13 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -n -v >> /home/user/astrofiler-gui/logs/cron_sync_repo.log 2>&1
+
+# =============================================================================
+# EVENING OPERATIONS (6:00 PM - 12:00 AM)
+# Final processing and cleanup for the day
+# =============================================================================
+
+# 6:00 PM - Evening repository check
+# Final check for any new files added during the day
+0 18 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -v >> /home/user/astrofiler-gui/logs/cron_evening_load.log 2>&1
+
+# 6:30 PM - Evening session creation
+# Create sessions for any files processed in the evening
+30 18 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CreateSessions.py -v >> /home/user/astrofiler-gui/logs/cron_evening_sessions.log 2>&1
+
+# 11:00 PM - Final cloud backup of the day
+# Ensure all new files from the day are backed up to cloud
+0 23 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py -p backup --yes -v >> /home/user/astrofiler-gui/logs/cron_final_backup.log 2>&1
+
+# =============================================================================
+# HOURLY OPERATIONS
+# Frequent monitoring and light processing
+# =============================================================================
+
+# Every 4 hours during daytime - Repository sync (no movement)
+# Check for files that may have been added directly to repository
+0 8,12,16,20 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -n >> /home/user/astrofiler-gui/logs/cron_hourly_sync.log 2>&1
+
+# =============================================================================
+# WEEKLY OPERATIONS
+# Maintenance and optimization tasks
+# =============================================================================
+
+# Monday 2:00 AM - Weekly master calibration analysis
+# Analyze calibration opportunities and create any missing masters
+0 2 * * 1 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/AutoCalibration.py --mode analyze -v >> /home/user/astrofiler-gui/logs/cron_weekly_analysis.log 2>&1
+
+# Wednesday 1:30 AM - Mid-week complete cloud sync
+# Additional complete sync to ensure cloud storage is up-to-date
+30 1 * * 3 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py -p complete --yes -v >> /home/user/astrofiler-gui/logs/cron_midweek_sync.log 2>&1
+
+# Friday 3:00 AM - Weekly calibration of all uncalibrated lights
+# Process any light frames that haven't been calibrated yet
+0 3 * * 5 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py --uncalibrated-only -v >> /home/user/astrofiler-gui/logs/cron_weekly_calibration.log 2>&1
+
+# Saturday 4:00 AM - Weekly quality assessment and optimization
+# Comprehensive quality check and performance optimization
+0 4 * * 6 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/AutoCalibration.py --mode quality --optimize -v >> /home/user/astrofiler-gui/logs/cron_weekly_optimization.log 2>&1
+
+# =============================================================================
+# MONTHLY OPERATIONS
+# Deep maintenance and archival tasks
+# =============================================================================
+
+# First Sunday of month at 1:00 AM - Deep cloud analysis and cleanup
+# Comprehensive duplicate detection and storage optimization
+0 1 1-7 * 0 /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CloudSync.py --analyze --deep-clean --yes -v >> /home/user/astrofiler-gui/logs/cron_monthly_cleanup.log 2>&1
+
+# =============================================================================
+# CUSTOM OBJECT PROCESSING
+# Add your specific astronomical targets here
+# =============================================================================
+
+# Process specific objects based on observing season
+# Winter objects (December - February)
+0 5 * 12,1,2 * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py -o M42 --pipeline full -v >> /home/user/astrofiler-gui/logs/cron_winter_objects.log 2>&1
+15 5 * 12,1,2 * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py -o NGC2237 --pipeline full -v >> /home/user/astrofiler-gui/logs/cron_winter_objects.log 2>&1
+
+# Summer objects (June - August)
+0 5 * 6,7,8 * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py -o M57 --pipeline full -v >> /home/user/astrofiler-gui/logs/cron_summer_objects.log 2>&1
+15 5 * 6,7,8 * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/calibrateLights.py -o NGC7000 --pipeline full -v >> /home/user/astrofiler-gui/logs/cron_summer_objects.log 2>&1
+
+# =============================================================================
+# ALTERNATIVE CONFIGURATIONS
+# Uncomment and modify these sections as needed
+# =============================================================================
+
+# For systems with limited processing power - use wrapper scripts instead of direct python calls:
+# 0 10 * * * /home/user/astrofiler-gui/commands/astrofiler_workflow.sh >> /home/user/astrofiler-gui/logs/cron_workflow.log 2>&1
+# 0 2 * * * /home/user/astrofiler-gui/commands/cron_cloudsync.sh >> /home/user/astrofiler-gui/logs/cron_cloudsync.log 2>&1
+# 30 3 * * * /home/user/astrofiler-gui/commands/cron_autocalibration.sh >> /home/user/astrofiler-gui/logs/cron_autocalibration.log 2>&1
+# 0 4 * * * /home/user/astrofiler-gui/commands/cron_calibrate_lights.sh >> /home/user/astrofiler-gui/logs/cron_calibrate_lights.log 2>&1
+
+# For testing - run operations every 15 minutes (remove after testing):
+# */15 * * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -n >> /home/user/astrofiler-gui/logs/test_loadrepo.log 2>&1
+
+# For high-volume processing - more frequent operations:
+# */30 * * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/LoadRepo.py -v >> /home/user/astrofiler-gui/logs/frequent_load.log 2>&1
+# 0 */2 * * * /home/user/astrofiler-gui/.venv/bin/python /home/user/astrofiler-gui/commands/CreateSessions.py -v >> /home/user/astrofiler-gui/logs/frequent_sessions.log 2>&1
+
+# =============================================================================
+# NOTES AND TIPS
+# =============================================================================
+#
+# 1. Log Management:
+#    - All commands redirect output to log files in /home/user/astrofiler-gui/logs/
+#    - Create this directory if it doesn't exist: mkdir -p /home/user/astrofiler-gui/logs
+#    - Consider log rotation to prevent disk space issues
+#
+# 2. Error Handling:
+#    - The "2>&1" redirects both stdout and stderr to the log files
+#    - Check log files regularly for errors
+#    - Consider adding email notifications for critical failures
+#
+# 3. Resource Management:
+#    - Calibration operations can be CPU/memory intensive
+#    - Cloud sync operations use network bandwidth
+#    - Stagger operations to avoid system overload
+#
+# 4. Customization:
+#    - Adjust times based on your observation schedule
+#    - Modify object names to match your targets
+#    - Add/remove operations based on your needs
+#
+# 5. Testing:
+#    - Test each command manually before adding to cron
+#    - Use the --dry-run flag where available for testing
+#    - Start with less frequent operations and increase as needed
+#
+# 6. Monitoring:
+#    - Set up log monitoring to track operation success
+#    - Consider disk space monitoring for logs and repository
+#    - Monitor cloud storage usage and costs
+#
+# 7. Backup Strategy:
+#    - This crontab provides multiple backup opportunities
+#    - Ensure cloud sync configuration is properly set up
+#    - Test cloud restore procedures periodically
+#
+# 8. Maintenance:
+#    - Review and update this crontab periodically
+#    - Check for new AstroFiler features that could be automated
+#    - Clean up old log files regularly
+#
+# =============================================================================

@@ -8,6 +8,7 @@ import socket
 import ipaddress
 import os
 import logging
+import configparser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import ftplib
@@ -58,8 +59,30 @@ class SmartTelescopeManager:
                 'default_password': None,  # No authentication for FTP
                 'protocol': 'ftp',
                 'fits_path': 'Astronomy'  # DWARF stores FITS files in /Astronomy
+            },
+            'iTelescope': {
+                'default_hostname': 'data.itelescope.net',
+                'default_username': '',  # To be configured by user
+                'default_password': '',  # To be configured by user
+                'protocol': 'ftps',  # FTP with TLS
+                'fits_path': '',  # Start scanning from root
+                'port': 21
             }
         }
+    
+    def get_itelescope_credentials(self):
+        """Get iTelescope credentials from configuration file."""
+        try:
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            
+            username = config.get('DEFAULT', 'itelescope_username', fallback='')
+            password = config.get('DEFAULT', 'itelescope_password', fallback='')
+            
+            return username.strip(), password.strip()
+        except Exception as e:
+            logger.error(f"Error reading iTelescope credentials: {e}")
+            return '', ''
     
     def get_local_network(self):
         """Get the local network range based on the local IP address."""
@@ -134,6 +157,16 @@ class SmartTelescopeManager:
         """Find a specific telescope on the network."""
         logger.info(f"Starting search for {telescope_type} telescope (hostname={hostname}, network={network_range})")
         
+        # For iTelescope, bypass all network scanning and SMB checks
+        if telescope_type == 'iTelescope':
+            if hostname:
+                logger.info(f"Using provided iTelescope hostname: {hostname}")
+                return hostname, None
+            else:
+                default_hostname = self.supported_telescopes['iTelescope']['default_hostname']
+                logger.info(f"Using default iTelescope hostname: {default_hostname}")
+                return default_hostname, None
+        
         if not SMB_AVAILABLE:
             logger.error("SMB protocol not available. Install pysmb package.")
             return None, "SMB protocol not available. Install pysmb package."
@@ -200,7 +233,11 @@ class SmartTelescopeManager:
             except Exception as e:
                 logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
         
-        # Scan network for device (no reverse DNS lookups for SeeStar)
+        # Scan network for device (no reverse DNS lookups for SeeStar, skip entirely for iTelescope)
+        if telescope_type == 'iTelescope':
+            logger.error("iTelescope should have been handled above - network scanning not applicable")
+            return None, "iTelescope configuration error"
+            
         if not network_range:
             network_range = self.get_local_network()
             logger.debug(f"Using auto-detected network range: {network_range}")
@@ -267,6 +304,8 @@ class SmartTelescopeManager:
         # Check protocol type
         if config.get('protocol') == 'ftp':
             return self._get_fits_files_ftp(telescope_type, ip, username, password)
+        elif config.get('protocol') == 'ftps':
+            return self._get_fits_files_ftps(telescope_type, ip, username, password)
         else:
             return self._get_fits_files_smb(telescope_type, ip, username, password)
     
@@ -355,6 +394,47 @@ class SmartTelescopeManager:
         except Exception as e:
             logger.error(f"FTP connection error to {ip}: {e}")
             return [], f"FTP connection error: {e}"
+    
+    def _get_fits_files_ftps(self, telescope_type, hostname, username=None, password=None):
+        """Get FITS files via FTPS protocol (iTelescope)."""
+        logger.info(f"Using FTPS connection for {telescope_type}")
+        
+        if not username or not password:
+            logger.error("Username and password required for iTelescope FTPS connection")
+            return [], "Username and password required for iTelescope FTPS connection"
+        
+        try:
+            # Create FTPS connection (FTP over TLS)
+            from ftplib import FTP_TLS
+            ftps = FTP_TLS()
+            logger.debug(f"Attempting FTPS connection to {hostname}:21...")
+            ftps.connect(hostname, 21, timeout=30)
+            
+            # Login with user credentials
+            ftps.login(username, password)
+            
+            # Switch to secure data connection
+            ftps.prot_p()
+            logger.info(f"Successfully connected to FTPS service at {hostname}")
+            
+            try:
+                # Get FITS files from iTelescope structure
+                start_time = time.time()
+                fits_files = self._get_fits_files_from_itelescope_ftps(ftps, hostname)
+                scan_time = time.time() - start_time
+                
+                ftps.quit()
+                logger.info(f"Found {len(fits_files)} FITS files in {scan_time:.2f} seconds")
+                return fits_files, None
+                
+            except Exception as e:
+                ftps.quit()
+                logger.error(f"Error accessing files on {hostname}: {e}")
+                return [], f"Error accessing files: {e}"
+                
+        except Exception as e:
+            logger.error(f"FTPS connection error to {hostname}: {e}")
+            return [], f"FTPS connection error: {e}"
     
     def _get_fits_files_from_path_smb(self, conn, share_name, target_path, telescope_type):
         """Get all FITS files from folders ending in '_sub' within the target path."""
@@ -625,6 +705,137 @@ class SmartTelescopeManager:
         except Exception as e:
             logger.error(f"Error scanning DWARF_DARK folder: {e}")
     
+    def _get_fits_files_from_itelescope_ftps(self, ftps, hostname):
+        """Get all calibrated FITS files from iTelescope FTPS server."""
+        fits_files = []
+        
+        try:
+            # Start from root directory
+            ftps.cwd('/')
+            
+            # Recursively scan all directories for files starting with 'calibrated'
+            self._scan_itelescope_directory(ftps, '', fits_files, hostname)
+            
+        except Exception as e:
+            logger.error(f"Error scanning iTelescope directories: {e}")
+            
+        return fits_files
+    
+    def _scan_itelescope_directory(self, ftps, current_path, fits_files, hostname, max_depth=10, current_depth=0):
+        """Recursively scan iTelescope directory structure for calibrated files."""
+        if current_depth > max_depth:
+            logger.debug(f"Maximum depth reached at '{current_path}', stopping recursion")
+            return
+            
+        try:
+            # Change to the current directory
+            if current_path:
+                ftps.cwd('/')
+                ftps.cwd(current_path)
+            
+            # List files and directories
+            items = []
+            try:
+                ftps.retrlines('LIST', items.append)
+            except Exception as e:
+                logger.debug(f"Could not list directory {current_path}: {e}")
+                return
+            
+            for item_line in items:
+                # Parse FTP LIST output (Unix-style)
+                # Example: -rw-r--r--   1 user group      1234 Jan 01 12:00 filename.fits
+                parts = item_line.split()
+                if len(parts) < 9:
+                    continue
+                    
+                permissions = parts[0]
+                filename = ' '.join(parts[8:])  # Handle filenames with spaces
+                
+                # Skip hidden files and current/parent directory references
+                if filename.startswith('.'):
+                    continue
+                
+                item_path = f"{current_path}/{filename}" if current_path else filename
+                
+                if permissions.startswith('d'):
+                    # It's a directory
+                    if not current_path:
+                        # Root level - only scan directories that start with 'T' or 't'
+                        if filename.lower().startswith('t'):
+                            logger.debug(f"Scanning root telescope directory: {item_path}")
+                            self._scan_itelescope_directory(ftps, item_path, fits_files, hostname, max_depth, current_depth + 1)
+                        else:
+                            logger.debug(f"Skipping non-telescope root directory: {filename}")
+                    else:
+                        # Subfolder within telescope directory - scan all subdirectories
+                        logger.debug(f"Scanning telescope subdirectory: {item_path}")
+                        self._scan_itelescope_directory(ftps, item_path, fits_files, hostname, max_depth, current_depth + 1)
+                    
+                elif filename.lower().startswith('calibrated') and filename.lower().endswith('.fit.zip'):
+                    # It's a calibrated FIT zip file
+                    try:
+                        # Get file size
+                        if current_path:
+                            ftps.cwd('/')
+                            ftps.cwd(current_path)
+                        size = ftps.size(filename)
+                    except:
+                        size = 0
+                    
+                    # Extract date from LIST output if possible
+                    try:
+                        date_str = f"{parts[5]} {parts[6]} {parts[7]}"
+                    except:
+                        date_str = "Unknown"
+                    
+                    fits_files.append({
+                        "name": filename,
+                        "path": item_path,
+                        "size": size,
+                        "date": date_str,
+                        "share_name": "ftps_root",
+                        "folder_name": os.path.basename(current_path) if current_path else "root",
+                        "telescope_type": "iTelescope",
+                        "file_type": "calibrated_light_zip",
+                        "object": self._extract_object_from_filename(filename),
+                        "instrument": "iTelescope",
+                        "hostname": hostname
+                    })
+                    logger.debug(f"Found iTelescope calibrated file: {item_path}")
+                    
+        except Exception as e:
+            logger.error(f"Error scanning iTelescope directory {current_path}: {e}")
+    
+    def _extract_object_from_filename(self, filename):
+        """Extract object name from iTelescope filename if possible."""
+        # iTelescope filenames might contain object information
+        # This is a basic implementation - may need refinement based on actual filename patterns
+        try:
+            # Remove 'calibrated' prefix and file extension
+            base_name = filename.lower()
+            if base_name.startswith('calibrated'):
+                base_name = base_name[10:]  # Remove 'calibrated' prefix
+            if base_name.startswith('_'):
+                base_name = base_name[1:]  # Remove leading underscore
+            
+            # Remove file extension
+            if base_name.endswith('.fit.zip'):
+                base_name = base_name[:-8]  # Remove '.fit.zip' extension
+            elif base_name.endswith('.fits'):
+                base_name = base_name[:-5]
+            elif base_name.endswith('.fit'):
+                base_name = base_name[:-4]
+            
+            # Extract first part which might be object name
+            parts = base_name.split('_')
+            if parts:
+                return parts[0].title()
+                
+        except Exception:
+            pass
+            
+        return "Unknown"
+    
     def download_file(self, telescope_type, ip, file_info, local_path, username=None, password=None, progress_callback=None):
         """Download a specific file from the telescope."""
         file_name = os.path.basename(file_info['path'])
@@ -638,6 +849,8 @@ class SmartTelescopeManager:
         # Check protocol type
         if config.get('protocol') == 'ftp':
             return self._download_file_ftp(telescope_type, ip, file_info, local_path, progress_callback)
+        elif config.get('protocol') == 'ftps':
+            return self._download_file_ftps(telescope_type, ip, file_info, local_path, username, password, progress_callback)
         else:
             return self._download_file_smb(telescope_type, ip, file_info, local_path, username, password, progress_callback)
     
@@ -765,6 +978,57 @@ class SmartTelescopeManager:
         except Exception as e:
             logger.error(f"FTP connection error during download of {file_name}: {e}")
             return False, f"FTP connection error: {e}"
+    
+    def _download_file_ftps(self, telescope_type, hostname, file_info, local_path, username=None, password=None, progress_callback=None):
+        """Download file via FTPS protocol (iTelescope)."""
+        file_name = os.path.basename(file_info['path'])
+        
+        if not username or not password:
+            logger.error("Username and password required for iTelescope FTPS download")
+            return False, "Username and password required"
+        
+        try:
+            # Create FTPS connection
+            from ftplib import FTP_TLS
+            ftps = FTP_TLS()
+            ftps.connect(hostname, 21, timeout=30)
+            ftps.login(username, password)
+            ftps.prot_p()  # Switch to secure data connection
+            
+            try:
+                # Navigate to the directory containing the file
+                file_dir = os.path.dirname(file_info['path'])
+                if file_dir:
+                    ftps.cwd('/')
+                    ftps.cwd(file_dir)
+                
+                # Download the file with progress tracking
+                total_size = file_info.get('size', 0)
+                downloaded = 0
+                
+                def progress_handler(data):
+                    nonlocal downloaded
+                    downloaded += len(data)
+                    if progress_callback and total_size > 0:
+                        progress = int((downloaded / total_size) * 100)
+                        progress_callback(f"Downloading {file_name}: {progress}%")
+                    local_file.write(data)
+                
+                with open(local_path, 'wb') as local_file:
+                    ftps.retrbinary(f'RETR {file_name}', progress_handler)
+                
+                ftps.quit()
+                logger.info(f"Successfully downloaded {file_name} to {local_path}")
+                return True, None
+                
+            except Exception as e:
+                ftps.quit()
+                logger.error(f"Error downloading {file_name}: {e}")
+                return False, f"Error downloading file: {e}"
+                
+        except Exception as e:
+            logger.error(f"FTPS connection error during download of {file_name}: {e}")
+            return False, f"FTPS connection error: {e}"
     
     def format_file_size(self, size_bytes):
         """Format file size in human readable format."""

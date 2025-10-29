@@ -22,6 +22,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **SEESTAR Support**: Direct connection to SEESTAR smart telescopes via SMB/CIFS protocol
 - **StellarMate Support**: Direct connection to StellarMate systems via SMB/CIFS protocol
 - **DWARF Support**: Direct connection to DWARF smart telescopes via FTP protocol (experimental)
+- **iTelescope Support**: Secure FTPS connection to iTelescope network for downloading calibrated files
 - **Network Discovery**: Automatic scanning of local network to locate telescopes
 - **Remote File Access**: Browse and download FITS files directly from telescope storage
 - **Selective Download**: Filter and download only from "_sub" folders for targeted data retrieval
@@ -39,17 +40,27 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
   - **Complete Sync**: Bidirectional sync - downloads missing files from cloud AND uploads files without cloud URLs
   - **Backup Only**: One-way backup - uploads local files to cloud for safe storage
   - **On Demand**: Manual file-by-file synchronization (coming soon)
-- **Smart Upload Logic**: Only uploads files that don't exist in cloud to avoid duplicates and reduce transfer time
+- **Advanced Duplicate Detection**: Hash-based duplicate prevention and storage optimization
+  - **MD5 Hash Comparison**: Prevents duplicate uploads by comparing file content hashes
+  - **Cloud Storage Analysis**: Identifies duplicate files in cloud storage to reduce costs
+  - **Bulk Performance Optimization**: Efficient metadata retrieval reduces API calls and improves sync speed
+  - **Detailed Duplicate Reports**: Shows duplicate groups, wasted space, and optimization opportunities
+- **Smart Upload Logic**: Three-tier decision system (skip identical files, upload new files, overwrite changed content)
+- **Enhanced File Matching**: Multi-tier local file matching using exact filename, partial filename, and hash-based verification
 - **Database Integration**: Tracks cloud URLs for all files with `fitsFileCloudURL` field enabling future remote access features
 - **Images View Integration**: Local/Cloud status icons show file storage locations at a glance
-- **Real-time Progress**: Live progress tracking with file-by-file updates and cancellation support
+- **Real-time Progress**: Live progress tracking with efficiency statistics and detailed completion summaries
 - **Command-Line Automation**: Complete command-line interface (`CloudSync.py`) with automation scripts for cron/Task Scheduler
-- **Analysis Mode**: Analyze cloud storage contents and compare with local database without performing sync
+- **Analysis Mode**: Analyze cloud storage contents, detect duplicates, and compare with local database without performing sync
 - **Comprehensive Error Handling**: User-friendly error messages for authentication, bucket access, and network issues
 - **Directory Structure Preservation**: Maintains your local repository folder structure in cloud storage
 - **Bucket Validation**: Pre-operation checks ensure bucket exists and is accessible
 - **Service Account Authentication**: Secure authentication using Google Cloud service account keys
-- **Configuration Management**: Easy setup through dedicated Cloud Sync configuration interface
+- **Tabbed Configuration Interface**: Modern tabbed configuration dialog with organized sections:
+  - **General Tab**: General settings, display preferences, external tools, and warning suppression
+  - **Cloud Sync Tab**: Dedicated cloud synchronization configuration with vendor selection and authentication
+  - **Calibration Tab**: Auto-calibration settings including master frame creation and retention policies
+  - **Smart Telescopes Tab**: Telescope-specific configurations including iTelescope credentials
 - **Self-Contained Architecture**: All cloud operations integrated into dialog for improved maintainability
 
 ### 🗂️ **File Management**
@@ -215,7 +226,7 @@ Desktop launchers automatically check for and install updates from GitHub when s
 ## 🎯 Usage Examples
 
 ### Basic Repository Management
-1. **Setup Repository**: Configure your FITS file repository location in Settings
+1. **Setup Repository**: Configure your FITS file repository location in Config → General tab
 2. **Scan Files**: Use "Load Repository" to scan and catalog your FITS files
 3. **View Statistics**: Check the Stats tab for repository overview and file counts
 
@@ -232,11 +243,17 @@ Desktop launchers automatically check for and install updates from GitHub when s
 3. **Browse & Download**: Navigate telescope folders and download FITS files
 4. **Auto-Process**: Files are automatically processed and added to your repository
 
+### iTelescope Integration
+1. **Configure Credentials**: Config → Smart Telescopes tab → Enter iTelescope username/password
+2. **Connect**: Tools → "Download from Smart Telescope" → Select "iTelescope"
+3. **Scan Files**: System discovers all calibrated files in your iTelescope account
+4. **Download**: Select and download calibrated files directly to your repository
+
 ### Cloud Sync Setup
 1. **Google Cloud Setup**: Follow the [GCS Setup Guide](GCS_SETUP_GUIDE.md)
-2. **Configure Sync**: Tools → "Cloud Sync" → Configure your bucket and credentials  
+2. **Configure Sync**: Config → Cloud Sync tab → Configure your bucket and credentials  
 3. **Choose Profile**: Select Complete Sync, Backup Only, or On Demand
-4. **Sync**: Monitor progress with real-time status updates
+4. **Sync**: Tools → "Cloud Sync" → Monitor progress with real-time status updates
 
 ## 🗄️ Database Migrations
 

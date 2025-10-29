@@ -30,6 +30,8 @@
 
 10. **Always split classes out into separate files**: Each class should be in its own file named after the class. For example, a class named `ImageProcessor` should be in a file named `image_processor.py`. Where a particular part of a program requires multiple classes, group related classes into a single package (directory with `__init__.py`), ensuring each class still resides in its own file within that package. This will keep the codebase organized and maintainable.
 
+11. **Documentation**: Do not create documentation unless specifically asked to by the user.
+
 ### Rationale:
 - Ensures consistent dependency versions across development environments
 - Prevents conflicts with system-wide Python packages

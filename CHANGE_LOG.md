@@ -3,6 +3,35 @@
 ## Version 1.2.0 - Current Development
 
 ### New Features
+- **iTelescope Smart Telescope Integration**: Revolutionary integration with iTelescope remote observatory network
+  - **Secure FTPS Connection**: Direct connection to data.itelescope.net using FTPS (FTP over TLS) for encrypted data transfer
+  - **Selective Root Directory Scanning**: Intelligent scanning that only explores root directories starting with 'T' or 't' to focus on telescope directories
+  - **Compressed FITS Support**: Handles iTelescope's .fit.zip format for efficient file transfer and storage
+  - **Automatic File Discovery**: Recursively scans telescope directories for calibrated FITS files (files starting with "calibrated")
+  - **Configuration Integration**: Added iTelescope credentials configuration in Smart Telescopes tab of Config dialog
+  - **Progress Tracking**: Real-time download progress with file-by-file status updates and comprehensive error handling
+  - **Metadata Extraction**: Automatic extraction of object names, file sizes, dates, and paths from iTelescope file structure
+  - **Secure Authentication**: Username/password authentication with TLS encryption for all data transfers
+  - **Smart Telescope Framework Integration**: Fully integrated with existing telescope management system alongside SeeStar, StellarMate, and DWARF support
+
+- **Tabbed Configuration Interface**: Complete redesign of configuration dialog for improved usability
+  - **General Tab**: Consolidated General Settings, Display Settings, External Tools, and Suppress Warnings
+  - **Cloud Sync Tab**: Dedicated tab for all cloud synchronization settings and authentication
+  - **Calibration Tab**: Focused tab for Auto-Calibration configuration and master frame settings  
+  - **Smart Telescopes Tab**: New dedicated tab for telescope-specific configurations including iTelescope credentials
+  - **Improved Organization**: Logical grouping reduces interface clutter and improves configuration workflow
+  - **Better User Experience**: Tabbed interface allows for larger, more detailed configuration sections without overwhelming the user
+
+### Fixes
+- **FRAME cards** - images with FRAME cards but no IMAGETYP have had  
+- **Cloud Sync Header Modification Issue**: Fixed critical issue where downloaded files were being re-uploaded due to FITS header modifications during registration
+  - Problem: Files downloaded from cloud had headers modified (FRAME → IMAGETYP, etc.) during database registration, causing hash changes
+  - Solution: Cloud sync now detects when downloaded files were modified and replaces the cloud version instead of creating duplicates
+  - Prevents accumulation of near-duplicate files in cloud storage with only header differences
+  - Enhanced logging shows when files are being "replaced after download" vs normal uploads
+  - Tracks replaced file count separately in sync reports for transparency  
+
+### New Features
 - **Complete Cloud Sync System**: Revolutionary cloud synchronization with Google Cloud Storage integration
   - **Configuration Interface**: Added Cloud Sync section in Configuration dialog with vendor selection, bucket URL, service account authentication file picker, and sync profile selection (Complete/Backup/On Demand)
   - **Cloud Sync Dialog**: New Tools → Cloud Sync menu opens dedicated dialog with Analyze and Sync operations, real-time configuration display, and Configure button for easy settings access
@@ -31,6 +60,19 @@
     - **Safety Error Handling**: Comprehensive error management with graceful fallbacks - if cloud verification fails, local files are preserved with detailed error logging
     - **Enhanced CLI Safety**: All command-line cloud sync operations include identical safety checks with cloud verification before deletion
     - **Intelligent File Detection**: Updated queries to include all file types (regular FITS, soft-deleted calibration files, master frames) in appropriate sync operations
+  - **Advanced Duplicate Detection and Hash-Based Optimization**: Revolutionary performance and storage optimization features
+    - **MD5 Hash-Based Duplicate Prevention**: Intelligent upload prevention system that calculates MD5 hashes for local files and compares with cloud metadata to avoid duplicate uploads
+    - **Bulk Cloud Metadata Retrieval**: Efficient cloud file hash collection using Google Cloud Storage metadata API, dramatically reducing API calls and improving sync performance
+    - **Smart Upload Decision Logic**: Three-tier upload decision system - skip identical files (MD5 match), upload new files, and overwrite files with different content
+    - **Enhanced Sync Performance**: Bulk hash comparison operations replace individual file checks, resulting in significantly faster sync operations and reduced bandwidth usage
+    - **Comprehensive Progress Reporting**: Enhanced progress dialogs with "Checking cloud for existing files" phase, efficiency statistics showing files skipped vs uploaded, and detailed completion summaries
+    - **Cloud Duplicate Analysis**: Advanced duplicate detection in cloud storage during Analyze operations
+      - **Hash-Based File Grouping**: Groups cloud files by MD5 hash to identify identical content stored under different names or paths
+      - **Wasted Space Calculation**: Calculates storage space wasted by duplicate files with human-readable size formatting (MB/GB/TB)
+      - **Detailed Duplicate Reports**: Optional detailed view showing duplicate groups, file paths, and wasted space per group with professional formatting
+      - **Enhanced Analysis Results**: Comprehensive analysis statistics including duplicate groups found, total duplicate files, and storage optimization opportunities
+    - **Advanced File Matching for Analysis**: Multi-tier local file matching system combining exact filename matching, partial filename matching, and hash-based content verification for maximum accuracy
+    - **Consistent Hash Implementation**: Unified hash-based duplicate detection across both Sync and Analyze operations ensuring consistent behavior and accurate results
 
 - **Command-Line Cloud Sync**: Complete automation support for unattended cloud operations
   - **CloudSync.py**: Comprehensive command-line utility in `commands/` folder supporting all sync profiles

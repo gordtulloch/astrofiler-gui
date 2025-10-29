@@ -211,6 +211,78 @@ The Cloud Sync system is tightly integrated with AstroFiler's database:
 - **Permission Checking**: Specific errors for access denied scenarios
 - **Network Resilience**: Handles temporary network issues gracefully
 
+## Advanced Features (v1.2.0+)
+
+### Hash-Based Duplicate Detection and Optimization
+
+AstroFiler's cloud sync system includes advanced duplicate detection and performance optimization features:
+
+#### Smart Upload Prevention
+- **MD5 Hash Comparison**: Calculates MD5 hashes for local files and compares with cloud metadata
+- **Content-Based Detection**: Identifies identical files even with different names or paths
+- **Bandwidth Optimization**: Skips uploads for files that already exist with identical content
+- **Performance Enhancement**: Bulk metadata retrieval reduces API calls and speeds up sync operations
+
+#### Cloud Storage Duplicate Analysis
+The **Analyze** function now includes comprehensive duplicate detection:
+
+1. **Duplicate Scanning**: Analyzes all cloud files for identical content based on MD5 hashes
+2. **Storage Optimization**: Identifies wasted storage space from duplicate files
+3. **Detailed Reporting**: Shows duplicate groups with file paths and space calculations
+4. **Cost Reduction**: Helps identify files that can be safely removed to reduce storage costs
+
+#### Enhanced Analysis Features
+- **Multi-Tier File Matching**: 
+  - Exact filename matching with hash verification
+  - Partial filename matching with content verification
+  - Pure hash-based matching across all files for maximum accuracy
+- **Progress Phases**: 
+  - "Downloading file listing from cloud..."
+  - "Analyzing cloud storage for duplicates..."
+  - "Analyzing matches with local files..."
+- **Comprehensive Statistics**:
+  - Local match breakdown (exact filename, hash-verified, partial matches)
+  - Duplicate detection results (groups found, total duplicates, wasted space)
+  - Storage optimization opportunities
+
+#### Using Duplicate Detection
+
+**Basic Analysis with Duplicate Detection:**
+1. Go to **Tools** > **Cloud Sync**
+2. Click **Analyze**
+3. Review results showing:
+   - Cloud files found
+   - Local matches identified
+   - Duplicate groups detected
+   - Wasted storage space
+
+**Detailed Duplicate Report:**
+1. If duplicates are found, click **Help** in the results dialog
+2. View detailed report showing:
+   - Each duplicate group with file count and wasted space
+   - Full file paths for all duplicates
+   - MD5 hash information for verification
+   - Storage space calculations
+
+**Optimizing Storage:**
+- Use duplicate reports to identify redundant files
+- Safely remove duplicate files from cloud storage to reduce costs
+- Consider standardizing file naming conventions to prevent future duplicates
+
+### Performance Improvements
+
+#### Efficient Sync Operations
+- **Bulk Hash Retrieval**: Downloads all cloud file metadata in one operation
+- **Smart Upload Logic**: Three-tier decision system (skip/upload/overwrite)
+- **Reduced API Calls**: Minimizes individual file checks for better performance
+- **Progress Optimization**: Shows efficiency statistics (files skipped vs uploaded)
+
+#### Enhanced User Experience
+- **Real-time Feedback**: Live progress updates with descriptive messages
+- **Cancellation Support**: User can abort operations cleanly at any time
+- **Detailed Completion**: Comprehensive statistics showing time and bandwidth saved
+- **Error Recovery**: Graceful handling of network issues and partial failures
+
 ## Step 8: Best Practices
 
 ### Initial Setup Workflow

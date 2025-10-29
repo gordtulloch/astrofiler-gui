@@ -60,6 +60,20 @@ AstroFiler is a powerful Python application designed for astronomers and astroph
 - **Quality Control**: Validates calibration frame quality and reports any issues or missing calibration data
 - **Command-Line Automation**: Complete command-line interface for automated calibration workflows and scheduling
 
+### Cloud Sync Integration (V1.2.0)
+- **Google Cloud Storage Support**: Complete integration with Google Cloud Storage for backup and synchronization
+- **Advanced Duplicate Detection**: Hash-based duplicate prevention and cloud storage optimization
+  - **MD5 Hash Comparison**: Prevents duplicate uploads by comparing file content hashes
+  - **Cloud Storage Analysis**: Identifies duplicate files in cloud storage to reduce costs and optimize storage
+  - **Bulk Performance Optimization**: Efficient metadata retrieval reduces API calls and improves sync performance
+  - **Detailed Duplicate Reports**: Shows duplicate groups, wasted space, and optimization opportunities
+- **Multiple Sync Profiles**: Complete (bidirectional), Backup Only (one-way), and On Demand synchronization options
+- **Smart Upload Logic**: Three-tier decision system prevents unnecessary uploads and optimizes bandwidth usage
+- **Enhanced File Matching**: Multi-tier local file matching using exact filename, partial filename, and hash-based verification
+- **Real-time Progress Tracking**: Live progress updates with efficiency statistics and detailed completion summaries
+- **Command-Line Automation**: Complete CLI interface with cron/Task Scheduler automation scripts
+- **Database Integration**: Tracks cloud URLs for all files enabling future remote access features
+
 ### Enhanced Merge/Rename Functionality
 - **FITS Header Updates**: When files are renamed, OBJECT headers are automatically updated to match
 - **Directory Structure Management**: Files are moved to correct directory hierarchy based on new object names

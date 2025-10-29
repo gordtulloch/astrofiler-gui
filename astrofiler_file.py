@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import uuid
 import os
 import hashlib
+import zipfile
 from math import cos,sin 
 from astropy.io import fits
 import shutil
@@ -425,6 +426,65 @@ class fitsProcessing:
             return None
 
     #################################################################################################################
+    ## extractZipFile - this function extracts FITS files from zip archives                                       ##
+    #################################################################################################################
+    def extractZipFile(self, zip_path):
+        """
+        Extract FITS files from a zip archive.
+        
+        Args:
+            zip_path (str): Path to the zip file
+            
+        Returns:
+            str or None: Path to the extracted FITS file, or None if extraction failed
+        """
+        try:
+            zip_dir = os.path.dirname(zip_path)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                # List all files in the zip
+                file_list = zip_ref.namelist()
+                
+                if not file_list:
+                    logger.warning(f"No files found in zip archive {zip_path}")
+                    return None
+                
+                # Extract all files to the same directory as the zip file
+                zip_ref.extractall(zip_dir)
+                
+                # Find the main FITS file (usually the largest or first .fit/.fits file)
+                extracted_fits_files = []
+                for file_name in file_list:
+                    if file_name.lower().endswith(('.fit', '.fits')):
+                        extracted_path = os.path.join(zip_dir, file_name)
+                        if os.path.exists(extracted_path):
+                            extracted_fits_files.append(extracted_path)
+                
+                if extracted_fits_files:
+                    # Return the first FITS file found
+                    main_file = extracted_fits_files[0]
+                    logger.info(f"Successfully extracted {len(extracted_fits_files)} FITS file(s) from {os.path.basename(zip_path)}")
+                    
+                    # Remove the original zip file after successful extraction
+                    try:
+                        os.remove(zip_path)
+                        logger.debug(f"Removed original zip file {zip_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not remove original zip file {zip_path}: {e}")
+                    
+                    return main_file
+                else:
+                    logger.warning(f"No FITS files found in zip archive {zip_path}")
+                    return None
+                    
+        except zipfile.BadZipFile:
+            logger.error(f"Invalid zip file: {zip_path}")
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting zip file {zip_path}: {e}")
+            return None
+
+    #################################################################################################################
     ## registerFitsImage - this functioncalls a function to registers each fits files in the database              ##
     ## and also corrects any issues with the Fits header info (e.g. WCS)                                           ##
     #################################################################################################################
@@ -439,7 +499,31 @@ class fitsProcessing:
         config.read('astrofiler.ini')
         save_modified = config.getboolean('DEFAULT', 'save_modified_headers', fallback=False)
 
-        # Ignore everything not a *fit* file
+        # Check if this is a zip file containing FITS files
+        if file_extension.lower() in ['.zip']:
+            # Check if it's a FITS zip file based on the name
+            if file.lower().endswith(('.fit.zip', '.fits.zip')):
+                logger.info(f"Found FITS zip file: {file}")
+                
+                # Extract the zip file
+                zip_path = os.path.join(root, file)
+                extracted_fits_path = self.extractZipFile(zip_path)
+                
+                if extracted_fits_path:
+                    # Update the file path to point to the extracted FITS file
+                    root = os.path.dirname(extracted_fits_path)
+                    file = os.path.basename(extracted_fits_path)
+                    file_name, file_extension = os.path.splitext(os.path.join(root, file))
+                    logger.info(f"Processing extracted FITS file: {file}")
+                else:
+                    logger.error(f"Failed to extract FITS file from {file}")
+                    return False
+            else:
+                # Regular zip file, not a FITS zip
+                logger.debug("Ignoring non-FITS zip file "+os.path.join(root, file))
+                return False
+
+        # Ignore everything not a *fit* file (after potential zip extraction)
         if "fit" not in file_extension.lower():
             logger.debug("Ignoring file "+os.path.join(root, file)+" with extension -"+file_extension+"-")
             return False
@@ -470,7 +554,7 @@ class fitsProcessing:
         if mapping_modified:
             header_modified = True
         
-        if "IMAGETYP" in hdr:
+        if "IMAGETYP" in hdr or "FRAME" in hdr:
             # Fix variances in header cards
             if ("EXPTIME" in hdr):
                 exposure=hdr["EXPTIME"]
@@ -486,6 +570,11 @@ class fitsProcessing:
             else:
                 telescope="Unknown"
             
+            # Fix frames where FRAME is used instead of IMAGETYP
+            if ("FRAME" in hdr) and ("IMAGETYP" not in hdr):
+                # Assign FRAME keyword to IMAGETYP
+                hdr["IMAGETYP"]=hdr["FRAME"]
+                
             # Fix calibration frames where OBJECT is set to an object rather than the frametype
             if "DARK" in hdr["IMAGETYP"].upper():
                 hdr["OBJECT"] = "Dark"
@@ -702,17 +791,19 @@ class fitsProcessing:
         for root, dirs, files in os.walk(os.path.abspath(workFolder)):
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                # Check for FITS files (.fit, .fits) and XISF files (.xisf)
-                if "fit" in file_extension.lower() or file_extension.lower() == ".xisf":
+                # Check for FITS files (.fit, .fits), XISF files (.xisf), and FITS zip files (.fit.zip, .fits.zip)
+                if ("fit" in file_extension.lower() or 
+                    file_extension.lower() == ".xisf" or 
+                    (file_extension.lower() == ".zip" and file.lower().endswith(('.fit.zip', '.fits.zip')))):
                     total_files += 1
         
-        logger.info(f"Found {total_files} FITS and XISF files to process")
+        logger.info(f"Found {total_files} FITS, XISF, and FITS ZIP files to process")
         
         # If no files found, return early
         if total_files == 0:
-            logger.info("No FITS or XISF files found to process")
+            logger.info("No FITS, XISF, or FITS ZIP files found to process")
             if progress_callback:
-                progress_callback(0, 0, "No FITS or XISF files found")
+                progress_callback(0, 0, "No FITS, XISF, or FITS ZIP files found")
             return registeredFiles
         
         # Second pass: process files with progress tracking
@@ -727,10 +818,20 @@ class fitsProcessing:
             logger.debug(f"Processing directory: {root} with {len(files)} files")
             for file in files:
                 file_name, file_extension = os.path.splitext(file)
-                # Check for FITS files (.fit, .fits) and XISF files (.xisf)
-                if "fit" in file_extension.lower() or file_extension.lower() == ".xisf":
+                # Check for FITS files (.fit, .fits), XISF files (.xisf), and FITS zip files (.fit.zip, .fits.zip)
+                if ("fit" in file_extension.lower() or 
+                    file_extension.lower() == ".xisf" or 
+                    (file_extension.lower() == ".zip" and file.lower().endswith(('.fit.zip', '.fits.zip')))):
                     currCount += 1
-                    file_type = "XISF" if file_extension.lower() == ".xisf" else "FITS"
+                    
+                    # Determine file type for logging
+                    if file_extension.lower() == ".xisf":
+                        file_type = "XISF"
+                    elif file_extension.lower() == ".zip":
+                        file_type = "FITS ZIP"
+                    else:
+                        file_type = "FITS"
+                    
                     logger.debug(f"Found {file_type} file #{currCount}: {file}")
                     
                     # Call progress callback if provided
@@ -1214,7 +1315,7 @@ class fitsProcessing:
             # Create new fitsFile record
             logger.debug("Adding file "+fileName+" to repo with date "+hdr["DATE-OBS"])
             
-            # Adjust for different keywords
+            # Adjust for different keywords              
             if ("EXPTIME" in hdr):
                 exposure=hdr["EXPTIME"]
             else:

@@ -1,6 +1,7 @@
 import os
 import logging
 import configparser
+import zipfile
 from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal, Qt, QUrl
@@ -35,32 +36,83 @@ class TelescopeDownloadWorker(QThread):
         self.delete_files = delete_files
         self._stop_requested = False
     
-    def _modify_fits_headers(self, fits_path, folder_name):
+    def _modify_fits_headers(self, fits_path, folder_name, telescope_type=None):
         """Modify FITS headers based on folder name."""
         try:
             with fits.open(fits_path, mode='update') as hdul:
                 header = hdul[0].header
                 
-                # Extract OBJECT from folder name (strip _sub or _mosaic_sub suffix)
-                object_name = folder_name
-                if folder_name.endswith('_mosaic_sub'):
-                    object_name = folder_name[:-11]  # Remove '_mosaic_sub'
-                elif folder_name.endswith('_sub'):
-                    object_name = folder_name[:-4]   # Remove '_sub'
+                # For iTelescope, preserve the original OBJECT header and don't modify it
+                if "seestar" in telescope_type.lower():
+                    # Extract OBJECT from folder name (strip _sub or _mosaic_sub suffix)
+                    object_name = folder_name
+                    if folder_name.endswith('_mosaic_sub'):
+                        object_name = folder_name[:-11]  # Remove '_mosaic_sub'
+                    elif folder_name.endswith('_sub'):
+                        object_name = folder_name[:-4]   # Remove '_sub'
+                    
+                    # Set OBJECT header
+                    header['OBJECT'] = object_name
                 
-                # Set OBJECT header
-                header['OBJECT'] = object_name
-                
-                # Set MOSAIC header for mosaic folders
-                if folder_name.endswith('_mosaic_sub'):
-                    header['MOSAIC'] = True
-                else:
-                    header['MOSAIC'] = False
+                    # Set MOSAIC header for mosaic folders (for all telescope types)
+                    if folder_name.endswith('_mosaic_sub'):
+                        header['MOSAIC'] = True
+                    else:
+                        header['MOSAIC'] = False
                 
                 hdul.flush()
                 
         except Exception as e:
             self.progress_updated.emit(f"Warning: Could not modify headers for {os.path.basename(fits_path)}: {str(e)}")
+    
+    def _unzip_file(self, zip_path):
+        """Unzip a file and return the path to the extracted file."""
+        try:
+            # Get the directory where the zip file is located
+            zip_dir = os.path.dirname(zip_path)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                # List all files in the zip
+                file_list = zip_ref.namelist()
+                
+                if not file_list:
+                    logger.warning(f"No files found in zip archive {zip_path}")
+                    return None
+                
+                # Extract all files to the same directory as the zip file
+                zip_ref.extractall(zip_dir)
+                
+                # Find the main file (usually the largest or first .fit/.fits file)
+                extracted_files = []
+                for file_name in file_list:
+                    if file_name.lower().endswith(('.fit', '.fits')):
+                        extracted_path = os.path.join(zip_dir, file_name)
+                        if os.path.exists(extracted_path):
+                            extracted_files.append(extracted_path)
+                
+                if extracted_files:
+                    # Return the first FITS file found
+                    main_file = extracted_files[0]
+                    logger.info(f"Successfully extracted {len(extracted_files)} file(s) from {os.path.basename(zip_path)}")
+                    
+                    # Remove the original zip file after successful extraction
+                    try:
+                        os.remove(zip_path)
+                        logger.debug(f"Removed original zip file {zip_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not remove original zip file {zip_path}: {e}")
+                    
+                    return main_file
+                else:
+                    logger.warning(f"No FITS files found in zip archive {zip_path}")
+                    return None
+                    
+        except zipfile.BadZipFile:
+            logger.error(f"Invalid zip file: {zip_path}")
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting zip file {zip_path}: {e}")
+            return None
     
     def stop(self):
         """Request the worker to stop."""
@@ -74,7 +126,12 @@ class TelescopeDownloadWorker(QThread):
             if self._stop_requested:
                 return
             
-            protocol_info = "SMB" if self.telescope_type in ["SeeStar", "StellarMate"] else "FTP"
+            if self.telescope_type in ["SeeStar", "StellarMate"]:
+                protocol_info = "SMB"
+            elif self.telescope_type == "iTelescope":
+                protocol_info = "FTPS"
+            else:
+                protocol_info = "FTP"
             self.progress_updated.emit(f"Scanning network for {self.telescope_type} telescope ({protocol_info})...")
             logger.info(f"Scanning network for {self.telescope_type} telescope ({protocol_info})...")
             self.progress_percent_updated.emit(5)
@@ -105,7 +162,17 @@ class TelescopeDownloadWorker(QThread):
             logger.info("Scanning for FITS files...")
             self.progress_percent_updated.emit(20)
             
-            fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip)
+            # Get credentials for iTelescope if needed
+            self.username = None
+            self.password = None
+            if self.telescope_type == "iTelescope":
+                self.username, self.password = smart_telescope_manager.get_itelescope_credentials()
+                if not self.username or not self.password:
+                    self.error_occurred.emit("iTelescope credentials not configured. Please configure in Config → Smart Telescopes tab.")
+                    logger.error("iTelescope credentials not configured")
+                    return
+            
+            fits_files, error = smart_telescope_manager.get_fits_files(self.telescope_type, ip, self.username, self.password)
             
             if self._stop_requested:
                 return
@@ -144,14 +211,21 @@ class TelescopeDownloadWorker(QThread):
                 download_progress = 30 + int((i / len(fits_files)) * 60)
                 self.progress_percent_updated.emit(download_progress)
                 
-                # Create local file path maintaining folder structure
+                # Create local file path
                 folder_name = file_info.get('folder_name', 'unknown')
-                local_dir = os.path.join(self.target_directory, folder_name)
-                local_path = os.path.join(local_dir, file_name)
+                
+                # For iTelescope, store files directly in target directory without preserving folder structure
+                if self.telescope_type == 'iTelescope':
+                    local_path = os.path.join(self.target_directory, file_name)
+                else:
+                    # For other telescopes, maintain folder structure
+                    local_dir = os.path.join(self.target_directory, folder_name)
+                    local_path = os.path.join(local_dir, file_name)
                 
                 # Download the file
                 success, error = smart_telescope_manager.download_file(
                     self.telescope_type, ip, file_info, local_path,
+                    self.username, self.password,
                     progress_callback=lambda progress: not self._stop_requested
                 )
                 
@@ -162,8 +236,22 @@ class TelescopeDownloadWorker(QThread):
                     downloaded_files += 1
                     logger.info(f"Downloaded {file_name}")
                     
+                    # Unzip files if they have .zip extension
+                    if file_name.lower().endswith('.zip'):
+                        try:
+                            unzipped_path = self._unzip_file(local_path)
+                            if unzipped_path:
+                                logger.info(f"Unzipped {file_name} to {os.path.basename(unzipped_path)}")
+                                # Update local_path to point to the unzipped file for further processing
+                                local_path = unzipped_path
+                                file_name = os.path.basename(unzipped_path)
+                            else:
+                                logger.warning(f"Failed to unzip {file_name}, continuing with zip file")
+                        except Exception as e:
+                            logger.error(f"Error unzipping {file_name}: {e}, continuing with zip file")
+                    
                     # Modify FITS headers based on folder name
-                    self._modify_fits_headers(local_path, folder_name)
+                    self._modify_fits_headers(local_path, folder_name, self.telescope_type)
                     
                     # Register the downloaded FITS file in the database
                     try:
@@ -251,6 +339,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         self.telescope_list.addItem("SeeStar")
         self.telescope_list.addItem("StellarMate")
         self.telescope_list.addItem("DWARF 3")
+        self.telescope_list.addItem("iTelescope")
         self.telescope_list.setCurrentRow(0)
         self.telescope_list.setMaximumHeight(100)
         
@@ -360,6 +449,8 @@ class SmartTelescopeDownloadDialog(QDialog):
                 self.hostname_edit.setText("stellarmate.local")
             elif telescope_type == "DWARF 3":
                 self.hostname_edit.setText("dwarf.local")
+            elif telescope_type == "iTelescope":
+                self.hostname_edit.setText("data.itelescope.net")
     
     def start_download(self):
         """Start the download process."""
@@ -427,6 +518,12 @@ class SmartTelescopeDownloadDialog(QDialog):
         
         # Show completion message
         QMessageBox.information(self, "Download Complete", message)
+        
+        # Refresh the Images view in the main window if available
+        if self.parent() and hasattr(self.parent(), 'images_widget'):
+            if hasattr(self.parent().images_widget, 'load_fits_data'):
+                logger.info("Refreshing Images view after download completion")
+                self.parent().images_widget.load_fits_data()
         
         # Close the download dialog
         self.accept()
