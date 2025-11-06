@@ -19,7 +19,7 @@ def migrate(migrator, database, fake=False, **kwargs):
     Add calibration tracking fields to fitsFile table
     """
     # Add calibration tracking fields
-    migrator.add_columns('fitsfile', 
+    migrator.add_fields('fitsfile', 
         fitsFileSoftDelete=pw.BooleanField(null=True, default=False),
         fitsFileCalibrationDate=pw.DateTimeField(null=True),
         fitsFileMasterBias=pw.TextField(null=True),
@@ -34,7 +34,7 @@ def rollback(migrator, database, fake=False, **kwargs):
     Remove calibration tracking fields from fitsFile table
     """
     # Remove the calibration tracking fields
-    migrator.drop_columns('fitsfile', 
+    migrator.remove_fields('fitsfile', 
         'fitsFileSoftDelete',
         'fitsFileCalibrationDate',
         'fitsFileMasterBias',

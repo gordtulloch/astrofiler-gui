@@ -19,7 +19,7 @@ def migrate(migrator, database, fake=False, **kwargs):
     Add auto-calibration tracking fields to fitsSession table
     """
     # Add auto-calibration tracking fields
-    migrator.add_columns('fitssession', 
+    migrator.add_fields('fitssession', 
         is_auto_calibration=pw.BooleanField(null=True, default=False),
         auto_calibration_dark_session_id=pw.TextField(null=True),
         auto_calibration_flat_session_id=pw.TextField(null=True),
@@ -34,7 +34,7 @@ def rollback(migrator, database, fake=False, **kwargs):
     Remove auto-calibration tracking fields from fitsSession table
     """
     # Remove the auto-calibration tracking fields
-    migrator.drop_columns('fitssession', 
+    migrator.remove_fields('fitssession', 
         'is_auto_calibration',
         'auto_calibration_dark_session_id',
         'auto_calibration_flat_session_id',

@@ -12,22 +12,12 @@ def migrate(migrator, database, fake=False, **kwargs):
     """
     Add fitsFileCloudURL field to fitsFile table
     """
-    # Check if the column already exists
-    cursor = database.execute_sql("PRAGMA table_info(fitsfile)")
-    existing_columns = [row[1] for row in cursor.fetchall()]
-    
-    # Only add the column if it doesn't already exist
-    if 'fitsFileCloudURL' not in existing_columns:
-        migrator.add_columns('fitsfile', fitsFileCloudURL=pw.TextField(null=True))
+    # Add the cloud URL field
+    migrator.add_fields('fitsfile', fitsFileCloudURL=pw.TextField(null=True))
 
 def rollback(migrator, database, fake=False, **kwargs):
     """
     Remove fitsFileCloudURL field from fitsFile table
     """
-    # Check if the column exists before trying to remove it
-    cursor = database.execute_sql("PRAGMA table_info(fitsfile)")
-    existing_columns = [row[1] for row in cursor.fetchall()]
-    
-    # Only remove the column if it exists
-    if 'fitsFileCloudURL' in existing_columns:
-        migrator.drop_columns('fitsfile', 'fitsFileCloudURL')
+    # Remove the cloud URL field
+    migrator.remove_fields('fitsfile', 'fitsFileCloudURL')
