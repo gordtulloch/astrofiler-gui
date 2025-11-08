@@ -1,0 +1,174 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrofiler"
+version = "1.2.0"
+description = "Professional Astronomical Image Management and Processing Suite"
+authors = [
+    {name = "Gord Tulloch", email = "gord.tulloch@gmail.com"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+keywords = ["astronomy", "fits", "image-processing", "telescope", "astrophotography"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "astropy>=4.0",
+    "peewee>=3.14",
+    "peewee-migrate>=1.6",
+    "numpy>=1.20",
+    "matplotlib>=3.3",
+    "pytz",
+    "PySide6>=6.0",
+    "Pillow>=8.0",
+    "pysmb>=1.2",
+    "google-cloud-storage>=2.0",
+    "scipy>=1.7",
+    "lz4>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.10",
+    "pytest-qt>=4.0",
+    "black>=21.0",
+    "flake8>=4.0",
+    "mypy>=0.910",
+    "pre-commit>=2.15",
+]
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme>=1.0",
+]
+quality = [
+    "scipy>=1.7",  # For advanced quality analysis
+]
+cloud = [
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=0.4",
+]
+
+[project.scripts]
+astrofiler = "astrofiler.main:main"
+astrofiler-cli = "astrofiler.cli.main:main"
+
+[project.gui-scripts]
+astrofiler-gui = "astrofiler.main:main"
+
+[project.urls]
+Homepage = "https://github.com/gordtulloch/astrofiler-gui"
+Documentation = "https://astrofiler-gui.readthedocs.io/"
+Repository = "https://github.com/gordtulloch/astrofiler-gui.git"
+Issues = "https://github.com/gordtulloch/astrofiler-gui/issues"
+Changelog = "https://github.com/gordtulloch/astrofiler-gui/blob/main/CHANGE_LOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["astrofiler*"]
+
+[tool.setuptools.package-data]
+astrofiler = ["ui/css/*.css", "ui/images/*", "*.ini"]
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310", "py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  migrations
+  | __pycache__
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["astrofiler"]
+known_third_party = ["astropy", "peewee", "PySide6", "numpy", "matplotlib"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "astropy.*",
+    "peewee",
+    "peewee_migrate",
+    "pysmb.*",
+    "matplotlib.*",
+    "scipy.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=astrofiler",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "gui: marks tests that require GUI components",
+]
+
+[tool.coverage.run]
+source = ["src/astrofiler"]
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "setup.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]

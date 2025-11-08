@@ -16,6 +16,7 @@ Options:
     -l, --lights     Only create light sessions
     -C, --calibs     Only create calibration sessions
     -r, --regenerate Clear all existing sessions first, then regenerate all session data
+    -n, --new-only   Only create sessions for files without existing sessions
 
 Requirements:
     - astrofiler.ini configuration file
@@ -37,6 +38,9 @@ Example:
     
     # Regenerate all sessions (clear existing first)
     python CreateSessions.py -r
+    
+    # Only create sessions for unassigned files
+    python CreateSessions.py -n
 """
 
 import sys
@@ -48,9 +52,11 @@ from datetime import datetime
 
 # Add the parent directory to the path to import astrofiler modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setup_path  # Configure Python path for new package structure
 
-from astrofiler_file import fitsProcessing
-from astrofiler_db import setup_database, fitsFile as FitsFileModel, fitsSession as FitsSessionModel
+from astrofiler.core import fitsProcessing
+from astrofiler.database import setup_database
+from astrofiler.models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 
 def setup_logging(verbose=False):
     """Setup logging configuration."""
@@ -130,6 +136,7 @@ Examples:
     python CreateSessions.py -l            # Only light sessions
     python CreateSessions.py -C            # Only calibration sessions
     python CreateSessions.py -r            # Clear all sessions and regenerate
+    python CreateSessions.py -n            # Only create sessions for unassigned files
         """
     )
     
@@ -143,12 +150,16 @@ Examples:
                         help='Only create calibration sessions')
     parser.add_argument('-r', '--regenerate', action='store_true',
                         help='Clear all existing sessions first, then regenerate all session data')
+    parser.add_argument('-n', '--new-only', action='store_true',
+                        help='Only create sessions for files without existing sessions')
     
     args = parser.parse_args()
     
     # Validate argument combinations
-    if args.regenerate and (args.lights or args.calibs):
-        parser.error("--regenerate cannot be used with --lights or --calibs (regenerate always creates both)")
+    if args.regenerate and (args.lights or args.calibs or args.new_only):
+        parser.error("--regenerate cannot be used with other options (regenerate always creates both types for all files)")
+    if args.new_only and (args.lights or args.calibs):
+        parser.error("--new-only cannot be used with --lights or --calibs (new-only always processes both types)")
     
     # Setup logging
     logger = setup_logging(args.verbose)
@@ -172,13 +183,41 @@ Examples:
         if args.regenerate:
             create_lights = True
             create_calibs = True
+            new_only_mode = False
             logger.info("Regenerate mode: Will clear all existing sessions and recreate both light and calibration sessions")
+        elif args.new_only:
+            create_lights = True
+            create_calibs = True
+            new_only_mode = True
+            logger.info("New-only mode: Will create sessions only for files without existing sessions")
         else:
             # Determine what to process
             create_lights = not args.calibs  # Create lights unless only calibs requested
             create_calibs = not args.lights  # Create calibs unless only lights requested
+            new_only_mode = False
             logger.info(f"Will create light sessions: {create_lights}")
             logger.info(f"Will create calibration sessions: {create_calibs}")
+        
+        # Check for unassigned files in new-only mode
+        if new_only_mode:
+            unassigned_light_count = FitsFileModel.select().where(
+                FitsFileModel.fitsFileSession.is_null(), 
+                FitsFileModel.fitsFileType == 'LIGHT FRAME',
+                FitsFileModel.fitsFileSoftDelete == False
+            ).count()
+            
+            unassigned_cal_count = FitsFileModel.select().where(
+                FitsFileModel.fitsFileSession.is_null(),
+                FitsFileModel.fitsFileType.in_(['BIAS FRAME', 'DARK FRAME', 'FLAT FIELD']),
+                FitsFileModel.fitsFileSoftDelete == False
+            ).count()
+            
+            total_unassigned = unassigned_light_count + unassigned_cal_count
+            logger.info(f"Found {unassigned_light_count} unassigned light files and {unassigned_cal_count} unassigned calibration files")
+            
+            if total_unassigned == 0:
+                logger.info("No unassigned files found - all files already have sessions assigned")
+                return 0
         
         # Clear existing sessions if regenerate flag is set
         if args.regenerate:
@@ -207,10 +246,15 @@ Examples:
         if args.regenerate:
             logger.info("=== Session Regeneration Complete ===")
             logger.info(f"All existing sessions were cleared and recreated")
+        elif args.new_only:
+            logger.info("=== New-Only Session Creation Complete ===")
+            logger.info(f"Sessions created only for files without existing sessions")
         
         if total_sessions == 0:
             if args.regenerate:
                 logger.warning("No sessions were created after regeneration - no unassigned files found!")
+            elif args.new_only:
+                logger.info("No sessions were created - all files already have sessions assigned!")
             else:
                 logger.warning("No sessions were created - all files may already be assigned!")
             return 1

@@ -1,9 +1,19 @@
+# Configure Python path for new package structure - must be before any astrofiler imports
 import sys
 import os
+
+project_root = os.path.dirname(os.path.abspath(__file__))
+src_path = os.path.join(project_root, 'src')
+
+# Ensure src path is first in path to avoid conflicts with root astrofiler.py
+if src_path in sys.path:
+    sys.path.remove(src_path)
+sys.path.insert(0, src_path)
+
 from datetime import datetime
 from PySide6.QtWidgets import QApplication
-from ui.main_window import AstroFilerGUI
-from astrofiler_db import setup_database
+from astrofiler.ui.main_window import AstroFilerGUI
+from astrofiler.database import setup_database
 import logging
 
 def rotate_log_file():

@@ -246,10 +246,218 @@ pause
 
 $batScript | Out-File -FilePath "run_astrofiler.bat" -Encoding ASCII
 
+# Create custom launch script based on auto-update preference
+Write-Host "Creating launch script..." -ForegroundColor Yellow
+$autoUpdateEnabled = ($enableAutoUpdate -match "^[Yy].*" -or $enableAutoUpdate -eq "")
+
+$launchScript = @"
+# AstroFiler Desktop Launcher for Windows (PowerShell)
+# This script launches AstroFiler from any location
+
+param(
+    [switch]`$NoWait
+)
+
+# Get the directory where this script is located and go to parent
+`$ScriptDir = Split-Path -Parent `$MyInvocation.MyCommand.Path
+
+# Change to the AstroFiler directory (parent of install folder)
+Set-Location (Split-Path -Parent `$ScriptDir)
+"@
+
+if ($autoUpdateEnabled) {
+    $launchScript += @"
+
+# Check for updates from GitHub if this is a git repository
+if (Test-Path ".git") {
+    Write-Host "Checking for updates from GitHub..." -ForegroundColor Yellow
+    Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Checking for updates from GitHub..."
+    try {
+        & git fetch origin main 2>`$null
+        `$updateCount = & git rev-list HEAD..origin/main --count 2>`$null
+        if (`$updateCount -and `$updateCount -gt 0) {
+            Write-Host "Updates available! Pulling latest changes..." -ForegroundColor Green
+            Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Updates available! `$updateCount commits behind. Pulling latest changes..."
+            & git fetch origin
+            & git reset --hard origin/main
+            if (`$LASTEXITCODE -eq 0) {
+                Write-Host "Successfully updated to latest version." -ForegroundColor Green
+                Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Successfully updated to latest version from GitHub"
+                # Run database migrations after successful update
+                Write-Host "Running database migrations..." -ForegroundColor Yellow
+                Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Running database migrations after update"
+                if (Test-Path ".venv\Scripts\python.exe") {
+                    try {
+                        & ".venv\Scripts\python.exe" migrate.py run
+                        if (`$LASTEXITCODE -eq 0) {
+                            Write-Host "Database migrations completed successfully." -ForegroundColor Green
+                            Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Database migrations completed successfully"
+                        } else {
+                            Write-Host "Warning: Database migration failed. AstroFiler may not function correctly." -ForegroundColor Yellow
+                            Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - WARNING - Database migration failed after update"
+                        }
+                    } catch {
+                        Write-Host "Warning: Error running database migrations: `$_" -ForegroundColor Yellow
+                        Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - WARNING - Error running database migrations: `$_"
+                    }
+                }
+            } else {
+                Write-Host "Warning: Failed to update from GitHub. Continuing with current version." -ForegroundColor Yellow
+                Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - WARNING - Failed to update from GitHub. Continuing with current version"
+            }
+        } else {
+            Write-Host "Already up to date." -ForegroundColor Green
+            Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Repository already up to date"
+        }
+    } catch {
+        Write-Host "Note: Could not check for updates (git not available or not connected to internet)." -ForegroundColor Yellow
+        Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Could not check for updates (git not available or not connected to internet)"
+    }
+    Write-Host
+}
+"@
+}
+
+$launchScript += @"
+
+# Check if virtual environment exists
+if (-not (Test-Path ".venv\Scripts\Activate.ps1")) {
+    Write-Host "Error: AstroFiler virtual environment not found." -ForegroundColor Red
+    Write-Host "Please run install.ps1 first to set up AstroFiler." -ForegroundColor Yellow
+    Write-Host
+    if (-not `$NoWait) {
+        Read-Host "Press Enter to exit"
+    }
+    exit 1
+}
+
+Write-Host "Starting AstroFiler..." -ForegroundColor Green
+Add-Content -Path "astrofiler.log" -Value "`$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - launch_astrofiler.ps1 - INFO - Starting AstroFiler application via launch script"
+
+try {
+    # Activate virtual environment
+    & ".venv\Scripts\Activate.ps1"
+    
+    # Run AstroFiler
+    python astrofiler.py
+    
+    if (`$LASTEXITCODE -ne 0) {
+        Write-Host
+        Write-Host "AstroFiler exited with an error." -ForegroundColor Red
+        Write-Host "Error code: `$LASTEXITCODE" -ForegroundColor Red
+        if (-not `$NoWait) {
+            Read-Host "Press Enter to exit"
+        }
+    }
+} catch {
+    Write-Host "Error launching AstroFiler: `$_" -ForegroundColor Red
+    if (-not `$NoWait) {
+        Read-Host "Press Enter to exit"
+    }
+    exit 1
+}
+"@
+
+$launchScript | Out-File -FilePath "install\launch_astrofiler.ps1" -Encoding UTF8
+
+# Create batch file version of the launcher
+$launchBat = @"
+@echo off
+cd /d "%~dp0\.."
+"@
+
+if ($autoUpdateEnabled) {
+    $launchBat += @"
+
+REM Check for updates from GitHub if this is a git repository
+if exist ".git" (
+    echo Checking for updates from GitHub...
+    echo %date% %time% - launch_astrofiler.bat - INFO - Checking for updates from GitHub... >> astrofiler.log
+    git fetch origin main >nul 2>&1
+    if not errorlevel 1 (
+        for /f %%i in ('git rev-list HEAD..origin/main --count 2^>nul') do set UPDATE_COUNT=%%i
+        if not "!UPDATE_COUNT!"=="0" (
+            if not "!UPDATE_COUNT!"=="" (
+                echo Updates available! Pulling latest changes...
+                echo %date% %time% - launch_astrofiler.bat - INFO - Updates available. Pulling latest changes... >> astrofiler.log
+                git fetch origin && git reset --hard origin/main
+                if not errorlevel 1 (
+                    echo Successfully updated to latest version.
+                    echo %date% %time% - launch_astrofiler.bat - INFO - Successfully updated to latest version from GitHub >> astrofiler.log
+                    echo Running database migrations...
+                    echo %date% %time% - launch_astrofiler.bat - INFO - Running database migrations after update >> astrofiler.log
+                    if exist ".venv\Scripts\python.exe" (
+                        .venv\Scripts\python.exe migrate.py run
+                        if not errorlevel 1 (
+                            echo Database migrations completed successfully.
+                            echo %date% %time% - launch_astrofiler.bat - INFO - Database migrations completed successfully >> astrofiler.log
+                        ) else (
+                            echo Warning: Database migration failed. AstroFiler may not function correctly.
+                            echo %date% %time% - launch_astrofiler.bat - WARNING - Database migration failed after update >> astrofiler.log
+                        )
+                    )
+                ) else (
+                    echo Warning: Failed to update from GitHub. Continuing with current version.
+                    echo %date% %time% - launch_astrofiler.bat - WARNING - Failed to update from GitHub. Continuing with current version >> astrofiler.log
+                )
+            )
+        ) else (
+            echo Already up to date.
+            echo %date% %time% - launch_astrofiler.bat - INFO - Repository already up to date >> astrofiler.log
+        )
+    ) else (
+        echo Note: Could not check for updates (git not available or not connected to internet^).
+        echo %date% %time% - launch_astrofiler.bat - INFO - Could not check for updates (git not available or not connected to internet^) >> astrofiler.log
+    )
+    echo.
+)
+"@
+}
+
+$launchBat += @"
+
+REM Check if virtual environment exists
+if not exist ".venv\Scripts\activate.bat" (
+    echo Error: AstroFiler virtual environment not found.
+    echo Please run install.ps1 first to set up AstroFiler.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Starting AstroFiler...
+echo %date% %time% - launch_astrofiler.bat - INFO - Starting AstroFiler application via launch script >> astrofiler.log
+
+REM Activate virtual environment and run AstroFiler
+call .venv\Scripts\activate.bat
+python astrofiler.py
+
+if errorlevel 1 (
+    echo.
+    echo AstroFiler exited with an error.
+    pause
+)
+"@
+
+$launchBat | Out-File -FilePath "install\launch_astrofiler.bat" -Encoding ASCII
+
 Write-Host "Run scripts created:" -ForegroundColor Green
 Write-Host "  - run_astrofiler.ps1 (PowerShell)" -ForegroundColor White
 Write-Host "  - run_astrofiler.bat (Command Prompt)" -ForegroundColor White
+if ($autoUpdateEnabled) {
+    Write-Host "  - launch_astrofiler.ps1 (with auto-updates)" -ForegroundColor White
+    Write-Host "  - launch_astrofiler.bat (with auto-updates)" -ForegroundColor White
+} else {
+    Write-Host "  - launch_astrofiler.ps1 (without auto-updates)" -ForegroundColor White
+    Write-Host "  - launch_astrofiler.bat (without auto-updates)" -ForegroundColor White
+}
 Write-Host
+
+# Ask if user wants automatic updates
+$enableAutoUpdate = "Y"
+if (-not $Quiet) {
+    $enableAutoUpdate = Read-Host "Do you want automatic updates? (Updates will be checked on each launch) [Y/n]"
+}
 
 # Ask if user wants to create desktop shortcut
 $createShortcut = "Y"

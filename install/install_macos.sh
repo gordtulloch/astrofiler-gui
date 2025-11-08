@@ -174,7 +174,7 @@ echo "You can also use the run_astrofiler.sh script for convenience."
 echo
 
 # Create convenience run script
-echo "Creating run script..."
+echo "Creating run scripts..."
 cat > run_astrofiler.sh << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
@@ -183,10 +183,31 @@ python astrofiler.py
 EOF
 
 chmod +x run_astrofiler.sh
-echo "run_astrofiler.sh created and made executable."
+
+# Ask user about automatic updates
+echo
+read -p "Do you want automatic updates? (Updates will be checked on each launch) [Y/n]: " enable_auto_update
+
+# Create custom launch script based on auto-update preference
+echo "Creating launch script..."
+AUTO_UPDATE_ENABLED=true
+case "$enable_auto_update" in
+    [nN]|[nN][oO])
+        AUTO_UPDATE_ENABLED=false
+        ;;
+    *)
+        AUTO_UPDATE_ENABLED=true
+        ;;
+esac
 
 # Make desktop launcher executable
 chmod +x install/launch_astrofiler_macos.sh
+
+if [ "$AUTO_UPDATE_ENABLED" = true ]; then
+    echo "run_astrofiler.sh created and made executable (with auto-updates)."
+else
+    echo "run_astrofiler.sh created and made executable (without auto-updates)."
+fi
 echo "Desktop launcher created and made executable: install/launch_astrofiler_macos.sh"
 
 # Create macOS app launcher
@@ -244,34 +265,63 @@ EOF
 # Navigate to the original installation directory
 APP_DIR="$(pwd)"
 cd "\$APP_DIR"
+EOF
+
+        if [ "$AUTO_UPDATE_ENABLED" = true ]; then
+            cat >> "$app_name/Contents/MacOS/AstroFiler" << 'EOF'
 
 # Check for updates from GitHub if this is a git repository
 if [ -d ".git" ]; then
     echo "Checking for updates from GitHub..."
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - Checking for updates from GitHub..." >> astrofiler.log
     if command -v git >/dev/null 2>&1; then
         git fetch origin main >/dev/null 2>&1
-        UPDATE_COUNT=\$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
-        if [ "\$UPDATE_COUNT" -gt 0 ] 2>/dev/null; then
+        UPDATE_COUNT=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
+        if [ "$UPDATE_COUNT" -gt 0 ] 2>/dev/null; then
             echo "Updates available! Pulling latest changes..."
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - Updates available! $UPDATE_COUNT commits behind. Pulling latest changes..." >> astrofiler.log
             if git fetch origin && git reset --hard origin/main; then
                 echo "Successfully updated to latest version."
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - Successfully updated to latest version from GitHub" >> astrofiler.log
+                # Run database migrations after successful update
+                echo "Running database migrations..."
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - Running database migrations after update" >> astrofiler.log
+                if [ -f ".venv/bin/python" ]; then
+                    if .venv/bin/python migrate.py run; then
+                        echo "Database migrations completed successfully."
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - Database migrations completed successfully" >> astrofiler.log
+                    else
+                        echo "Warning: Database migration failed. AstroFiler may not function correctly."
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - WARNING - Database migration failed after update" >> astrofiler.log
+                    fi
+                fi
             else
                 echo "Warning: Failed to update from GitHub. Continuing with current version."
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - WARNING - Failed to update from GitHub. Continuing with current version" >> astrofiler.log
             fi
         else
             echo "Already up to date."
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - Repository already up to date" >> astrofiler.log
         fi
     else
         echo "Note: git not available, skipping update check."
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - git not available, skipping update check" >> astrofiler.log
     fi
     echo
 fi
+EOF
+        fi
+
+        cat >> "$app_name/Contents/MacOS/AstroFiler" << EOF
 
 # Check if virtual environment exists
 if [ ! -f ".venv/bin/activate" ]; then
     osascript -e 'tell application "System Events" to display dialog "AstroFiler virtual environment not found. Please run install_macos.sh first." with title "AstroFiler Error" buttons {"OK"} default button "OK"'
     exit 1
 fi
+
+echo "Starting AstroFiler..."
+echo "\$(date '+%Y-%m-%d %H:%M:%S') - AstroFiler.app - INFO - Starting AstroFiler application via macOS app" >> astrofiler.log
 
 # Activate virtual environment and run AstroFiler
 source .venv/bin/activate

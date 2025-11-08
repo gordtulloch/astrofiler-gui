@@ -38,6 +38,10 @@ Example:
 
 import sys
 import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setup_path  # Configure Python path for new package structure
 import argparse
 import logging
 import configparser
@@ -46,8 +50,8 @@ from datetime import datetime
 # Add the parent directory to the path to import astrofiler modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from astrofiler_file import fitsProcessing
-from astrofiler_db import setup_database
+from astrofiler.core import fitsProcessing
+from astrofiler.database import setup_database
 
 def setup_logging(verbose=False):
     """Setup logging configuration."""

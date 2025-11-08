@@ -10,3 +10,4 @@ pysmb
 google-cloud-storage
 scipy
 lz4>=3.0.0
+# pysiril  # Manual install from https://gitlab.com/free-astro/pysiril/-/releases

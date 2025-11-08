@@ -53,6 +53,7 @@ from pathlib import Path
 
 # Add the parent directory to the Python path so we can import astrofiler modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setup_path  # Configure Python path for new package structure
 
 def setup_logging(verbose=False, quiet=False, log_file=None):
     """Setup logging configuration"""
@@ -92,7 +93,7 @@ def setup_logging(verbose=False, quiet=False, log_file=None):
     )
     
     # Set specific logger levels
-    logging.getLogger('astrofiler_file').setLevel(log_level)
+    logging.getLogger('core').setLevel(log_level)
     logging.getLogger('astrofiler_db').setLevel(log_level)
     
     return logging.getLogger(__name__)
@@ -112,7 +113,8 @@ def load_config(config_path='astrofiler.ini'):
 def validate_database_access():
     """Validate database connectivity"""
     try:
-        from astrofiler_db import setup_database, fitsFile, fitsSession
+        from astrofiler.database import setup_database
+        from astrofiler.models import fitsFile, fitsSession
         
         # Test database connection
         setup_database()
@@ -156,7 +158,7 @@ def create_cli_progress_callback(description="Processing"):
 
 def register_existing_files(config, scan_subdirectories=True, verify_headers=True, dry_run=False):
     """Register existing calibrated files and master frames"""
-    from astrofiler_file import fitsProcessing
+    from astrofiler.core import fitsProcessing
     
     logging.info("Starting existing file registration...")
     

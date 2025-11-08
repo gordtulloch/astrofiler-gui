@@ -48,6 +48,7 @@ from datetime import datetime
 
 # Add the parent directory to the path to import astrofiler modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setup_path  # Configure Python path for new package structure
 
 def setup_logging(verbose=False):
     """Setup logging configuration"""
@@ -95,7 +96,7 @@ def get_cloud_config(config):
 
 def validate_bucket_access(cloud_config):
     """Validate that we can access the cloud bucket"""
-    from ui.cloud_sync_dialog import _get_gcs_client
+    from astrofiler.ui.cloud_sync_dialog import _get_gcs_client
     
     try:
         # Extract bucket name
@@ -121,8 +122,8 @@ def validate_bucket_access(cloud_config):
 
 def perform_analysis(cloud_config):
     """Perform cloud storage analysis"""
-    from ui.cloud_sync_dialog import list_gcs_bucket_files
-    from astrofiler_db import fitsFile, setup_database
+    from astrofiler.ui.cloud_sync_dialog import list_gcs_bucket_files
+    from astrofiler.database import setup_database; from astrofiler.models import fitsFile
     
     logging.info("Starting cloud storage analysis...")
     
@@ -175,8 +176,8 @@ def perform_analysis(cloud_config):
 
 def perform_sync(cloud_config, sync_profile, auto_confirm=False):
     """Perform the actual sync operation"""
-    from ui.cloud_sync_dialog import CloudSyncDialog
-    from astrofiler_db import setup_database
+    from astrofiler.ui.cloud_sync_dialog import CloudSyncDialog
+    from astrofiler.database import setup_database
     import configparser
     
     logging.info(f"Starting {sync_profile} sync...")
@@ -247,8 +248,8 @@ def perform_sync(cloud_config, sync_profile, auto_confirm=False):
 
 def perform_backup_sync_cli(cloud_config, repo_path):
     """Perform backup sync from command line"""
-    from ui.cloud_sync_dialog import upload_file_to_backup
-    from astrofiler_db import fitsFile
+    from astrofiler.ui.cloud_sync_dialog import upload_file_to_backup
+    from astrofiler.models import fitsFile
     
     # Get bucket info
     bucket_url = cloud_config['bucket_url']
@@ -306,8 +307,8 @@ def perform_backup_sync_cli(cloud_config, repo_path):
                 if fits_file.fitsFileSoftDelete:
                     try:
                         # Verify file exists in cloud before deleting
-                        from ui.cloud_sync_dialog import check_file_exists_in_gcs
-                        from astrofiler_cloud import _get_gcs_client
+                        from astrofiler.ui.cloud_sync_dialog import check_file_exists_in_gcs
+                        from astrofiler.services.cloud import _get_gcs_client
                         
                         client = _get_gcs_client(auth_info)
                         gcs_object_name = relative_path.replace('\\', '/')
@@ -345,8 +346,8 @@ def perform_backup_sync_cli(cloud_config, repo_path):
 
 def perform_ondemand_sync_cli(cloud_config, repo_path):
     """Perform on-demand sync from command line - upload and delete soft-deleted files"""
-    from ui.cloud_sync_dialog import upload_file_to_backup
-    from astrofiler_db import fitsFile
+    from astrofiler.ui.cloud_sync_dialog import upload_file_to_backup
+    from astrofiler.models import fitsFile
     
     # Get bucket info
     bucket_url = cloud_config['bucket_url']
@@ -407,8 +408,8 @@ def perform_ondemand_sync_cli(cloud_config, repo_path):
                 
                 # Verify cloud backup before deleting local file
                 try:
-                    from ui.cloud_sync_dialog import check_file_exists_in_gcs
-                    from astrofiler_cloud import _get_gcs_client
+                    from astrofiler.ui.cloud_sync_dialog import check_file_exists_in_gcs
+                    from astrofiler.services.cloud import _get_gcs_client
                     
                     client = _get_gcs_client(auth_info)
                     gcs_object_name = relative_path.replace('\\', '/')
@@ -444,8 +445,8 @@ def perform_ondemand_sync_cli(cloud_config, repo_path):
 
 def perform_upload_without_deletion_cli(cloud_config, repo_path):
     """Perform upload without deletion for complete sync - keep files in both places"""
-    from ui.cloud_sync_dialog import upload_file_to_backup
-    from astrofiler_db import fitsFile
+    from astrofiler.ui.cloud_sync_dialog import upload_file_to_backup
+    from astrofiler.models import fitsFile
     
     # Get bucket info
     bucket_url = cloud_config['bucket_url']
@@ -520,9 +521,9 @@ def perform_upload_without_deletion_cli(cloud_config, repo_path):
 
 def perform_complete_sync_cli(cloud_config, repo_path):
     """Perform complete sync from command line"""
-    from ui.cloud_sync_dialog import list_gcs_bucket_files, download_file_from_gcs, upload_file_to_backup
-    from astrofiler_db import fitsFile
-    from astrofiler_file import fitsProcessing
+    from astrofiler.ui.cloud_sync_dialog import list_gcs_bucket_files, download_file_from_gcs, upload_file_to_backup
+    from astrofiler.models import fitsFile
+    from astrofiler.core import fitsProcessing
     import configparser
     
     # Read configuration file

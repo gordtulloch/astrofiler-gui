@@ -13,11 +13,11 @@ def migrate(migrator, database, fake=False, **kwargs):
     Add fitsFileCloudURL field to fitsFile table
     """
     # Add the new cloud URL field
-    migrator.add_columns('fitsfile', fitsFileCloudURL=pw.TextField(null=True))
+    migrator.add_fields('fitsfile', fitsFileCloudURL=pw.TextField(null=True))
 
 def rollback(migrator, database, fake=False, **kwargs):
     """
     Remove fitsFileCloudURL field from fitsFile table
     """
     # Remove the cloud URL field
-    migrator.drop_columns('fitsfile', 'fitsFileCloudURL')
+    migrator.remove_fields('fitsfile', 'fitsFileCloudURL')

@@ -55,9 +55,10 @@ from pathlib import Path
 script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
 parent_dir = os.path.dirname(script_dir)
 sys.path.insert(0, parent_dir)
+import setup_path  # Configure Python path for new package structure
 
-from astrofiler_smart import SmartTelescopeManager
-from astrofiler_file import fitsProcessing
+from astrofiler.services.telescope import SmartTelescopeManager
+from astrofiler.core import fitsProcessing
 
 def setup_logging(verbose=False):
     """Configure logging based on verbosity level."""

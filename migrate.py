@@ -18,7 +18,8 @@ Examples:
 
 import sys
 import argparse
-from astrofiler_db import setup_database, create_migration, run_migrations, get_migration_status
+import setup_path  # Configure Python path for new package structure
+from astrofiler.database import setup_database, create_migration, run_migrations, get_migration_status
 import logging
 
 # Configure logging
