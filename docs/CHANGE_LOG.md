@@ -1,5 +1,27 @@
 # AstroFiler Change Log
 
+## Version 1.2.1 - Compression Enhancement (In Development)
+
+### New Features
+
+- **Intelligent FITS Compression System**: Smart compression algorithm selection based on data type analysis
+  - **Smart Algorithm Selection**: Automatic optimal compression based on FITS data type
+    - RICE compression for 16-bit integer data (NINA compatible)
+    - GZIP-2 compression for 32-bit floating-point data (78% reduction on real astronomical data)
+    - Safe fallbacks for unknown data types
+  - **FITS Internal Compression Only**: Removed external compression (.gz, .xz, .bz2) due to Siril/NINA incompatibility
+  - **Comprehensive Read Support**: Full support for reading RICE, GZIP-1, GZIP-2, and uncompressed FITS files
+  - **Enhanced File Registry**: Updated file scanning and registration to fully support compressed FITS files
+    - Automatic detection of FITS internal compression (CompImageHDU)
+    - External compression detection (.fits.gz, .fits.xz, .fits.bz2)
+    - Smart file type identification for comprehensive FITS support
+    - Directory scanning includes all compression formats
+  - **Enhanced UI**: Updated compression dropdown with clear algorithm descriptions and compatibility notes
+  - **Auto-Selection Default**: Smart 'auto' mode as default choice for optimal user experience
+  - **Data Protection**: Automatic prevention of lossy compression on floating-point data
+  - **Universal Compatibility**: Full support across astropy, Siril, NINA, and PySiril workflows
+  - **Extensive Testing**: Comprehensive test suite with real astronomical data validation
+
 ## Version 1.2.0 - Current Development
 
 ### New Features

@@ -59,12 +59,17 @@ class FitsCompressor:
         self.verify_compression = self.config.getboolean('DEFAULT', 'verify_compression', fallback=True)
         
         # Algorithm-specific settings
+        # FITS internal compression algorithms - optimized for data type
+        # RICE: Lossless for integer data (NINA compatible)
+        # GZIP: Lossless for floating-point data 
         self.algorithms = {
             'gzip': {'extension': '.gz', 'module': gzip, 'levels': (1, 9)},
             'lzma': {'extension': '.xz', 'module': lzma, 'levels': (0, 9)}, 
             'bzip2': {'extension': '.bz2', 'module': bz2, 'levels': (1, 9)},
+            'fits_rice': {'extension': '.fits', 'module': None, 'levels': (1, 9)},
             'fits_gzip1': {'extension': '.fits', 'module': None, 'levels': (1, 9)},
-            'fits_gzip2': {'extension': '.fits', 'module': None, 'levels': (1, 9)}
+            'fits_gzip2': {'extension': '.fits', 'module': None, 'levels': (1, 9)},
+            'auto': {'extension': '.fits', 'module': None, 'levels': (1, 9)}  # Smart selection
         }
         
         logger.info(f"FITS compression initialized: enabled={self.compression_enabled}, "
@@ -77,7 +82,7 @@ class FitsCompressor:
     
     def is_compressed(self, file_path: str) -> bool:
         """
-        Check if a file is already compressed.
+        Check if a file is already compressed (external or internal FITS compression).
         
         Args:
             file_path: Path to the file to check
@@ -85,8 +90,52 @@ class FitsCompressor:
         Returns:
             True if file appears to be compressed, False otherwise
         """
-        compressed_extensions = ['.gz', '.xz', '.bz2']
-        return any(file_path.lower().endswith(ext) for ext in compressed_extensions)
+        # Check for external compression extensions
+        external_compressed_extensions = ['.gz', '.xz', '.bz2']
+        if any(file_path.lower().endswith(ext) for ext in external_compressed_extensions):
+            return True
+        
+        # Check for FITS internal compression by examining the file structure
+        if file_path.lower().endswith(('.fits', '.fit', '.fts')):
+            try:
+                with fits.open(file_path) as hdul:
+                    # Check if there are CompImageHDU (compressed image) extensions
+                    for hdu in hdul:
+                        if isinstance(hdu, fits.CompImageHDU):
+                            return True
+            except Exception:
+                # If we can't read the file, assume it's not compressed
+                pass
+        
+        return False
+    
+    def is_fits_file(self, file_path: str) -> bool:
+        """
+        Check if a file is a FITS file (compressed or uncompressed).
+        
+        Args:
+            file_path: Path to the file to check
+            
+        Returns:
+            True if file is a FITS file, False otherwise
+        """
+        # Check for standard FITS extensions
+        fits_extensions = ['.fits', '.fit', '.fts']
+        
+        # Check direct FITS extensions
+        if any(file_path.lower().endswith(ext) for ext in fits_extensions):
+            return True
+            
+        # Check for externally compressed FITS files
+        external_compressed_extensions = ['.gz', '.xz', '.bz2']
+        for ext in external_compressed_extensions:
+            if file_path.lower().endswith(ext):
+                # Check if the base file (without compression extension) is a FITS file
+                base_path = file_path[:-len(ext)]
+                if any(base_path.lower().endswith(fits_ext) for fits_ext in fits_extensions):
+                    return True
+        
+        return False
     
     def get_compressed_path(self, original_path: str, algorithm: str = None) -> str:
         """
@@ -418,6 +467,55 @@ class FitsCompressor:
             except:
                 pass
     
+    def _select_optimal_compression(self, fits_path: str) -> Optional[str]:
+        """
+        Select optimal compression algorithm based on FITS data type.
+        
+        Args:
+            fits_path: Path to FITS file
+            
+        Returns:
+            Optimal algorithm name, or None if unable to determine
+        """
+        try:
+            with fits.open(fits_path) as hdul:
+                # Find the primary data HDU
+                data_hdu = None
+                for hdu in hdul:
+                    if hasattr(hdu, 'data') and hdu.data is not None:
+                        data_hdu = hdu
+                        break
+                
+                if data_hdu is None:
+                    logger.warning("No data found in FITS file for compression analysis")
+                    return 'fits_gzip2'  # Default fallback
+                
+                data_dtype = data_hdu.data.dtype
+                logger.info(f"FITS data type detected: {data_dtype}")
+                
+                # Integer data: Use RICE (lossless, designed for integers, NINA compatible)
+                if data_dtype.kind in ['i', 'u']:  # signed or unsigned integer
+                    if data_dtype.itemsize <= 2:  # 8-bit or 16-bit integers
+                        logger.info("Using RICE compression for integer data (NINA compatible)")
+                        return 'fits_rice'
+                    else:  # 32-bit+ integers - RICE may not be optimal
+                        logger.info("Using GZIP-2 for large integer data") 
+                        return 'fits_gzip2'
+                
+                # Floating-point data: Use GZIP-2 (best compression, lossless)
+                elif data_dtype.kind == 'f':  # floating point
+                    logger.info("Using GZIP-2 compression for floating-point data")
+                    return 'fits_gzip2'
+                
+                # Complex or other data types: Use conservative GZIP-1
+                else:
+                    logger.info(f"Using GZIP-1 for unknown data type: {data_dtype}")
+                    return 'fits_gzip1'
+                
+        except Exception as e:
+            logger.error(f"Error analyzing FITS file for compression: {e}")
+            return 'fits_gzip2'  # Safe fallback
+    
     def _compress_fits_internal(self, input_path: str, replace_original: bool, algorithm: str) -> Optional[str]:
         """
         Compress FITS file using internal FITS compression (tile compression).
@@ -425,14 +523,23 @@ class FitsCompressor:
         Args:
             input_path: Path to input FITS file
             replace_original: Whether to replace the original file
-            algorithm: FITS compression algorithm (fits_gzip1, fits_gzip2)
+            algorithm: FITS compression algorithm (auto, fits_rice, fits_gzip1, fits_gzip2)
+                      'auto' = smart selection based on data type
             
         Returns:
             Path to compressed FITS file
         """
         try:
+            # Smart algorithm selection for 'auto' mode
+            if algorithm == 'auto':
+                algorithm = self._select_optimal_compression(input_path)
+                if not algorithm:
+                    logger.error("Failed to determine optimal compression algorithm")
+                    return None
+            
             # Map algorithm names to astropy compression types
             compression_map = {
+                'fits_rice': 'RICE_1',
                 'fits_gzip1': 'GZIP_1', 
                 'fits_gzip2': 'GZIP_2'
             }

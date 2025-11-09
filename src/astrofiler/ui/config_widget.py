@@ -104,15 +104,15 @@ class ConfigWidget(QWidget):
 
         # Compression algorithm selection
         self.compression_algorithm = QComboBox()
-        self.compression_algorithm.addItems(["gzip", "lzma", "bzip2", "fits_gzip1", "fits_gzip2"])
-        self.compression_algorithm.setCurrentText("lzma")
+        self.compression_algorithm.addItems(["auto", "fits_gzip2", "fits_gzip1", "fits_rice"])
+        self.compression_algorithm.setCurrentText("auto")
         self.compression_algorithm.setToolTip(
-            "Compression algorithms:\n"
-            "• gzip = fast external compression\n"
-            "• lzma = best external compression\n"
-            "• bzip2 = balanced external compression\n"
-            "• fits_gzip1 = FITS internal GZIP level 1 (Siril compatible)\n"
-            "• fits_gzip2 = FITS internal GZIP level 2 (Siril compatible)"
+            "Compression algorithms (FITS internal only - Siril compatible):\n"
+            "• auto = smart selection (RICE for 16-bit integers, GZIP-2 for floats)\n"
+            "• fits_gzip2 = FITS GZIP level 2 (best compression for float data)\n" 
+            "• fits_gzip1 = FITS GZIP level 1 (faster, good compression)\n"
+            "• fits_rice = FITS Rice (optimal for 16-bit integer data, NINA compatible)\n\n"
+            "External compression removed (not supported by Siril/NINA workflows)"
         )
 
         # Compression level (1-9, default 6)
@@ -636,7 +636,7 @@ class ConfigWidget(QWidget):
                 self.compress_fits.setChecked(compress_fits_value)
             
             if config.has_option('DEFAULT', 'compression_algorithm'):
-                compression_algorithm = config.get('DEFAULT', 'compression_algorithm', fallback='lzma')
+                compression_algorithm = config.get('DEFAULT', 'compression_algorithm', fallback='auto')
                 index = self.compression_algorithm.findText(compression_algorithm)
                 if index >= 0:
                     self.compression_algorithm.setCurrentIndex(index)
@@ -693,7 +693,7 @@ class ConfigWidget(QWidget):
         
         # FITS compression defaults
         self.compress_fits.setChecked(False)
-        self.compression_algorithm.setCurrentIndex(0)  # Reset to 'gzip'
+        self.compression_algorithm.setCurrentIndex(0)  # Reset to 'auto'
         self.compression_level.setValue(6)
         self.verify_compression.setChecked(True)
         self.min_compression_size.setValue(1024)
