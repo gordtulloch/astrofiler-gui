@@ -3,6 +3,31 @@
 ## Version 1.2.0 - Current Development
 
 ### New Features
+
+- **Advanced Quality Analysis System**: SEP-based image quality assessment integrated into AutoCalibration workflow
+  - **SEP Integration**: Source Extractor Python (SEP) library for robust star detection and photometry with automatic background subtraction and advanced source extraction algorithms
+  - **Enhanced Quality Metrics**: Comprehensive quality analysis including average FWHM in arcseconds, star eccentricity (0-1 scale), Half Flux Radius (HFR) in arcseconds, image signal-to-noise ratio, detected star count, and image scale calculation from FITS headers
+  - **Dual Detection Methods**: Primary SEP-based detection with photutils DAOStarFinder fallback for maximum reliability across different image conditions
+  - **Database Integration**: New quality metrics fields in fitsFile table via Migration 009: `fitsFileAvgFWHMArcsec`, `fitsFileAvgEccentricity`, `fitsFileAvgHFRArcsec`, `fitsFileImageSNR`, `fitsFileStarCount`, `fitsFileImageScale`
+  - **AutoCalibration Integration**: Quality analysis fully integrated into AutoCalibration workflow with progress tracking, real-time feedback, and automatic database updates
+  - **Advanced Image Scale Detection**: Multi-method image scale calculation using WCS headers, PIXSCALE/SCALE keywords, CDELT values, focal length calculations, and instrument-specific defaults
+  - **Robust Error Handling**: Graceful fallback mechanisms, comprehensive parameter validation, and detailed logging for troubleshooting
+  - **Performance Optimization**: Configurable star count limits (3-200 stars), efficient source filtering, and optimized processing for large datasets
+  - **Professional Accuracy**: Astronomy-grade calculations with proper units conversion, scientific validation, and industry-standard methodologies
+  - **Progress Callback System**: Real-time progress updates with descriptive status messages, cancellation support, and 5-phase workflow tracking
+  - **CLI Integration**: Full command-line support through AutoCalibration.py with quality assessment mode, batch processing, and automated reporting
+
+- **Enhanced Installation System**: Streamlined pysiril installation across all platforms with automatic download capabilities
+  - **Automated Wheel Installation**: All install scripts now automatically detect and install pysiril wheel files with `--force-reinstall` for clean installation
+  - **Automatic Download Support**: When wheel files not found, scripts automatically download latest pysiril build artifacts from GitLab CI/CD pipeline
+  - **Multi-Platform Coverage**: Enhanced Windows PowerShell (`install.ps1`), Linux (`install.sh`), and macOS (`install_macos.sh`) scripts with platform-specific optimizations
+  - **Fallback Installation**: Git source installation as secondary method when artifact download fails using `git+https://gitlab.com/free-astro/pysiril.git`
+  - **PyWinInstall Integration**: Special `PyWinInstall.Special.bat` script for automated SETUP.EXE installations with PowerShell-based download, extraction, and validation
+  - **Robust Error Handling**: Comprehensive error checking, temporary file cleanup, network failure recovery, and informative user feedback
+  - **Silent Operation**: Automated installations suitable for unattended deployment with progress tracking and verification steps
+  - **Cross-Platform Tools**: Uses native tools (PowerShell, curl, wget, unzip) for reliable operation across different environments
+  - **Installation Verification**: Post-installation verification with version checking and import testing to confirm successful setup
+
 - **iTelescope Smart Telescope Integration**: Revolutionary integration with iTelescope remote observatory network
   - **Secure FTPS Connection**: Direct connection to data.itelescope.net using FTPS (FTP over TLS) for encrypted data transfer
   - **Selective Root Directory Scanning**: Intelligent scanning that only explores root directories starting with 'T' or 't' to focus on telescope directories
@@ -271,6 +296,16 @@
   - Added `designMasterFileStorageStructure()` with comprehensive documentation and storage patterns
   - Session analysis functions: `checkCalibrationSessionsForMasters()`, `getSessionsNeedingMasters()`, `validateMasterFiles()`
   - Configuration system integration with 5 new auto-calibration settings and UI controls
+- **Enhanced Quality Analysis Module**: Complete refactoring of quality assessment system with professional-grade architecture
+  - **New `enhanced_quality.py` Module**: Comprehensive quality analyzer with `EnhancedQualityAnalyzer` class for modular, reusable quality assessment
+  - **SEP Integration Architecture**: Primary SEP-based detection with photutils fallback, robust parameter validation, and graceful error handling
+  - **Database Integration Methods**: `update_file_quality_metrics()` and `analyze_and_update_file()` methods for seamless database operations
+  - **Multi-Method Image Scale Detection**: `_calculate_image_scale()` with WCS, header keywords, focal length calculations, and instrument-specific defaults
+  - **Advanced Star Analysis Pipeline**: Comprehensive star property analysis including FWHM radial profiling, eccentricity moments calculation, and HFR measurement
+  - **Robust Error Handling**: Graceful degradation with detailed logging, parameter validation, and comprehensive fallback mechanisms
+  - **Progress Callback Integration**: Built-in progress tracking with descriptive status messages and cancellation support
+  - **Professional Code Organization**: Clean separation of concerns with dedicated methods for detection, analysis, and database operations
+  - **Scientific Accuracy**: Astronomy-grade calculations with proper units conversion, statistical validation, and industry-standard methodologies
   - Siril CLI path configuration with file browser and validation
 - **File Registration**: Downloaded files automatically registered in database with proper metadata and folder organization
 - **Progress Tracking**: Enhanced progress dialogs with granular updates and metadata extraction feedback

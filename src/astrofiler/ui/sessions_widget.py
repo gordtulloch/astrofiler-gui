@@ -1109,101 +1109,17 @@ class SessionsWidget(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to link sessions: {e}")
 
     def run_auto_calibration(self):
-        """Run the auto-calibration workflow with progress tracking"""
+        """Run the auto-calibration workflow with customizable operation selection"""
         try:
-            # Ask for confirmation before proceeding
-            reply = QMessageBox.question(self, "Auto-Calibration Workflow", 
-                                       "This will analyze calibration sessions and automatically create master frames.\n\n"
-                                       "The process includes:\n"
-                                       "• Analyzing calibration sessions\n"
-                                       "• Creating master bias/dark/flat frames\n"
-                                       "• Detecting auto-calibration opportunities\n"
-                                       "• Preparing for light frame calibration\n\n"
-                                       "Are you sure you want to continue?",
-                                       QMessageBox.Yes | QMessageBox.No,
-                                       QMessageBox.No)
+            from .auto_calibration_dialog import AutoCalibrationDialog
+            from PySide6.QtWidgets import QDialog
             
-            if reply != QMessageBox.Yes:
-                return
+            # Create and show the workflow selection dialog
+            dialog = AutoCalibrationDialog(self)
+            result = dialog.exec()
             
-            # Set up progress tracking
-            was_cancelled = False
-            
-            # Create progress dialog
-            progress_dialog = QProgressDialog("Initializing auto-calibration workflow...", "Cancel", 0, 100, self)
-            progress_dialog.setWindowTitle("Auto-Calibration Workflow")
-            progress_dialog.setWindowModality(Qt.WindowModal)
-            progress_dialog.setMinimumDuration(0)  # Show immediately
-            progress_dialog.show()
-            QApplication.processEvents()
-            
-            def update_progress(current, total, message):
-                """Progress callback function"""
-                nonlocal was_cancelled
-                
-                # Don't check cancellation if already cancelled
-                if was_cancelled:
-                    return False
-                
-                # Check if dialog was cancelled before updating
-                if progress_dialog and progress_dialog.wasCanceled():
-                    was_cancelled = True
-                    return False  # Signal to stop processing
-                
-                if progress_dialog:
-                    progress_dialog.setValue(current)
-                    progress_dialog.setLabelText(f"{message}")
-                    QApplication.processEvents()  # Keep UI responsive
-                    
-                    # Check again after processing events
-                    if progress_dialog.wasCanceled():
-                        was_cancelled = True
-                        return False
-                
-                return True  # Continue processing
-            
-            # Create and run the auto-calibration workflow
-            fits_processor = fitsProcessing()
-            results = fits_processor.runAutoCalibrationWorkflow(progress_callback=update_progress)
-            
-            # Close progress dialog
-            if progress_dialog:
-                progress_dialog.close()
-            
-            # Handle results
-            if was_cancelled:
-                QMessageBox.information(self, "Auto-Calibration", "Auto-calibration workflow was cancelled.")
-            elif results.get("status") == "error":
-                error_message = results.get("message", "Unknown error occurred")
-                QMessageBox.critical(self, "Auto-Calibration Error", f"Auto-calibration failed:\n\n{error_message}")
-            else:
-                # Show success summary
-                sessions_analyzed = results.get("sessions_analyzed", 0)
-                masters_created = results.get("masters_created", 0)
-                opportunities = results.get("calibration_opportunities", 0)
-                light_sessions = results.get("light_frames_calibrated", 0)
-                errors = results.get("errors", [])
-                
-                status_text = results.get("status", "unknown")
-                success_msg = f"Auto-calibration workflow completed ({status_text})!\n\n"
-                success_msg += f"• Sessions analyzed: {sessions_analyzed}\n"
-                success_msg += f"• Master frames created: {masters_created}\n"
-                success_msg += f"• Calibration opportunities found: {opportunities}\n"
-                success_msg += f"• Light sessions ready for calibration: {light_sessions}\n"
-                
-                if errors:
-                    success_msg += f"\n⚠️ Warnings/Errors ({len(errors)}):\n"
-                    for i, error in enumerate(errors[:3]):  # Show first 3 errors
-                        success_msg += f"  {i+1}. {error}\n"
-                    if len(errors) > 3:
-                        success_msg += f"  ... and {len(errors)-3} more issues\n"
-                
-                if status_text == "success":
-                    QMessageBox.information(self, "Auto-Calibration Complete", success_msg)
-                else:
-                    QMessageBox.warning(self, "Auto-Calibration Partial Success", success_msg)
-                
-                # Refresh the sessions display
+            # Refresh the sessions display if workflow completed
+            if result == QDialog.Accepted:
                 self.load_sessions_data()
             
         except Exception as e:

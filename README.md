@@ -121,13 +121,16 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Intelligent Master Frame Creation**: Automatically creates master bias, dark, and flat frames using Siril CLI
 - **Smart Session Linking**: Automatically links calibration sessions to light frame sessions based on camera, binning, and temperature
 - **Calibration Workflow**: One-click calibration of light frames using appropriate master calibration files
-- **Quality Assessment**: Validates master frames and calibration files with detailed quality metrics
+- **Advanced Quality Assessment**: SEP-based image analysis with FWHM, HFR, eccentricity, and SNR calculations
+- **Professional Quality Metrics**: Comprehensive quality analysis including star detection, seeing quality, and image statistics
 - **Progress Tracking**: Real-time progress monitoring with detailed status updates and ETA calculations
 - **Enhanced FITS Headers**: Automatic addition of comprehensive calibration metadata to processed files
 - **Professional Context Menus**: Right-click context menus with master frame management, calibration operations, and session tools
 - **Existing File Detection**: Smart duplicate prevention and master frame reuse to avoid unnecessary processing
 - **Command-Line Automation**: Complete CLI interface for automated calibration workflows and batch processing
 - **Advanced UI Indicators**: Visual status indicators showing calibration status, master frame availability, and processing state
+- **Database Integration**: Quality metrics stored in database for analysis and filtering (Migration 009)
+- **Modular Architecture**: Comprehensive refactoring with dedicated `enhanced_quality.py` module for professional-grade quality analysis
 
 ### **Future Versions**
 - **XISF import**: Load XISF files, extract headers and data, save to FITS format (optional)
@@ -156,6 +159,8 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **google-auth**: Authentication library for Google Cloud services
 - **Pillow**: Image processing for thumbnails and previews
 - **Siril**: Command-line integration for master frame creation and calibration workflows
+- **SEP**: Source Extractor Python library for advanced star detection and quality analysis
+- **pysiril**: Python interface to Siril (automatically installed by install scripts)
 
 ### Optional Dependencies
 - **Git**: Required for auto-update functionality
@@ -215,6 +220,7 @@ chmod +x install/install_macos.sh && ./install/install_macos.sh
 - Checks for Python 3.8+ (installs if needed)
 - Creates virtual environment
 - Installs all dependencies
+- **Automatically downloads and installs pysiril** from GitLab CI/CD artifacts
 - Creates desktop shortcuts and application menu entries
 - Sets up automatic update checking from GitHub
 

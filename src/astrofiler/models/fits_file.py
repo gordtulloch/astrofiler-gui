@@ -33,6 +33,14 @@ class fitsFile(BaseModel):
     fitsFileCalibrationDate = pw.DateTimeField(null=True)
     fitsFileOriginalFile = pw.TextField(null=True)
     fitsFileOriginalCloudURL = pw.TextField(null=True)
+    
+    # Quality metrics fields
+    fitsFileAvgFWHMArcsec = pw.FloatField(null=True)  # Average FWHM in arcseconds
+    fitsFileAvgEccentricity = pw.FloatField(null=True)  # Average star eccentricity (0-1)
+    fitsFileAvgHFRArcsec = pw.FloatField(null=True)  # Average HFR in arcseconds  
+    fitsFileImageSNR = pw.FloatField(null=True)  # Signal-to-noise ratio for image
+    fitsFileStarCount = pw.IntegerField(null=True)  # Number of detected stars
+    fitsFileImageScale = pw.FloatField(null=True)  # Arcsec/pixel scale
 
     class Meta:
         table_name = 'fitsFile'

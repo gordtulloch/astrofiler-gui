@@ -190,7 +190,7 @@ Write-Host "Installing required packages..." -ForegroundColor Yellow
 if (Test-Path "requirements.txt") {
     try {
         python -m pip install -r requirements.txt
-        Write-Host "All packages installed successfully!" -ForegroundColor Green
+        Write-Host "Core packages installed successfully!" -ForegroundColor Green
     } catch {
         Write-Host "Error: Failed to install some packages." -ForegroundColor Red
         Write-Host "Please check the error messages above." -ForegroundColor Yellow
@@ -205,6 +205,82 @@ if (Test-Path "requirements.txt") {
     foreach ($package in $packages) {
         Write-Host "Installing $package..." -ForegroundColor Cyan
         python -m pip install $package
+    }
+}
+
+# Install pysiril from local wheel file
+Write-Host
+Write-Host "Installing pysiril..." -ForegroundColor Yellow
+$pysirilWheel = Get-ChildItem -Path "." -Name "pysiril-*.whl" | Select-Object -First 1
+
+if ($pysirilWheel) {
+    Write-Host "Found pysiril wheel: $pysirilWheel" -ForegroundColor Cyan
+    try {
+        python -m pip install $pysirilWheel --force-reinstall
+        Write-Host "pysiril installed successfully!" -ForegroundColor Green
+    } catch {
+        Write-Host "Warning: Failed to install pysiril from wheel file." -ForegroundColor Yellow
+        Write-Host "You may need to install it manually later." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "No pysiril wheel file found. Attempting to download..." -ForegroundColor Cyan
+    
+    # Try to download the latest pysiril wheel file
+    try {
+        Write-Host "Downloading latest pysiril wheel from GitLab..." -ForegroundColor Cyan
+        $downloadUrl = "https://gitlab.com/free-astro/pysiril/-/jobs/artifacts/main/download?job=build"
+        $tempZip = "$env:TEMP\pysiril_artifacts.zip"
+        $tempDir = "$env:TEMP\pysiril_extract"
+        
+        # Remove existing temp files
+        if (Test-Path $tempZip) { Remove-Item $tempZip -Force }
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        
+        # Download artifacts
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing
+        Write-Host "Download completed. Extracting wheel file..." -ForegroundColor Cyan
+        
+        # Extract the zip file
+        Expand-Archive -Path $tempZip -DestinationPath $tempDir -Force
+        
+        # Find the wheel file in extracted contents
+        $extractedWheel = Get-ChildItem -Path $tempDir -Name "pysiril-*.whl" -Recurse | Select-Object -First 1
+        
+        if ($extractedWheel) {
+            $sourcePath = Get-ChildItem -Path $tempDir -Name "pysiril-*.whl" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+            $destPath = Join-Path (Get-Location) (Split-Path $sourcePath -Leaf)
+            Copy-Item $sourcePath $destPath -Force
+            
+            Write-Host "Found wheel file: $(Split-Path $sourcePath -Leaf)" -ForegroundColor Green
+            python -m pip install $destPath --force-reinstall
+            Write-Host "pysiril installed successfully!" -ForegroundColor Green
+            
+            # Clean up
+            Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            throw "No wheel file found in downloaded artifacts"
+        }
+        
+    } catch {
+        Write-Host "Download failed. Trying alternative method..." -ForegroundColor Yellow
+        
+        # Clean up temp files
+        if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+        
+        try {
+            Write-Host "Installing pysiril from source..." -ForegroundColor Cyan
+            python -m pip install git+https://gitlab.com/free-astro/pysiril.git
+            Write-Host "pysiril installed successfully from source!" -ForegroundColor Green
+        } catch {
+            Write-Host "Warning: Failed to install pysiril automatically." -ForegroundColor Yellow
+            Write-Host "You can install it manually later with:" -ForegroundColor Yellow
+            Write-Host "  python -m pip install git+https://gitlab.com/free-astro/pysiril.git" -ForegroundColor White
+            Write-Host "Or download the wheel file from:" -ForegroundColor Yellow
+            Write-Host "  https://gitlab.com/free-astro/pysiril/-/releases" -ForegroundColor White
+        }
     }
 }
 

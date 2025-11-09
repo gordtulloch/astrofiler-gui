@@ -154,10 +154,108 @@ if [ -f "requirements.txt" ]; then
         echo "  arch -arm64 python -m pip install -r requirements.txt"
         exit 1
     fi
+    echo "Core packages installed successfully!"
 else
     echo "Warning: requirements.txt not found."
     echo "Installing packages manually..."
     python -m pip install astropy peewee numpy matplotlib pytz PySide6
+fi
+
+# Install pysiril from local wheel file
+echo
+echo "Installing pysiril..."
+PYSIRIL_WHEEL=$(find . -name "pysiril-*.whl" -type f | head -n 1)
+
+if [ -n "$PYSIRIL_WHEEL" ]; then
+    echo "Found pysiril wheel: $PYSIRIL_WHEEL"
+    if python -m pip install "$PYSIRIL_WHEEL" --force-reinstall; then
+        echo "pysiril installed successfully!"
+    else
+        echo "Warning: Failed to install pysiril from wheel file."
+        echo "You may need to install it manually later."
+    fi
+else
+    echo "No pysiril wheel file found. Attempting to download..."
+    
+    # Try to download the latest pysiril wheel file
+    echo "Downloading latest pysiril wheel from GitLab..."
+    DOWNLOAD_URL="https://gitlab.com/free-astro/pysiril/-/jobs/artifacts/main/download?job=build"
+    TEMP_ZIP="/tmp/pysiril_artifacts.zip"
+    TEMP_DIR="/tmp/pysiril_extract"
+    
+    # Clean up any existing temp files
+    rm -f "$TEMP_ZIP"
+    rm -rf "$TEMP_DIR"
+    mkdir -p "$TEMP_DIR"
+    
+    # Download artifacts using curl (standard on macOS)
+    if curl -L -o "$TEMP_ZIP" "$DOWNLOAD_URL" 2>/dev/null; then
+        echo "Download completed. Extracting wheel file..."
+        
+        # Extract the zip file (unzip is standard on macOS)
+        cd "$TEMP_DIR"
+        if unzip -q "$TEMP_ZIP" 2>/dev/null; then
+            cd - >/dev/null
+            
+            # Find the wheel file in extracted contents
+            EXTRACTED_WHEEL=$(find "$TEMP_DIR" -name "pysiril-*.whl" -type f | head -n 1)
+            
+            if [ -n "$EXTRACTED_WHEEL" ]; then
+                WHEEL_NAME=$(basename "$EXTRACTED_WHEEL")
+                cp "$EXTRACTED_WHEEL" "./$WHEEL_NAME"
+                
+                echo "Found wheel file: $WHEEL_NAME"
+                if python -m pip install "./$WHEEL_NAME" --force-reinstall; then
+                    echo "pysiril installed successfully!"
+                else
+                    echo "Warning: Failed to install downloaded wheel file."
+                fi
+                
+                # Clean up
+                rm -f "$TEMP_ZIP"
+                rm -rf "$TEMP_DIR"
+            else
+                echo "No wheel file found in downloaded artifacts."
+                rm -f "$TEMP_ZIP"
+                rm -rf "$TEMP_DIR"
+                
+                # Fall back to source installation
+                echo "Trying to install from source..."
+                if python -m pip install git+https://gitlab.com/free-astro/pysiril.git; then
+                    echo "pysiril installed successfully from source!"
+                else
+                    echo "Warning: Failed to install pysiril automatically."
+                    echo "You can install it manually later with:"
+                    echo "  python -m pip install git+https://gitlab.com/free-astro/pysiril.git"
+                    echo "Or download the wheel file from:"
+                    echo "  https://gitlab.com/free-astro/pysiril/-/releases"
+                fi
+            fi
+        else
+            echo "Extraction failed. Trying source installation..."
+            cd - >/dev/null
+            rm -f "$TEMP_ZIP"
+            rm -rf "$TEMP_DIR"
+            
+            if python -m pip install git+https://gitlab.com/free-astro/pysiril.git; then
+                echo "pysiril installed successfully from source!"
+            else
+                echo "Warning: Failed to install pysiril automatically."
+                echo "You can install it manually later."
+            fi
+        fi
+    else
+        echo "Download failed. Trying source installation..."
+        if python -m pip install git+https://gitlab.com/free-astro/pysiril.git; then
+            echo "pysiril installed successfully from source!"
+        else
+            echo "Warning: Failed to install pysiril automatically."
+            echo "You can install it manually later with:"
+            echo "  python -m pip install git+https://gitlab.com/free-astro/pysiril.git"
+            echo "Or download the wheel file from:"
+            echo "  https://gitlab.com/free-astro/pysiril/-/releases"
+        fi
+    fi
 fi
 
 echo

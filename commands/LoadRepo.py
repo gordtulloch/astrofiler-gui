@@ -15,7 +15,7 @@ Options:
     -c, --config    Path to configuration file (default: astrofiler.ini)
     -s, --source    Override source folder path
     -r, --repo      Override repository folder path
-    -n, --no-move   Don't move files, just register them (sync mode)
+    -n, --no-move   Resync mode: Clear database and re-register all files without moving them
 
 Requirements:
     - astrofiler.ini configuration file
@@ -38,17 +38,25 @@ Example:
 
 import sys
 import os
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import setup_path  # Configure Python path for new package structure
 import argparse
 import logging
 import configparser
 from datetime import datetime
 
-# Add the parent directory to the path to import astrofiler modules
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Configure Python path for new package structure - must be before any astrofiler imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_path = os.path.join(project_root, 'src')
+
+# Ensure src path is first in path to avoid conflicts with root astrofiler.py
+if src_path in sys.path:
+    sys.path.remove(src_path)
+sys.path.insert(0, src_path)
+
+def ensure_astrofiler_imports():
+    """Ensure astrofiler package can be imported correctly from src directory"""
+    global src_path
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
 
 from astrofiler.core import fitsProcessing
 from astrofiler.database import setup_database
@@ -107,7 +115,7 @@ Examples:
     python LoadRepo.py -v                  # Verbose output
     python LoadRepo.py -c custom.ini       # Custom config file
     python LoadRepo.py -s /path/to/source  # Override source folder
-    python LoadRepo.py -n                  # Sync mode (don't move files)
+    python LoadRepo.py -n                  # Resync mode (clear DB and re-register files)
         """
     )
     
@@ -120,7 +128,7 @@ Examples:
     parser.add_argument('-r', '--repo',
                         help='Override repository folder path')
     parser.add_argument('-n', '--no-move', action='store_true',
-                        help="Don't move files, just register them (sync mode)")
+                        help="Resync mode: Clear database and re-register all files without moving them")
     
     args = parser.parse_args()
     
@@ -130,6 +138,9 @@ Examples:
     try:
         logger.info("=== AstroFiler Repository Loader Starting ===")
         logger.info(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Ensure imports work correctly
+        ensure_astrofiler_imports()
         
         # Load configuration
         logger.info(f"Loading configuration from: {args.config}")
@@ -153,6 +164,31 @@ Examples:
         # Setup database
         logger.info("Setting up database...")
         setup_database()
+        
+        # If in resync mode (-n/--no-move), clear the database tables first
+        if args.no_move:
+            logger.info("Resync mode detected - clearing database tables...")
+            try:
+                from astrofiler.models import fitsFile, fitsSession, Mapping, Masters
+                
+                # Clear all tables in dependency order
+                logger.info("Clearing fitsFile table...")
+                fitsFile.delete().execute()
+                
+                logger.info("Clearing fitsSession table...")
+                fitsSession.delete().execute()
+                
+                logger.info("Clearing Mapping table...")
+                Mapping.delete().execute()
+                
+                logger.info("Clearing Masters table...")
+                Masters.delete().execute()
+                
+                logger.info("Database tables cleared successfully for resync.")
+                
+            except Exception as e:
+                logger.error(f"Error clearing database tables: {e}")
+                raise
         
         # Create processor instance
         processor = fitsProcessing()

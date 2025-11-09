@@ -9,6 +9,7 @@ import datetime
 import hashlib
 import os
 import logging
+import time
 from .base import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,32 @@ class Masters(BaseModel):
         return query.first()
     
     @classmethod
+    def _retry_database_operation(cls, operation, max_retries=5, delay=1.0):
+        """
+        Retry database operation to handle SQLite database locks.
+        
+        Args:
+            operation: Function to execute
+            max_retries: Maximum number of retry attempts
+            delay: Initial delay between retries (exponential backoff)
+            
+        Returns:
+            Result of the operation
+        """
+        for attempt in range(max_retries):
+            try:
+                return operation()
+            except pw.OperationalError as e:
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    wait_time = delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"Database locked, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Database operation failed after {attempt + 1} attempts: {e}")
+                    raise
+
+    @classmethod
     def create_master_record(cls, master_path, session_data, cal_type, file_count=0):
         """
         Create a new master calibration frame record.
@@ -105,25 +132,28 @@ class Masters(BaseModel):
             with open(master_path, 'rb') as f:
                 file_hash = hashlib.md5(f.read()).hexdigest()
         
-        return cls.create(
-            master_id=master_id,
-            master_type=cal_type,
-            master_path=master_path,
-            creation_date=datetime.datetime.now(),
-            telescope=session_data.get('telescope'),
-            instrument=session_data.get('instrument'),
-            exposure_time=session_data.get('exposure_time') if cal_type == 'dark' else None,
-            binning_x=session_data.get('binning_x'),
-            binning_y=session_data.get('binning_y'),
-            ccd_temp=session_data.get('ccd_temp'),
-            gain=session_data.get('gain'),
-            offset=session_data.get('offset'),
-            filter_name=session_data.get('filter_name') if cal_type == 'flat' else None,
-            source_session_id=session_data.get('session_id'),
-            file_count=file_count,
-            file_size=file_size,
-            hash_value=file_hash
-        )
+        def create_operation():
+            return cls.create(
+                master_id=master_id,
+                master_type=cal_type,
+                master_path=master_path,
+                creation_date=datetime.datetime.now(),
+                telescope=session_data.get('telescope'),
+                instrument=session_data.get('instrument'),
+                exposure_time=session_data.get('exposure_time') if cal_type == 'dark' else None,
+                binning_x=session_data.get('binning_x'),
+                binning_y=session_data.get('binning_y'),
+                ccd_temp=session_data.get('ccd_temp'),
+                gain=session_data.get('gain'),
+                offset=session_data.get('offset'),
+                filter_name=session_data.get('filter_name') if cal_type == 'flat' else None,
+                source_session_id=session_data.get('session_id'),
+                file_count=file_count,
+                file_size=file_size,
+                hash_value=file_hash
+            )
+        
+        return cls._retry_database_operation(create_operation)
     
     def validate_file_integrity(self):
         """

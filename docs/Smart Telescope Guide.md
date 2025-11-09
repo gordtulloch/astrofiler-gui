@@ -1,6 +1,6 @@
 # Smart Telescope Integration Guide
 
-This guide provides comprehensive instructions for using AstroFiler's smart telescope integration features with SEESTAR, StellarMate, and DWARF telescopes. These features allow you to directly connect to your smart telescope, browse its file system, and download FITS files directly into your AstroFiler repository.
+This guide provides comprehensive instructions for using AstroFiler's smart telescope integration features with SEESTAR, StellarMate, iTelescope, and DWARF telescopes. These features allow you to directly connect to your smart or remote telescope, browse its file system, and download FITS files directly into your AstroFiler repository.
 
 ## Overview
 
@@ -12,6 +12,7 @@ AstroFiler's smart telescope integration eliminates the need for manual file tra
 |-----------|----------|--------|----------|
 | SEESTAR S50/S60 | SMB/CIFS | Stable | Full folder browsing, selective download, header enhancement |
 | StellarMate | SMB/CIFS | Stable | Network file access, FITS management, observatory integration |
+| iTelescope | FTP | Stable | Downloads calibrated images only from t* folders on data.iTelescope.com |
 | DWARF II/III | FTP | Experimental | Folder structure validation, automatic header correction, dual camera support |
 
 ---
@@ -160,6 +161,58 @@ StellarMate devices typically organize astronomical files in user-defined direct
 ### StellarMate Header Processing
 
 AstroFiler processes StellarMate FITS files with standard FITS header handling:
+
+- **Preservation**: Existing FITS headers maintained
+- **Enhancement**: Additional metadata added where beneficial
+- **INSTRUME**: Preserved from original equipment settings
+- **TELESCOP**: May be enhanced based on observatory configuration
+- **Observatory Data**: Location and equipment information preserved
+
+## iTelescope Setup
+
+### Prerequisites
+
+- iTelescope device (any version) with network connectivity
+- iTelescope connected to your local network
+- SMB/CIFS networking enabled on your computer
+- FITS files accessible through iTelescope's file system
+
+### Network Configuration
+
+#### Automatic Discovery (Recommended)
+1. Ensure your iTelescope device is powered on and connected to network
+2. The device should be accessible via `iTelescope.local`
+3. AstroFiler will automatically attempt to connect using mDNS resolution
+
+#### Manual IP Configuration
+If automatic discovery fails:
+1. Find your iTelescope's IP address from your router's admin panel or iTelescope interface
+2. Use the IP address directly in AstroFiler's connection dialog
+3. Common iTelescope IP ranges depend on your network configuration
+
+### Connecting to iTelescope
+
+1. **Launch AstroFiler** and navigate to the **Images** tab
+2. **Click "Download from Telescope"** button
+3. **Select Protocol**: Choose "SMB (SEESTAR/iTelescope)"
+4. **Enter Connection Details**:
+   - **Hostname**: `iTelescope.local` (or your iTelescope's IP address)
+   - **Username**: `iTelescope` (default) or your configured username
+   - **Password**: Your iTelescope password
+   - **Share Name**: Appropriate share (commonly `home` or configured shares)
+5. **Click "Connect"** to establish connection
+
+### Downloading iTelescope Files
+
+#### Observatory Integration
+1. **Browse Directories**: Navigate through iTelescope's file system
+2. **Locate FITS Files**: Find observation sessions with 'calibrated' prefix
+3. **Select Files**: Choose specific files or entire observation runs
+4. **Download**: Transfer files to AstroFiler for processing
+
+### iTelescope Header Processing
+
+AstroFiler processes iTelescope FITS files with standard FITS header handling:
 
 - **Preservation**: Existing FITS headers maintained
 - **Enhancement**: Additional metadata added where beneficial

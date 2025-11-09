@@ -272,8 +272,69 @@ class ConfigWidget(QWidget):
             "Disable for headless or automated processing environments."
         )
 
+        # PySiril Convert Timeout
+        self.pysiril_convert_timeout = QSpinBox()
+        self.pysiril_convert_timeout.setMinimum(30)
+        self.pysiril_convert_timeout.setMaximum(3600)
+        self.pysiril_convert_timeout.setValue(120)
+        self.pysiril_convert_timeout.setSuffix(" seconds")
+        self.pysiril_convert_timeout.setToolTip(
+            "Timeout for PySiril convert operations in seconds.\n\n"
+            "Convert operations convert FITS files to Siril format.\n"
+            "Increase this value for large files or slow systems.\n"
+            "Default: 120 seconds"
+        )
+
+        # PySiril Stack Timeout
+        self.pysiril_stack_timeout = QSpinBox()
+        self.pysiril_stack_timeout.setMinimum(60)
+        self.pysiril_stack_timeout.setMaximum(7200)
+        self.pysiril_stack_timeout.setValue(300)
+        self.pysiril_stack_timeout.setSuffix(" seconds")
+        self.pysiril_stack_timeout.setToolTip(
+            "Timeout for PySiril stacking operations in seconds.\n\n"
+            "Stacking operations combine multiple frames into master frames.\n"
+            "This typically takes longer than conversion operations.\n"
+            "Default: 300 seconds (5 minutes)"
+        )
+
+        # PySiril Debug Logging
+        self.pysiril_debug_logging = QCheckBox()
+        self.pysiril_debug_logging.setChecked(True)
+        self.pysiril_debug_logging.setToolTip(
+            "Enable enhanced DEBUG logging for PySiril operations.\n\n"
+            "When enabled, detailed Siril command execution and internal\n"
+            "messages are logged for troubleshooting purposes.\n"
+            "Disable to reduce log verbosity in production.\n"
+            "Default: Enabled"
+        )
+
+        # Frame Processing Method
+        self.frame_processing_method = QComboBox()
+        self.frame_processing_method.addItems(["PySiril", "Internal"])
+        self.frame_processing_method.setCurrentText("PySiril")
+        self.frame_processing_method.setToolTip(
+            "Choose the method for processing and stacking astronomical frames.\n\n"
+            "PySiril: Uses Siril's professional algorithms via PySiril interface.\n"
+            "  - Advanced stacking with sigma clipping rejection\n"
+            "  - Professional calibration and registration\n"
+            "  - Higher quality results for all frame types\n"
+            "  - Requires Siril installation\n\n"
+            "Internal: Uses AstroFiler's built-in processing functions.\n"
+            "  - Fast, memory-efficient operations\n"
+            "  - No external dependencies required\n"
+            "  - Suitable for basic processing workflows\n"
+            "  - Good fallback when PySiril is unavailable\n\n"
+            "Applies to: Master frames, light frame stacking, calibration\n"
+            "Default: PySiril (if available)"
+        )
+
         auto_cal_layout.addRow("Min Files per Master:", self.min_files_per_master)
         auto_cal_layout.addRow("Show Progress Dialogs:", self.auto_calibration_progress)
+        auto_cal_layout.addRow("Frame Processing Method:", self.frame_processing_method)
+        auto_cal_layout.addRow("PySiril Convert Timeout:", self.pysiril_convert_timeout)
+        auto_cal_layout.addRow("PySiril Stack Timeout:", self.pysiril_stack_timeout)
+        auto_cal_layout.addRow("Enhanced Siril Logging:", self.pysiril_debug_logging)
 
         layout.addWidget(auto_cal_group)
         layout.addStretch()
@@ -358,7 +419,10 @@ class ConfigWidget(QWidget):
             # Auto-calibration settings
             config.set('DEFAULT', 'min_files_per_master', str(self.min_files_per_master.value()))
             config.set('DEFAULT', 'auto_calibration_progress', str(self.auto_calibration_progress.isChecked()))
-            config.set('DEFAULT', 'auto_calibration_progress', str(self.auto_calibration_progress.isChecked()))
+            config.set('DEFAULT', 'pysiril_convert_timeout', str(self.pysiril_convert_timeout.value()))
+            config.set('DEFAULT', 'pysiril_stack_timeout', str(self.pysiril_stack_timeout.value()))
+            config.set('DEFAULT', 'pysiril_debug_logging', str(self.pysiril_debug_logging.isChecked()))
+            config.set('DEFAULT', 'frame_processing_method', self.frame_processing_method.currentText())
             
             # iTelescope settings
             config.set('DEFAULT', 'itelescope_username', self.itelescope_username.text().strip())
@@ -480,6 +544,25 @@ class ConfigWidget(QWidget):
                 progress_str = config.get('DEFAULT', 'auto_calibration_progress')
                 progress_value = progress_str.lower() in ('true', '1', 'yes', 'on')
                 self.auto_calibration_progress.setChecked(progress_value)
+                
+            if config.has_option('DEFAULT', 'pysiril_convert_timeout'):
+                convert_timeout = config.getint('DEFAULT', 'pysiril_convert_timeout', fallback=120)
+                self.pysiril_convert_timeout.setValue(convert_timeout)
+                
+            if config.has_option('DEFAULT', 'pysiril_stack_timeout'):
+                stack_timeout = config.getint('DEFAULT', 'pysiril_stack_timeout', fallback=300)
+                self.pysiril_stack_timeout.setValue(stack_timeout)
+                
+            if config.has_option('DEFAULT', 'pysiril_debug_logging'):
+                debug_logging_str = config.get('DEFAULT', 'pysiril_debug_logging')
+                debug_logging_value = debug_logging_str.lower() in ('true', '1', 'yes', 'on')
+                self.pysiril_debug_logging.setChecked(debug_logging_value)
+                
+            if config.has_option('DEFAULT', 'frame_processing_method'):
+                frame_method = config.get('DEFAULT', 'frame_processing_method')
+                index = self.frame_processing_method.findText(frame_method)
+                if index >= 0:
+                    self.frame_processing_method.setCurrentIndex(index)
             
             # Load iTelescope settings
             if config.has_option('DEFAULT', 'itelescope_username'):
@@ -518,7 +601,10 @@ class ConfigWidget(QWidget):
         # Auto-calibration defaults
         self.min_files_per_master.setValue(3)
         self.auto_calibration_progress.setChecked(True)
-        self.auto_calibration_progress.setChecked(True)
+        self.frame_processing_method.setCurrentText("PySiril")
+        self.pysiril_convert_timeout.setValue(120)
+        self.pysiril_stack_timeout.setValue(300)
+        self.pysiril_debug_logging.setChecked(True)
         
         # iTelescope defaults
         self.itelescope_username.setText("")

@@ -17,10 +17,26 @@ Examples:
 """
 
 import sys
+import os
 import argparse
-import setup_path  # Configure Python path for new package structure
-from astrofiler.database import setup_database, create_migration, run_migrations, get_migration_status
 import logging
+
+# Configure Python path for new package structure - must be before any astrofiler imports
+project_root = os.path.dirname(os.path.abspath(__file__))
+src_path = os.path.join(project_root, 'src')
+
+# Ensure src path is first in path to avoid conflicts with root astrofiler.py
+if src_path in sys.path:
+    sys.path.remove(src_path)
+sys.path.insert(0, src_path)
+
+# Now import astrofiler modules
+try:
+    from astrofiler.database import setup_database, create_migration, run_migrations, get_migration_status
+except ImportError as e:
+    print(f"Error importing astrofiler modules: {e}")
+    print("Make sure you're running this from the project root directory.")
+    sys.exit(1)
 
 # Configure logging
 logging.basicConfig(
