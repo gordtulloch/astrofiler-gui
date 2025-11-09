@@ -1,40 +1,38 @@
 #!/usr/bin/env python3
 """
-LoadRepo.py - Command line utility to load new images from incoming folder
+SyncRepo.py - Command line utility to synchronize repository database with existing files
 
-This script scans the source folder for new FITS and XISF files and processes them into the repository.
-It moves files from the source folder to the repository structure and registers them in the database.
-XISF files are automatically converted to FITS format during processing.
+This script scans the repository folder for existing FITS and XISF files and updates the database
+to match the actual files on disk. It does not move any files but ensures the database accurately
+reflects what's currently in the repository.
 
 Usage:
-    python LoadRepo.py [options]
+    python SyncRepo.py [options]
 
 Options:
     -h, --help      Show this help message and exit
     -v, --verbose   Enable verbose logging
     -c, --config    Path to configuration file (default: astrofiler.ini)
-    -s, --source    Override source folder path
     -r, --repo      Override repository folder path
+    -n, --clear     Clear database before sync (recommended for clean sync)
 
 Requirements:
     - astrofiler.ini configuration file
-    - Valid source and repository paths
+    - Valid repository folder path
     - Write permissions to repository folder
 
 Example:
-    # Load new images with default settings
-    python LoadRepo.py
+    # Sync repository with default settings
+    python SyncRepo.py
     
-    # Load with verbose output
-    python LoadRepo.py -v
+    # Sync with verbose output and clear database first
+    python SyncRepo.py -v -n
     
-    # Load with custom config file
-    python LoadRepo.py -c /path/to/config.ini
+    # Sync with custom config file
+    python SyncRepo.py -c /path/to/config.ini
     
-    # Load from specific source folder
-    python LoadRepo.py -s /path/to/source
-
-Note: For synchronizing the database with existing repository files, use SyncRepo.py instead.
+    # Sync specific repository folder
+    python SyncRepo.py -r /path/to/repository
 """
 
 import sys
@@ -72,7 +70,7 @@ def setup_logging(verbose=False):
         level=level,
         format=format_str,
         handlers=[
-            logging.FileHandler('loadrepo.log'),
+            logging.FileHandler('syncrepo.log'),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -89,35 +87,27 @@ def load_config(config_path):
     config.read(config_path)
     return config
 
-def validate_paths(source_folder, repo_folder):
-    """Validate source and repository folder paths."""
-    if not os.path.exists(source_folder):
-        raise FileNotFoundError(f"Source folder does not exist: {source_folder}")
-    
+def validate_paths(repo_folder):
+    """Validate repository folder path."""
     if not os.path.exists(repo_folder):
-        try:
-            os.makedirs(repo_folder, exist_ok=True)
-            logging.info(f"Created repository folder: {repo_folder}")
-        except Exception as e:
-            raise RuntimeError(f"Cannot create repository folder {repo_folder}: {e}")
+        raise FileNotFoundError(f"Repository folder does not exist: {repo_folder}")
     
     # Check write permissions
     if not os.access(repo_folder, os.W_OK):
         raise PermissionError(f"No write permission for repository folder: {repo_folder}")
 
 def main():
-    """Main function to load new images from command line."""
+    """Main function to sync repository database from command line."""
     parser = argparse.ArgumentParser(
-        description="Load new FITS and XISF files from source folder into repository",
+        description="Synchronize repository database with existing FITS and XISF files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python LoadRepo.py                     # Load with default settings
-    python LoadRepo.py -v                  # Verbose output
-    python LoadRepo.py -c custom.ini       # Custom config file
-    python LoadRepo.py -s /path/to/source  # Override source folder
-
-Note: For database synchronization with existing files, use SyncRepo.py instead.
+    python SyncRepo.py                     # Sync with default settings
+    python SyncRepo.py -v                  # Verbose output
+    python SyncRepo.py -c custom.ini       # Custom config file
+    python SyncRepo.py -r /path/to/repo    # Override repository folder
+    python SyncRepo.py -n                  # Clear database before sync
         """
     )
     
@@ -125,10 +115,10 @@ Note: For database synchronization with existing files, use SyncRepo.py instead.
                         help='Enable verbose logging')
     parser.add_argument('-c', '--config', default='astrofiler.ini',
                         help='Path to configuration file (default: astrofiler.ini)')
-    parser.add_argument('-s', '--source', 
-                        help='Override source folder path')
     parser.add_argument('-r', '--repo',
                         help='Override repository folder path')
+    parser.add_argument('-n', '--clear', action='store_true',
+                        help="Clear database before sync (recommended for clean sync)")
     
     args = parser.parse_args()
     
@@ -136,7 +126,7 @@ Note: For database synchronization with existing files, use SyncRepo.py instead.
     logger = setup_logging(args.verbose)
     
     try:
-        logger.info("=== AstroFiler New Image Loader Starting ===")
+        logger.info("=== AstroFiler Repository Sync Starting ===")
         logger.info(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Ensure imports work correctly
@@ -146,39 +136,61 @@ Note: For database synchronization with existing files, use SyncRepo.py instead.
         logger.info(f"Loading configuration from: {args.config}")
         config = load_config(args.config)
         
-        # Get folder paths
-        source_folder = args.source or config.get('DEFAULT', 'source', fallback='.')
+        # Get repository folder path
         repo_folder = args.repo or config.get('DEFAULT', 'repo', fallback='.')
         
-        # Convert to absolute paths
-        source_folder = os.path.abspath(source_folder)
+        # Convert to absolute path
         repo_folder = os.path.abspath(repo_folder)
         
-        logger.info(f"Source folder: {source_folder}")
         logger.info(f"Repository folder: {repo_folder}")
+        logger.info(f"Clear database: {args.clear}")
         
         # Validate paths
-        validate_paths(source_folder, repo_folder)
+        validate_paths(repo_folder)
         
         # Setup database
         logger.info("Setting up database...")
         setup_database()
         
+        # If clear mode requested, clear the database tables first
+        if args.clear:
+            logger.info("Clear mode detected - clearing database tables...")
+            try:
+                from astrofiler.models import fitsFile, fitsSession, Mapping, Masters
+                
+                # Clear all tables in dependency order
+                logger.info("Clearing fitsFile table...")
+                fitsFile.delete().execute()
+                
+                logger.info("Clearing fitsSession table...")
+                fitsSession.delete().execute()
+                
+                logger.info("Clearing Mapping table...")
+                Mapping.delete().execute()
+                
+                logger.info("Clearing Masters table...")
+                Masters.delete().execute()
+                
+                logger.info("Database tables cleared successfully for sync.")
+                
+            except Exception as e:
+                logger.error(f"Error clearing database tables: {e}")
+                raise
+        
         # Create processor instance
         processor = fitsProcessing()
         
-        # Override folder paths if specified
-        if args.source:
-            processor.sourceFolder = source_folder
+        # Override repository folder path if specified
         if args.repo:
             processor.repoFolder = repo_folder
         
-        # Process files - always move files from source to repository
-        logger.info("Starting new image processing...")
+        # Process files - scan the repository folder instead of source folder
+        logger.info("Starting repository sync...")
         
         result = processor.registerFitsImages(
-            moveFiles=True,  # Always move files from source to repository
-            progress_callback=None  # Disabled for non-interactive use
+            moveFiles=False,  # Never move files during sync
+            progress_callback=None,  # Disabled for non-interactive use
+            source_folder=repo_folder  # Use repository folder as source
         )
         
         # Handle the new tuple return format (registered_files, duplicate_count)
@@ -190,27 +202,26 @@ Note: For database synchronization with existing files, use SyncRepo.py instead.
             duplicate_count = 0
         
         # Report results
-        logger.info(f"=== Processing Complete ===")
-        logger.info(f"Files processed: {len(registered_files)}")
+        logger.info(f"=== Repository Sync Complete ===")
+        logger.info(f"Files synchronized: {len(registered_files)}")
         if duplicate_count > 0:
             logger.info(f"Duplicate files skipped: {duplicate_count}")
-        logger.info(f"Mode: Move and register new images")
         
         if len(registered_files) == 0:
             if duplicate_count > 0:
-                logger.warning(f"No new FITS/XISF files processed! {duplicate_count} duplicate files were skipped.")
+                logger.warning(f"No new FITS/XISF files synchronized! {duplicate_count} duplicate files were skipped.")
             else:
-                logger.warning("No FITS or XISF files found to process!")
+                logger.warning("No FITS or XISF files found to synchronize!")
             return 1
         else:
-            logger.info("New image loading completed successfully!")
+            logger.info("Repository sync completed successfully!")
             return 0
             
     except KeyboardInterrupt:
         logger.info("Operation cancelled by user (Ctrl+C)")
         return 1
     except Exception as e:
-        logger.error(f"Error during repository load: {e}")
+        logger.error(f"Error during repository sync: {e}")
         if args.verbose:
             import traceback
             logger.error(traceback.format_exc())

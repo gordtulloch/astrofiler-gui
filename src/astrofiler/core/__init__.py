@@ -67,20 +67,34 @@ class fitsProcessing:
         """Register FITS image - original signature from astrofiler_file."""
         return self.file_processor.registerFitsImage(root, file, moveFiles)
     
-    def registerFitsImages(self, moveFiles=True, progress_callback=None):
+    def registerFitsImages(self, moveFiles=True, progress_callback=None, source_folder=None):
         """Register multiple FITS images from source folder."""
         import os
         processed_files = []
         
-        for root, dirs, files in os.walk(self.sourceFolder):
+        # Use specified folder or default to sourceFolder
+        scan_folder = source_folder if source_folder else self.sourceFolder
+        
+        # First, count total files to process
+        total_files = 0
+        for root, dirs, files in os.walk(scan_folder):
             for file in files:
                 if file.lower().endswith(('.fits', '.fit', '.fts', '.xisf')):
+                    total_files += 1
+        
+        current_file = 0
+        for root, dirs, files in os.walk(scan_folder):
+            for file in files:
+                if file.lower().endswith(('.fits', '.fit', '.fts', '.xisf')):
+                    current_file += 1
                     try:
                         result = self.registerFitsImage(root, file, moveFiles)
                         if result:  # If registration was successful
                             processed_files.append(os.path.join(root, file))
                         if progress_callback:
-                            progress_callback(len(processed_files))
+                            # Call with expected signature: current, total, filename
+                            if not progress_callback(current_file, total_files, os.path.join(root, file)):
+                                break  # Stop if callback returns False (user cancelled)
                     except Exception as e:
                         import logging
                         logger = logging.getLogger(__name__)

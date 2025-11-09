@@ -903,7 +903,12 @@ class ImagesWidget(QWidget):
             
             # Create and run the FITS processing
             fits_processor = fitsProcessing()
-            result = fits_processor.registerFitsImages(moveFiles=False, progress_callback=update_progress)
+            # For regeneration, scan the repository folder instead of the source folder
+            result = fits_processor.registerFitsImages(
+                moveFiles=False, 
+                progress_callback=update_progress, 
+                source_folder=fits_processor.repoFolder
+            )
             
             # Handle the new tuple return format (registered_files, duplicate_count)
             if isinstance(result, tuple):
