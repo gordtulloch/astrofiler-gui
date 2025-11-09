@@ -93,6 +93,54 @@ class ConfigWidget(QWidget):
         general_layout.addRow("Refresh on Startup:", self.refresh_on_startup)
         general_layout.addRow("Save Modified Headers:", self.save_modified_headers)
 
+        # FITS Compression settings group
+        compression_group = QGroupBox("FITS Compression")
+        compression_layout = QFormLayout(compression_group)
+
+        # Enable FITS compression (default unchecked)
+        self.compress_fits = QCheckBox()
+        self.compress_fits.setChecked(False)
+        self.compress_fits.setToolTip("When enabled, new FITS files will be automatically compressed using lossless compression")
+
+        # Compression algorithm selection
+        self.compression_algorithm = QComboBox()
+        self.compression_algorithm.addItems(["gzip", "lzma", "bzip2", "fits_gzip1", "fits_gzip2"])
+        self.compression_algorithm.setCurrentText("lzma")
+        self.compression_algorithm.setToolTip(
+            "Compression algorithms:\n"
+            "• gzip = fast external compression\n"
+            "• lzma = best external compression\n"
+            "• bzip2 = balanced external compression\n"
+            "• fits_gzip1 = FITS internal GZIP level 1 (Siril compatible)\n"
+            "• fits_gzip2 = FITS internal GZIP level 2 (Siril compatible)"
+        )
+
+        # Compression level (1-9, default 6)
+        self.compression_level = QSpinBox()
+        self.compression_level.setMinimum(1)
+        self.compression_level.setMaximum(9)
+        self.compression_level.setValue(6)
+        self.compression_level.setToolTip("Compression level: 1=fastest, 9=best compression, 6=balanced")
+
+        # Verify compression integrity (default checked)
+        self.verify_compression = QCheckBox()
+        self.verify_compression.setChecked(True)
+        self.verify_compression.setToolTip("When enabled, compressed files are verified to ensure perfect data integrity")
+
+        # Minimum file size for compression (default 1024 bytes)
+        self.min_compression_size = QSpinBox()
+        self.min_compression_size.setMinimum(0)
+        self.min_compression_size.setMaximum(1048576)  # 1MB max
+        self.min_compression_size.setValue(1024)
+        self.min_compression_size.setSuffix(" bytes")
+        self.min_compression_size.setToolTip("Files smaller than this size will not be compressed")
+
+        compression_layout.addRow("Enable Compression:", self.compress_fits)
+        compression_layout.addRow("Algorithm:", self.compression_algorithm)
+        compression_layout.addRow("Compression Level:", self.compression_level)
+        compression_layout.addRow("Verify Compression:", self.verify_compression)
+        compression_layout.addRow("Minimum File Size:", self.min_compression_size)
+
         # Display settings group
         display_group = QGroupBox("Display Settings")
         display_layout = QFormLayout(display_group)
@@ -154,6 +202,7 @@ class ConfigWidget(QWidget):
 
         # Add groups to tab layout
         layout.addWidget(general_group)
+        layout.addWidget(compression_group)
         layout.addWidget(display_group)
         layout.addWidget(tools_group)
         layout.addWidget(warnings_group)
@@ -428,6 +477,13 @@ class ConfigWidget(QWidget):
             config.set('DEFAULT', 'itelescope_username', self.itelescope_username.text().strip())
             config.set('DEFAULT', 'itelescope_password', self.itelescope_password.text().strip())
             
+            # FITS compression settings
+            config.set('DEFAULT', 'compress_fits', str(self.compress_fits.isChecked()))
+            config.set('DEFAULT', 'compression_algorithm', self.compression_algorithm.currentText())
+            config.set('DEFAULT', 'compression_level', str(self.compression_level.value()))
+            config.set('DEFAULT', 'verify_compression', str(self.verify_compression.isChecked()))
+            config.set('DEFAULT', 'min_compression_size', str(self.min_compression_size.value()))
+            
             # Write to the astrofiler.ini file
             with open('astrofiler.ini', 'w') as configfile:
                 config.write(configfile)
@@ -572,6 +628,31 @@ class ConfigWidget(QWidget):
             if config.has_option('DEFAULT', 'itelescope_password'):
                 itelescope_password = config.get('DEFAULT', 'itelescope_password')
                 self.itelescope_password.setText(itelescope_password)
+            
+            # Load FITS compression settings
+            if config.has_option('DEFAULT', 'compress_fits'):
+                compress_fits_str = config.get('DEFAULT', 'compress_fits')
+                compress_fits_value = compress_fits_str.lower() in ('true', '1', 'yes', 'on')
+                self.compress_fits.setChecked(compress_fits_value)
+            
+            if config.has_option('DEFAULT', 'compression_algorithm'):
+                compression_algorithm = config.get('DEFAULT', 'compression_algorithm', fallback='lzma')
+                index = self.compression_algorithm.findText(compression_algorithm)
+                if index >= 0:
+                    self.compression_algorithm.setCurrentIndex(index)
+            
+            if config.has_option('DEFAULT', 'compression_level'):
+                compression_level = config.getint('DEFAULT', 'compression_level', fallback=6)
+                self.compression_level.setValue(compression_level)
+            
+            if config.has_option('DEFAULT', 'verify_compression'):
+                verify_compression_str = config.get('DEFAULT', 'verify_compression')
+                verify_compression_value = verify_compression_str.lower() in ('true', '1', 'yes', 'on')
+                self.verify_compression.setChecked(verify_compression_value)
+            
+            if config.has_option('DEFAULT', 'min_compression_size'):
+                min_compression_size = config.getint('DEFAULT', 'min_compression_size', fallback=1024)
+                self.min_compression_size.setValue(min_compression_size)
                 
             logger.debug("Settings loaded from astrofiler.ini!")
             
@@ -609,6 +690,13 @@ class ConfigWidget(QWidget):
         # iTelescope defaults
         self.itelescope_username.setText("")
         self.itelescope_password.setText("")
+        
+        # FITS compression defaults
+        self.compress_fits.setChecked(False)
+        self.compression_algorithm.setCurrentIndex(0)  # Reset to 'gzip'
+        self.compression_level.setValue(6)
+        self.verify_compression.setChecked(True)
+        self.min_compression_size.setValue(1024)
     
     def browse_source_path(self):
         """Open directory dialog for source path"""

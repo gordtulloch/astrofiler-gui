@@ -25,6 +25,7 @@ from .calibration import CalibrationProcessor
 from .quality_analysis import QualityAnalyzer
 from .repository import RepositoryManager
 from .master_manager import MasterFrameManager, get_master_manager
+from .compress_files import get_fits_compressor, compress_fits_file, is_compression_enabled
 from .utils import (
     normalize_file_path,
     sanitize_filesystem_name,
@@ -297,6 +298,9 @@ __all__ = [
     'RepositoryManager',
     'MasterFrameManager',
     'get_master_manager',
+    'get_fits_compressor',
+    'compress_fits_file',
+    'is_compression_enabled',
     'normalize_file_path',
     'sanitize_filesystem_name',
     'dwarfFixHeader',

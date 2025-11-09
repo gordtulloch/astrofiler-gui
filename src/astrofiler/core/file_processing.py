@@ -2,7 +2,7 @@
 Core file processing module for AstroFiler.
 
 This module handles FITS file registration, header processing, hash calculation,
-and database operations for importing astronomical images.
+compression, and database operations for importing astronomical images.
 """
 
 import os
@@ -25,6 +25,7 @@ from ..exceptions import (
 )
 from .file_formats import get_file_format_processor
 from .services.file_hash_calculator import get_file_hash_calculator
+from .compress_files import get_fits_compressor
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class FileProcessor:
         # Initialize services following Dependency Inversion Principle
         self.format_processor = get_file_format_processor()
         self.hash_calculator = get_file_hash_calculator()
+        self.compressor = get_fits_compressor()
 
     def calculateFileHash(self, filePath: FilePath) -> Optional[str]:
         """
@@ -682,7 +684,20 @@ class FileProcessor:
                 logger.error(f"Unexpected error saving modified header for {file}: {e}")
                 # Continue processing despite header save failure
 
-        # Submit file to database
+        # Process file for compression if enabled and appropriate
+        current_file_path = os.path.join(root, file)
+        try:
+            compressed_file_path = self.compressor.process_file_for_compression(current_file_path)
+            if compressed_file_path != current_file_path:
+                # File was compressed, update path references
+                root = os.path.dirname(compressed_file_path)
+                file = os.path.basename(compressed_file_path)
+                logger.info(f"File compressed: {current_file_path} -> {compressed_file_path}")
+        except Exception as e:
+            logger.warning(f"Compression processing failed for {current_file_path}: {e}")
+            # Continue with original file if compression fails
+
+        # Submit file to database (use the potentially compressed file path)
         fileHash = self.calculateFileHash(os.path.join(root, file))
         newFitsFileId = self.submitFileToDB(os.path.join(root, file), hdr, fileHash)
         
