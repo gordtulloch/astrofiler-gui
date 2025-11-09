@@ -25,6 +25,7 @@ from .calibration import CalibrationProcessor
 from .quality_analysis import QualityAnalyzer
 from .repository import RepositoryManager
 from .master_manager import MasterFrameManager, get_master_manager
+from .compress_files import get_fits_compressor, compress_fits_file, is_compression_enabled
 from .utils import (
     normalize_file_path,
     sanitize_filesystem_name,
@@ -77,15 +78,20 @@ class fitsProcessing:
         
         # First, count total files to process
         total_files = 0
+        from .compress_files import get_fits_compressor
+        compressor = get_fits_compressor()
+        
         for root, dirs, files in os.walk(scan_folder):
             for file in files:
-                if file.lower().endswith(('.fits', '.fit', '.fts', '.xisf')):
+                # Use the comprehensive FITS file detection that includes compressed files
+                if compressor.is_fits_file(os.path.join(root, file)):
                     total_files += 1
         
         current_file = 0
         for root, dirs, files in os.walk(scan_folder):
             for file in files:
-                if file.lower().endswith(('.fits', '.fit', '.fts', '.xisf')):
+                # Use the comprehensive FITS file detection that includes compressed files
+                if compressor.is_fits_file(os.path.join(root, file)) or file.lower().endswith('.xisf'):
                     current_file += 1
                     try:
                         result = self.registerFitsImage(root, file, moveFiles)
@@ -297,6 +303,9 @@ __all__ = [
     'RepositoryManager',
     'MasterFrameManager',
     'get_master_manager',
+    'get_fits_compressor',
+    'compress_fits_file',
+    'is_compression_enabled',
     'normalize_file_path',
     'sanitize_filesystem_name',
     'dwarfFixHeader',
