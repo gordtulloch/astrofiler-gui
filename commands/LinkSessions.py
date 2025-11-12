@@ -24,15 +24,22 @@ import argparse
 import logging
 import os
 import sys
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import setup_path  # Configure Python path for new package structure
-import sys
 from datetime import datetime
 
-# Add the parent directory to sys.path so we can import astrofiler modules
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Configure Python path for new package structure - must be before any astrofiler imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_path = os.path.join(project_root, 'src')
+
+# Ensure src path is first in path to avoid conflicts with root astrofiler.py
+if src_path in sys.path:
+    sys.path.remove(src_path)
+sys.path.insert(0, src_path)
+
+def ensure_astrofiler_imports():
+    """Ensure astrofiler package can be imported correctly from src directory"""
+    global src_path
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
 
 from astrofiler.core import fitsProcessing
 from astrofiler.database import setup_database
@@ -46,13 +53,13 @@ def setup_logging(verbose=False):
     
     log_file = os.path.join(log_dir, 'linksessions.log')
     
-    # Configure logging
+    # Configure logging - using central astrofiler.log
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_file),
+            logging.FileHandler('astrofiler.log', mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )

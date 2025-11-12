@@ -65,12 +65,12 @@ def setup_logging(verbose=False):
     level = logging.DEBUG if verbose else logging.INFO
     format_str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     
-    # Configure logging to both file and console
+    # Configure logging - using central astrofiler.log
     logging.basicConfig(
         level=level,
         format=format_str,
         handlers=[
-            logging.FileHandler('syncrepo.log'),
+            logging.FileHandler('astrofiler.log', mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -164,13 +164,7 @@ Examples:
                 
                 logger.info("Clearing fitsSession table...")
                 fitsSession.delete().execute()
-                
-                logger.info("Clearing Mapping table...")
-                Mapping.delete().execute()
-                
-                logger.info("Clearing Masters table...")
-                Masters.delete().execute()
-                
+                               
                 logger.info("Database tables cleared successfully for sync.")
                 
             except Exception as e:

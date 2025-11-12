@@ -265,3 +265,30 @@ config_manager = ConfigManager()
 def get_config() -> AstroFilerConfig:
     """Get the current application configuration."""
     return config_manager.load_config()
+
+
+def get_temp_folder() -> str:
+    """
+    Get the configured temporary folder path.
+    
+    Returns:
+        str: The configured temp folder path, or system default if not configured
+    """
+    import configparser
+    import tempfile
+    
+    # Try to read from config file
+    config = configparser.ConfigParser()
+    config_file = 'astrofiler.ini'
+    
+    if os.path.exists(config_file):
+        config.read(config_file)
+        temp_folder = config.get('DEFAULT', 'temp_folder', fallback='').strip()
+        
+        if temp_folder:
+            # Ensure the directory exists
+            os.makedirs(temp_folder, exist_ok=True)
+            return os.path.abspath(temp_folder)
+    
+    # Fall back to system temporary directory
+    return tempfile.gettempdir()

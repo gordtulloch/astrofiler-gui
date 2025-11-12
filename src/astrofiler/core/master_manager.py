@@ -19,11 +19,54 @@ import datetime
 import shutil
 import configparser
 from pathlib import Path
+
+try:
+    import winreg  # For checking Windows Developer Mode
+except ImportError:
+    winreg = None  # Not on Windows
 from typing import Optional, Dict, Any, List, Callable
 
 from ..models import Masters, fitsSession, fitsFile, db
+from ..config import get_temp_folder
 
 logger = logging.getLogger(__name__)
+
+
+def check_symlink_support():
+    """Check if symbolic links are supported on this system."""
+    try:
+        # Try creating a test symlink
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = os.path.join(temp_dir, 'test.txt')
+            test_link = os.path.join(temp_dir, 'test_link.txt')
+            
+            # Create a test file
+            with open(test_file, 'w') as f:
+                f.write('test')
+            
+            # Try to create a symlink
+            os.symlink(test_file, test_link)
+            return True
+    except (OSError, NotImplementedError, PermissionError):
+        return False
+
+
+def check_windows_developer_mode():
+    """Check if Windows Developer Mode is enabled."""
+    if winreg is None or os.name != 'nt':
+        return False
+    
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+        )
+        allow_dev_unlock, _ = winreg.QueryValueEx(key, "AllowDevelopmentWithoutDevLicense")
+        winreg.CloseKey(key)
+        return bool(allow_dev_unlock)
+    except (OSError, FileNotFoundError):
+        return False
 
 
 def _get_config():
@@ -255,10 +298,14 @@ class MasterFrameManager:
             if progress_callback:
                 progress_callback(40, 100, "Setting up working directory...")
             
-            # Create working directory
-            working_dir = os.path.dirname(output_path)
-            temp_dir = os.path.join(working_dir, 'temp_pysiril')
+            # Create working directory with normalized paths using configured temp folder
+            configured_temp = get_temp_folder()
+            temp_base_dir = os.path.normpath(configured_temp)
+            temp_dir = os.path.normpath(os.path.join(temp_base_dir, f'astrofiler_pysiril_{cal_type}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}'))
             os.makedirs(temp_dir, exist_ok=True)
+            
+            logger.info(f"Using configured temp folder: {configured_temp}")
+            logger.info(f"PySiril working directory: {temp_dir}")
             
             # Set working directory in Siril
             cmd.cd(temp_dir)
@@ -267,49 +314,149 @@ class MasterFrameManager:
             if progress_callback:
                 progress_callback(50, 100, f"Processing {len(file_paths)} {cal_type} frames...")
             
-            # Copy files to working directory with sequential naming
+            # Check symlink support before processing
+            symlink_supported = check_symlink_support()
+            if not symlink_supported and os.name == 'nt':
+                dev_mode = check_windows_developer_mode()
+                if not dev_mode:
+                    logger.info("Windows Developer Mode not enabled. Consider enabling it for faster processing with symlinks.")
+                    logger.info("Go to Settings > Update & Security > For developers > Developer mode")
+            
+            # Link or copy files to working directory with sequential naming
+            use_symlinks = symlink_supported
+            method_logged = False
+            
             for i, file_path in enumerate(file_paths):
                 dest_file = os.path.join(temp_dir, f"{cal_type}_{i+1:05d}.fits")
-                shutil.copy2(file_path, dest_file)
+                
+                if use_symlinks:
+                    try:
+                        # Try to create a symbolic link first (more efficient)
+                        if os.path.exists(dest_file):
+                            os.remove(dest_file)  # Remove if exists
+                        
+                        os.symlink(file_path, dest_file)
+                        if not method_logged:
+                            logger.info(f"Using symbolic links for {cal_type} files (faster, space-efficient)")
+                            method_logged = True
+                        logger.debug(f"Symlinked {file_path} to {dest_file}")
+                    except (OSError, NotImplementedError, PermissionError) as e:
+                        if not method_logged:
+                            logger.warning(f"Symlinks failed ({type(e).__name__}: {e}), using file copying")
+                            use_symlinks = False  # Don't try symlinks for remaining files
+                            method_logged = True
+                        
+                        # Fall back to copying
+                        if os.path.exists(dest_file):
+                            os.remove(dest_file)  # Remove failed symlink attempt
+                        shutil.copy2(file_path, dest_file)
+                        logger.debug(f"Copied {file_path} to {dest_file}")
+                else:
+                    # Use copying from the start
+                    if not method_logged:
+                        logger.info(f"Using file copying for {cal_type} files")
+                        method_logged = True
+                    shutil.copy2(file_path, dest_file)
+                    logger.debug(f"Copied {file_path} to {dest_file}")
             
             # Convert to sequence
             sequence_name = f"{cal_type}_seq"
-            cmd.convert(cal_type, out=".", fitseq=True)
+            logger.info(f"Converting files to sequence: {sequence_name}")
+            try:
+                cmd.convert(cal_type, out=".", fitseq=True)
+                logger.info("Convert command completed successfully")
+            except Exception as e:
+                logger.error(f"Convert command failed: {e}")
+            
+            # List files after convert to see what was created
+            try:
+                temp_files_after_convert = os.listdir(temp_dir)
+                logger.info(f"Files after convert: {temp_files_after_convert}")
+            except Exception as e:
+                logger.error(f"Error listing temp dir after convert: {e}")
             
             if progress_callback:
                 progress_callback(70, 100, f"Stacking {cal_type} frames...")
             
             # Stack based on calibration type  
             output_name = os.path.splitext(os.path.basename(output_path))[0]
+            logger.info(f"Stacking {len(file_paths)} {cal_type} frames")
             
-            if cal_type == 'bias':
-                # Stack bias frames without normalization using rejection
-                cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="no")
-            elif cal_type == 'dark':
-                # Stack dark frames without normalization using rejection  
-                cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="no")
-            elif cal_type == 'flat':
-                # Stack flat frames with multiplicative normalization using rejection
-                cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
+            try:
+                if cal_type == 'bias':
+                    # Stack bias frames without normalization using rejection
+                    logger.info("Executing: stack bias type=rej sigma_low=3 sigma_high=3 norm=no")
+                    cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="no")
+                elif cal_type == 'dark':
+                    # Stack dark frames without normalization using rejection  
+                    logger.info("Executing: stack dark type=rej sigma_low=3 sigma_high=3 norm=no")
+                    cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="no")
+                elif cal_type == 'flat':
+                    # Stack flat frames with multiplicative normalization using rejection
+                    logger.info("Executing: stack flat type=rej sigma_low=3 sigma_high=3 norm=mul")
+                    cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
+                
+                logger.info("PySiril stacking command completed successfully")
+            except Exception as e:
+                logger.error(f"PySiril stack command failed: {e}")
+            
+            # List all files after stacking to see what was actually created
+            try:
+                temp_files_after_stack = os.listdir(temp_dir)
+                logger.info(f"Files after stacking: {temp_files_after_stack}")
+                
+                # Show file sizes too
+                for file in temp_files_after_stack:
+                    if file.endswith(('.fits', '.fit', '.fts')):
+                        file_path = os.path.join(temp_dir, file)
+                        size = os.path.getsize(file_path)
+                        logger.info(f"  {file}: {size} bytes")
+            except Exception as e:
+                logger.error(f"Error listing temp dir after stack: {e}")
             
             if progress_callback:
                 progress_callback(80, 100, "Saving master frame...")
             
             # Check if output file was created (Siril creates files with _stacked suffix)
-            stacked_file = os.path.join(temp_dir, f"{cal_type}_stacked.fits")
+            stacked_file = os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits"))
+            logger.info(f"Looking for stacked file: {stacked_file}")
+            
             if os.path.exists(stacked_file):
                 shutil.move(stacked_file, output_path)
                 success = True
                 logger.info(f"PySiril master {cal_type} creation successful")
             else:
-                # Try alternative naming patterns
+                # List all files in temp dir for debugging
+                try:
+                    temp_files = os.listdir(temp_dir)
+                    logger.info(f"Files in temp dir: {temp_files}")
+                    
+                    # Look for any .fits files
+                    fits_files = [f for f in temp_files if f.endswith('.fits')]
+                    logger.info(f"FITS files in temp dir: {fits_files}")
+                except Exception as e:
+                    logger.error(f"Error listing temp dir: {e}")
+                
+                # Try alternative naming patterns that PySiril commonly uses
                 alt_files = [
-                    os.path.join(temp_dir, f"{cal_type}.fits"),
-                    os.path.join(temp_dir, f"{cal_type}_seq_stacked.fits"),
-                    os.path.join(temp_dir, f"stacked.fits")
+                    # Most common patterns first
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits")),     # Expected default
+                    os.path.normpath(os.path.join(temp_dir, f"stacked.fits")),               # Simple stacked output
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}.fits")),            # Direct cal_type name
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_seq_stacked.fits")), # Sequence stacked
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_result.fits")),     # Result naming
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_r_stacked.fits")),  # Rejection stacked
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_out.fits")),        # Output file
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_master.fits")),     # Master naming
+                    os.path.normpath(os.path.join(temp_dir, f"master_{cal_type}.fits")),     # Master prefix
+                    # Alternative extensions
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fit")),     # .fit extension
+                    os.path.normpath(os.path.join(temp_dir, f"stacked.fit")),                # .fit extension
+                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}.fit")),             # .fit extension
                 ]
                 success = False
                 for alt_file in alt_files:
+                    logger.info(f"Checking alternative file: {alt_file}")
                     if os.path.exists(alt_file):
                         shutil.move(alt_file, output_path)
                         success = True
@@ -318,12 +465,7 @@ class MasterFrameManager:
                 
                 if not success:
                     logger.warning(f"PySiril stacking completed but output file not found. Expected: {stacked_file}")
-                    # List files in temp dir for debugging
-                    try:
-                        temp_files = os.listdir(temp_dir)
-                        logger.info(f"Files in temp dir: {temp_files}")
-                    except:
-                        pass
+                    logger.warning(f"Checked alternatives: {[os.path.basename(f) for f in alt_files]}")
             
             # Close PySiril
             app.Close()

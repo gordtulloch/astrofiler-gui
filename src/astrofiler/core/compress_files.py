@@ -34,6 +34,14 @@ from typing import Optional, Tuple
 from astropy.io import fits
 import hashlib
 
+# Import config for temp folder
+try:
+    from ..config import get_temp_folder
+except ImportError:
+    # Fallback if config module not available
+    def get_temp_folder():
+        return tempfile.gettempdir()
+
 logger = logging.getLogger(__name__)
 
 
@@ -423,8 +431,9 @@ class FitsCompressor:
             True if verification successful, False otherwise
         """
         try:
-            # Create temporary file for decompression test
-            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            # Create temporary file for decompression test using configured temp folder
+            temp_folder = get_temp_folder()
+            with tempfile.NamedTemporaryFile(delete=False, dir=temp_folder) as temp_file:
                 temp_path = temp_file.name
             
             # Attempt decompression
@@ -685,8 +694,9 @@ class FitsCompressor:
             True if verification passes, False otherwise
         """
         try:
-            # Create temporary file for decompression test
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.fits') as temp_file:
+            # Create temporary file for decompression test using configured temp folder
+            temp_folder = get_temp_folder()
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.fits', dir=temp_folder) as temp_file:
                 temp_path = temp_file.name
             
             try:

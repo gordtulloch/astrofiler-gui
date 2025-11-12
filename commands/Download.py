@@ -64,11 +64,12 @@ def setup_logging(verbose=False):
     """Configure logging based on verbosity level."""
     level = logging.DEBUG if verbose else logging.INFO
     
-    # Configure root logger
+    # Configure root logger - using central astrofiler.log
     logging.basicConfig(
         level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
+            logging.FileHandler('astrofiler.log', mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )

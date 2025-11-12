@@ -38,11 +38,12 @@ except ImportError as e:
     print("Make sure you're running this from the project root directory.")
     sys.exit(1)
 
-# Configure logging
+# Configure logging - using central astrofiler.log
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
+        logging.FileHandler('astrofiler.log', mode='a'),
         logging.StreamHandler(sys.stdout)
     ]
 )

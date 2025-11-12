@@ -79,6 +79,16 @@ class ConfigWidget(QWidget):
         repo_path_layout.addWidget(self.repo_path)
         repo_path_layout.addWidget(self.repo_path_button)
 
+        # Temporary Files Path with directory picker
+        temp_path_layout = QHBoxLayout()
+        self.temp_path = QLineEdit()
+        self.temp_path.setPlaceholderText("Leave empty to use system default temp folder")
+        self.temp_path_button = QPushButton("Browse...")
+        self.temp_path_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.temp_path_button.clicked.connect(self.browse_temp_path)
+        temp_path_layout.addWidget(self.temp_path)
+        temp_path_layout.addWidget(self.temp_path_button)
+
         # Refresh on Startup (default checked)
         self.refresh_on_startup = QCheckBox()
         self.refresh_on_startup.setChecked(True)
@@ -90,6 +100,7 @@ class ConfigWidget(QWidget):
 
         general_layout.addRow("Source Path:", source_path_layout)
         general_layout.addRow("Repository Path:", repo_path_layout)
+        general_layout.addRow("Temporary Files Folder:", temp_path_layout)
         general_layout.addRow("Refresh on Startup:", self.refresh_on_startup)
         general_layout.addRow("Save Modified Headers:", self.save_modified_headers)
 
@@ -441,8 +452,9 @@ class ConfigWidget(QWidget):
             # Get paths and ensure they end with a slash
             source_path = self.source_path.text().strip()
             repo_path = self.repo_path.text().strip()
+            temp_path = self.temp_path.text().strip()
             
-            # Automatically append slash if not present
+            # Automatically append slash if not present for source and repo paths
             if source_path and not source_path.endswith('/') and not source_path.endswith('\\'):
                 source_path += '/'
             if repo_path and not repo_path.endswith('/') and not repo_path.endswith('\\'):
@@ -451,6 +463,7 @@ class ConfigWidget(QWidget):
             # Update individual settings instead of replacing the entire DEFAULT section
             config.set('DEFAULT', 'source', source_path)
             config.set('DEFAULT', 'repo', repo_path)
+            config.set('DEFAULT', 'temp_folder', temp_path)
             config.set('DEFAULT', 'refresh_on_startup', str(self.refresh_on_startup.isChecked()))
             config.set('DEFAULT', 'save_modified_headers', str(self.save_modified_headers.isChecked()))
             config.set('DEFAULT', 'theme', self.theme.currentText())
@@ -507,6 +520,9 @@ class ConfigWidget(QWidget):
             
             if config.has_option('DEFAULT', 'repo'):
                 self.repo_path.setText(config.get('DEFAULT', 'repo'))
+            
+            if config.has_option('DEFAULT', 'temp_folder'):
+                self.temp_path.setText(config.get('DEFAULT', 'temp_folder'))
             
             # Load additional settings with defaults
             if config.has_option('DEFAULT', 'refresh_on_startup'):
@@ -717,6 +733,16 @@ class ConfigWidget(QWidget):
         )
         if directory:
             self.repo_path.setText(directory)
+    
+    def browse_temp_path(self):
+        """Open directory dialog for temporary files folder"""
+        directory = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Temporary Files Folder", 
+            self.temp_path.text() or os.path.expanduser("~")
+        )
+        if directory:
+            self.temp_path.setText(directory)
     
     def browse_fits_viewer(self):
         """Open file dialog for FITS viewer executable"""

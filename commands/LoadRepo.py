@@ -63,16 +63,16 @@ from astrofiler.core import fitsProcessing
 from astrofiler.database import setup_database
 
 def setup_logging(verbose=False):
-    """Setup logging configuration."""
+    """Setup logging configuration"""
     level = logging.DEBUG if verbose else logging.INFO
     format_str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     
-    # Configure logging to both file and console
+    # Configure logging to both file and console - using central astrofiler.log
     logging.basicConfig(
         level=level,
         format=format_str,
         handlers=[
-            logging.FileHandler('loadrepo.log'),
+            logging.FileHandler('astrofiler.log', mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )

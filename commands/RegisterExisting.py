@@ -243,7 +243,8 @@ def main():
                        help='Show what would be done without making changes')
     
     parser.add_argument('--log-file',
-                       help='Write log output to file')
+                       default='astrofiler.log',
+                       help='Write log output to file (default: astrofiler.log)')
     
     args = parser.parse_args()
     

@@ -26,6 +26,7 @@ from .quality_analysis import QualityAnalyzer
 from .repository import RepositoryManager
 from .master_manager import MasterFrameManager, get_master_manager
 from .compress_files import get_fits_compressor, compress_fits_file, is_compression_enabled
+from .session_processing import SessionProcessor
 from .utils import (
     normalize_file_path,
     sanitize_filesystem_name,
@@ -51,6 +52,7 @@ class fitsProcessing:
         self.quality_analyzer = QualityAnalyzer()
         self.repository_manager = RepositoryManager()
         self.master_manager = get_master_manager()  # Advanced master frame management
+        self.session_processor = SessionProcessor()  # Session creation and linking
         
         # Load configuration for backwards compatibility
         import configparser
@@ -293,6 +295,19 @@ class fitsProcessing:
     def getMasterStatistics(self):
         """Get comprehensive statistics about master frames."""
         return self.master_manager.get_master_statistics()
+    
+    # Session processing methods - delegate to SessionProcessor
+    def createLightSessions(self, progress_callback=None):
+        """Create sessions for all Light files not currently assigned to one."""
+        return self.session_processor.createLightSessions(progress_callback)
+    
+    def createCalibrationSessions(self, progress_callback=None):
+        """Create sessions for all calibration files not currently assigned to one."""
+        return self.session_processor.createCalibrationSessions(progress_callback)
+
+    def linkSessions(self, progress_callback=None):
+        """Link calibration sessions to light sessions based on matching criteria."""
+        return self.session_processor.linkSessions(progress_callback)
 
 # Export the main class for backwards compatibility
 __all__ = [
@@ -302,6 +317,7 @@ __all__ = [
     'QualityAnalyzer',
     'RepositoryManager',
     'MasterFrameManager',
+    'SessionProcessor',
     'get_master_manager',
     'get_fits_compressor',
     'compress_fits_file',

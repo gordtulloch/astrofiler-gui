@@ -57,6 +57,7 @@ def setup_logging(verbose=False):
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
+            logging.FileHandler('astrofiler.log', mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )
