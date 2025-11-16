@@ -19,24 +19,23 @@ Options:
     -v, --verbose       Enable verbose logging
     -q, --quiet         Suppress console output (logs only to file)
     -c, --config        Path to configuration file (default: astrofiler.ini)
-    -o, --operation     Operation to perform (analyze|masters|calibrate|quality|all|clear-masters)
+    -o, --operation     Operation to perform (analyze|masters|calibrate-lights|quality|all|clear-masters)
     -s, --session       Specific session ID to process (optional)
-    -f, --force         Force operation even if masters exist
+    -f, --force         Force operation even if masters exist or frames already calibrated
     --quality-only      Only perform quality assessment without calibration
     -r, --report        Generate detailed quality report
     --min-files         Override minimum files per master (default: from config)
     --no-cleanup        Skip cleanup operations after processing
     --dry-run           Show what would be done without making changes
     --log-file          Write logs to specified file (default: astrofiler.log)
-    --dry-run          Show what would be done without making changes
 
 Operations:
-    analyze         Analyze sessions for calibration opportunities
-    masters         Create master calibration frames only
-    calibrate       Calibrate light frames using existing masters
-    quality         Assess frame and master quality only
-    clear-masters   Clear all existing master frames from database and files
-    all             Complete auto-calibration workflow (default)
+    analyze             Analyze sessions for calibration opportunities
+    masters             Create master calibration frames only
+    calibrate-lights    Calibrate light frames using existing masters (PySiril/numpy)
+    quality             Assess frame and master quality only
+    clear-masters       Clear all existing master frames from database and files
+    all                 Complete auto-calibration workflow (default)
 
 Quality Assessment:
     - FWHM analysis for light frames (seeing quality)
@@ -54,6 +53,12 @@ Examples:
     
     # Create masters for specific session
     python AutoCalibration.py -o masters -s 123 -v
+    
+    # Calibrate light frames (uses PySiril if available, numpy fallback)
+    python AutoCalibration.py -o calibrate-lights -v
+    
+    # Force recalibrate already-calibrated frames
+    python AutoCalibration.py -o calibrate-lights --force -v
     
     # Quality assessment with detailed report
     python AutoCalibration.py -o quality -r -v
@@ -283,11 +288,91 @@ def analyze_calibration_opportunities(config, session_id=None, min_files=None):
         else:
             logging.info(f"\nNo calibration sessions found with sufficient files ({actual_min_files}+ each)")
         
+        # Analyze light frames calibration status
+        logging.info(f"\n=== LIGHT FRAME CALIBRATION STATUS ===")
+        
+        from astrofiler.models import fitsFile as FitsFileModel
+        
+        # Query all light frames
+        light_frames_query = FitsFileModel.select().where(
+            FitsFileModel.fitsFileType.contains('Light')
+        )
+        
+        total_light_frames = light_frames_query.count()
+        
+        # Count calibrated light frames
+        calibrated_light_frames = FitsFileModel.select().where(
+            (FitsFileModel.fitsFileType.contains('Light')) &
+            (FitsFileModel.fitsFileCalibrated == 1)
+        ).count()
+        
+        uncalibrated_light_frames = total_light_frames - calibrated_light_frames
+        
+        logging.info(f"Total light frames: {total_light_frames}")
+        logging.info(f"  - Calibrated: {calibrated_light_frames}")
+        logging.info(f"  - Uncalibrated: {uncalibrated_light_frames}")
+        
+        if uncalibrated_light_frames > 0:
+            calibration_percentage = (calibrated_light_frames / total_light_frames * 100) if total_light_frames > 0 else 0
+            logging.info(f"  - Calibration progress: {calibration_percentage:.1f}%")
+        
+        # Analyze soft-deleted frames
+        logging.info(f"\n=== SOFT-DELETED FRAMES ===")
+        
+        # Count soft-deleted light frames
+        soft_deleted_lights = FitsFileModel.select().where(
+            (FitsFileModel.fitsFileType.contains('Light')) &
+            (FitsFileModel.fitsFileSoftDelete == True)
+        ).count()
+        
+        # Count soft-deleted calibration frames by type
+        soft_deleted_bias = FitsFileModel.select().where(
+            (FitsFileModel.fitsFileType.contains('Bias')) &
+            (FitsFileModel.fitsFileSoftDelete == True)
+        ).count()
+        
+        soft_deleted_dark = FitsFileModel.select().where(
+            (FitsFileModel.fitsFileType.contains('Dark')) &
+            (FitsFileModel.fitsFileSoftDelete == True)
+        ).count()
+        
+        soft_deleted_flat = FitsFileModel.select().where(
+            (FitsFileModel.fitsFileType.contains('Flat')) &
+            (FitsFileModel.fitsFileSoftDelete == True)
+        ).count()
+        
+        soft_deleted_calibration = soft_deleted_bias + soft_deleted_dark + soft_deleted_flat
+        total_soft_deleted = soft_deleted_lights + soft_deleted_calibration
+        
+        logging.info(f"Total soft-deleted frames: {total_soft_deleted}")
+        logging.info(f"  - Light frames: {soft_deleted_lights}")
+        logging.info(f"  - Calibration frames: {soft_deleted_calibration}")
+        logging.info(f"    • Bias frames: {soft_deleted_bias}")
+        logging.info(f"    • Dark frames: {soft_deleted_dark}")
+        logging.info(f"    • Flat frames: {soft_deleted_flat}")
+        
+        if total_soft_deleted > 0:
+            logging.info(f"\nTo permanently remove soft-deleted frames:")
+            logging.info(f"  Use the AstroFiler GUI Duplicates widget to manage deleted files")
+        
         return {
             'total_opportunities': total_opportunities,
             'bias_sessions': sessions_by_type['bias'],
             'dark_sessions': sessions_by_type['dark'],
-            'flat_sessions': sessions_by_type['flat']
+            'flat_sessions': sessions_by_type['flat'],
+            'light_frame_stats': {
+                'total': total_light_frames,
+                'calibrated': calibrated_light_frames,
+                'uncalibrated': uncalibrated_light_frames
+            },
+            'soft_deleted_stats': {
+                'total': total_soft_deleted,
+                'light_frames': soft_deleted_lights,
+                'calibration_frames': soft_deleted_calibration,
+                'bias_frames': soft_deleted_bias,
+                'dark_frames': soft_deleted_dark,
+                'flat_frames': soft_deleted_flat
+            }
         }
         
     except Exception as e:
@@ -295,126 +380,24 @@ def analyze_calibration_opportunities(config, session_id=None, min_files=None):
         return {'error': str(e)}
 
 def create_master_frames(config, session_id=None, force=False, dry_run=False):
-    """Create master calibration frames"""
+    """Create master calibration frames - wrapper for core library function"""
     ensure_astrofiler_imports()
     
-    from astrofiler.core.master_manager import get_master_manager
-    from astrofiler.models import fitsSession as FitsSessionModel
+    from astrofiler.core.auto_calibration import create_master_frames as core_create_master_frames
     
     logging.info("Starting master frame creation...")
     
-    if dry_run:
-        logging.info("DRY RUN - No files will be created")
-        return True
-    
     try:
-        master_manager = get_master_manager()
+        # Call the core library function with CLI progress callback
+        success = core_create_master_frames(
+            config=config,
+            session_id=session_id,
+            force=force,
+            dry_run=dry_run,
+            progress_callback=create_cli_progress_callback("Creating masters")
+        )
         
-        # Get min files configuration
-        min_files = config.getint('DEFAULT', 'min_files_per_master', fallback=3)
-        
-        if session_id:
-            # Process specific session
-            try:
-                session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session_id)
-                obj_name = session.fitsSessionObjectName.lower()
-                
-                # Determine calibration type
-                cal_type = None
-                if 'bias' in obj_name:
-                    cal_type = 'bias'
-                elif 'dark' in obj_name:
-                    cal_type = 'dark'  
-                elif 'flat' in obj_name:
-                    cal_type = 'flat'
-                
-                if not cal_type:
-                    logging.error(f"Session {session_id} is not a calibration session: {obj_name}")
-                    return False
-                
-                logging.info(f"Creating {cal_type} master for session {session_id}")
-                
-                # Create master using master manager
-                master = master_manager.create_master_from_session(
-                    session_id=str(session_id),
-                    cal_type=cal_type,
-                    min_files=min_files,
-                    progress_callback=create_cli_progress_callback(f"Creating {cal_type} master")
-                )
-                
-                if master:
-                    logging.info(f"Successfully created {cal_type} master: {master.master_path}")
-                    return True
-                else:
-                    logging.error(f"Failed to create {cal_type} master for session {session_id}")
-                    return False
-                    
-            except Exception as e:
-                logging.error(f"Error processing session {session_id}: {e}")
-                return False
-        else:
-            # Process all viable calibration sessions
-            logging.info("Creating masters for all viable calibration sessions...")
-            
-            # Find calibration sessions with sufficient files
-            calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT']
-            cal_sessions = FitsSessionModel.select().where(
-                FitsSessionModel.fitsSessionObjectName.in_(calibration_types)
-            )
-            
-            created_masters = {'bias': 0, 'dark': 0, 'flat': 0}
-            total_processed = 0
-            
-            for session in cal_sessions:
-                # Check if session has enough files
-                file_count = session.get_session_file_count()
-                if file_count < min_files:
-                    continue
-                
-                obj_name = session.fitsSessionObjectName.lower()
-                cal_type = None
-                
-                if 'bias' in obj_name:
-                    cal_type = 'bias'
-                elif 'dark' in obj_name:
-                    cal_type = 'dark'
-                elif 'flat' in obj_name:
-                    cal_type = 'flat'
-                
-                if not cal_type:
-                    continue
-                
-                try:
-                    total_processed += 1
-                    logging.info(f"Processing session {session.fitsSessionId} for {cal_type} master ({file_count} files)")
-                    
-                    master = master_manager.create_master_from_session(
-                        session_id=str(session.fitsSessionId),
-                        cal_type=cal_type,
-                        min_files=min_files,
-                        progress_callback=create_cli_progress_callback(f"Creating {cal_type} masters")
-                    )
-                    
-                    if master:
-                        created_masters[cal_type] += 1
-                        logging.info(f"Created {cal_type} master: {master.master_path}")
-                    else:
-                        logging.warning(f"Could not create {cal_type} master for session {session.fitsSessionId}")
-                        
-                except Exception as e:
-                    logging.error(f"Error creating master for session {session.fitsSessionId}: {e}")
-                    continue
-            
-            total_created = sum(created_masters.values())
-            
-            logging.info(f"Master creation complete:")
-            logging.info(f"  - Sessions processed: {total_processed}")
-            logging.info(f"  - Masters created: {total_created}")
-            logging.info(f"    • Bias masters: {created_masters['bias']}")
-            logging.info(f"    • Dark masters: {created_masters['dark']}")  
-            logging.info(f"    • Flat masters: {created_masters['flat']}")
-            
-            return total_created > 0 or total_processed == 0  # Success even if no masters needed
+        return success
             
     except Exception as e:
         logging.error(f"Error in master frame creation: {e}")
@@ -622,78 +605,38 @@ def perform_quality_assessment(config, session_id=None, generate_report=False):
         logging.error(f"Error in quality assessment: {e}")
         return False
 
-def calibrate_light_frames(config, session_id=None, dry_run=False):
-    """Calibrate light frames using available masters"""
-    from astrofiler.services.telescope import calibrate_session_lights, get_session_master_frames
-    from astrofiler.models import fitsSession
+def calibrate_light_frames(config, session_id=None, force=False, dry_run=False):
+    """
+    Calibrate light frames using available master frames - wrapper for core library function.
+    
+    Uses PySiril for professional-grade calibration when available, falls back to numpy.
+    
+    Light frames are calibrated by:
+    1. Subtracting master bias
+    2. Subtracting master dark
+    3. Dividing by master flat (normalized)
+    
+    The calibrated frames are saved with 'cal_' prefix in the same directory.
+    """
+    ensure_astrofiler_imports()
+    
+    from astrofiler.core.auto_calibration import calibrate_light_frames as core_calibrate_light_frames
     
     logging.info("Starting light frame calibration...")
-    
-    if dry_run:
-        logging.info("DRY RUN - Light frame calibration simulation")
+    if force:
+        logging.info("Force recalibration enabled - will recalibrate already-calibrated frames")
     
     try:
-        # Get sessions to process
-        if session_id:
-            sessions = [fitsSession.get_by_id(session_id)]
-            if not sessions[0]:
-                logging.error(f"Session {session_id} not found")
-                return False
-        else:
-            # Get all sessions that have master frames available
-            sessions = fitsSession.select().where(
-                (fitsSession.master_dark_created == True) |
-                (fitsSession.master_flat_created == True) |
-                (fitsSession.master_bias_created == True)
-            )
+        # Call the core library function with CLI progress callback
+        success = core_calibrate_light_frames(
+            config=config,
+            session_id=session_id,
+            force_recalibrate=force,
+            dry_run=dry_run,
+            progress_callback=create_cli_progress_callback("Calibrating lights")
+        )
         
-        total_sessions = len(sessions) if session_id else sessions.count()
-        
-        if total_sessions == 0:
-            logging.info("No sessions with available master frames found")
-            return True
-            
-        logging.info(f"Processing {total_sessions} sessions for light frame calibration")
-        
-        success_count = 0
-        
-        for i, session in enumerate(sessions, 1):
-            logging.info(f"Processing session {i}/{total_sessions}: {session.id}")
-            
-            # Check for available master frames
-            master_frames = get_session_master_frames(session.id)
-            available_masters = [k for k, v in master_frames.items() if v]
-            
-            if not available_masters:
-                logging.info(f"No master frames available for session {session.id}, skipping")
-                continue
-                
-            logging.info(f"Available masters for session {session.id}: {', '.join(available_masters)}")
-            
-            if dry_run:
-                logging.info(f"DRY RUN: Would calibrate light frames in session {session.id}")
-                success_count += 1
-                continue
-            
-            # Calibrate the session
-            result = calibrate_session_lights(
-                session_id=session.id,
-                progress_callback=create_cli_progress_callback(f"Session {session.id} calibration"),
-                force_recalibrate=False
-            )
-            
-            if result.get('success', False):
-                success_count += 1
-                logging.info(f"Session {session.id} calibration completed: "
-                           f"{result['calibrated_count']} processed, "
-                           f"{result['skipped_count']} skipped, "
-                           f"{result['error_count']} errors")
-            else:
-                logging.error(f"Session {session.id} calibration failed: {result.get('error', 'Unknown error')}")
-        
-        logging.info(f"Light frame calibration completed: {success_count}/{total_sessions} sessions processed successfully")
-        return success_count > 0
-        
+        return success
     except Exception as e:
         logging.error(f"Error in light frame calibration: {e}")
         return False
@@ -741,17 +684,29 @@ def create_cli_progress_callback(operation_name):
     """Create a progress callback suitable for CLI output"""
     last_percent = -1
     
-    def progress_callback(current, total, message=""):
+    def progress_callback(current, total=None, message=""):
         nonlocal last_percent
         
-        if total > 0:
+        # Handle two call signatures:
+        # 1. (current, total, message) - standard 3-arg format
+        # 2. (percentage, message) - 2-arg format where current is already a percentage
+        
+        if total is None:
+            # 2-arg format: current is percentage, total is message
+            percent = int(current)
+            message = total if isinstance(total, str) else ""
+        elif isinstance(total, int) and total > 0:
+            # 3-arg format: calculate percentage
             percent = int((current / total) * 100)
-            # Only log every 10% to avoid spam
-            if percent != last_percent and percent % 10 == 0:
-                logging.info(f"{operation_name}: {percent}% - {message}")
-                last_percent = percent
         else:
-            logging.info(f"{operation_name}: {message}")
+            # Just log the message
+            logging.info(f"{operation_name}: {message if message else total}")
+            return True
+        
+        # Only log every 10% to avoid spam
+        if percent != last_percent and percent % 10 == 0:
+            logging.info(f"{operation_name}: {percent}% - {message}")
+            last_percent = percent
         
         return True  # Continue processing
     
@@ -823,7 +778,7 @@ def main():
                        help='Suppress console output (logs only to file)')
     parser.add_argument('-c', '--config', default='astrofiler.ini',
                        help='Path to configuration file (default: astrofiler.ini)')
-    parser.add_argument('-o', '--operation', choices=['analyze', 'masters', 'calibrate', 'quality', 'all', 'clear-masters'],
+    parser.add_argument('-o', '--operation', choices=['analyze', 'masters', 'calibrate-lights', 'quality', 'all', 'clear-masters'],
                        default='all', help='Operation to perform (default: all)')
     parser.add_argument('-s', '--session', type=str,
                        help='Specific session ID to process')
@@ -870,8 +825,8 @@ def main():
         elif args.operation == 'masters':
             success = create_master_frames(config, args.session, args.force, args.dry_run)
             
-        elif args.operation == 'calibrate':
-            success = calibrate_light_frames(config, args.session, args.dry_run)
+        elif args.operation == 'calibrate-lights':
+            success = calibrate_light_frames(config, args.session, args.force, args.dry_run)
             
         elif args.operation == 'quality':
             success = perform_quality_assessment(config, args.session, args.report)

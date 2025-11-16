@@ -111,6 +111,13 @@ class SessionsWidget(QWidget):
         else:
             checkout_action = None
         
+        # === CALIBRATION OPTIONS ===
+        if light_sessions and len(light_sessions) == 1:
+            calibrate_action = context_menu.addAction("⚙️ Calibrate")
+            calibrate_action.setToolTip("Calibrate light frames in this session using available master frames")
+        else:
+            calibrate_action = None
+        
         # === SESSION MANAGEMENT ===
         if light_sessions or calibration_sessions:
             if len(selected_items) == 1:
@@ -135,6 +142,11 @@ class SessionsWidget(QWidget):
             else:
                 logger.info(f"Checking out {len(light_sessions)} sessions")
                 self.checkout_multiple_sessions(light_sessions)
+        
+        # Calibrate action
+        elif action == calibrate_action:
+            logger.info(f"Calibrating session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(1)}")
+            self.calibrate_session(light_sessions[0])
         
         # Session management actions        
         elif action.text().startswith("🔍 Properties"):
@@ -161,40 +173,80 @@ class SessionsWidget(QWidget):
                 
             # Get light files
             light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
-
-            # Get calibration files if this is a light session
+            
+            # Check if lights are already calibrated
+            lights_calibrated = all(lf.fitsFileCalibrated for lf in light_files)
+            
+            # Get calibration files and masters if this is a light session with uncalibrated frames
             dark_files = []
             bias_files = []
             flat_files = []
+            master_files = []
 
             if object_name not in ['Bias', 'Dark', 'Flat']:
-                # Get linked calibration files
-                if session.fitsBiasSession:
-                    bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
-                    logger.info(f"Found {bias_files.count()} bias files")
+                if not lights_calibrated:
+                    # Get linked calibration files for uncalibrated lights
+                    if session.fitsBiasSession:
+                        bias_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsBiasSession)
+                        logger.info(f"Found {bias_files.count()} bias files")
 
-                if session.fitsDarkSession:
-                    dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
-                    logger.info(f"Found {dark_files.count()} dark files")
+                    if session.fitsDarkSession:
+                        dark_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsDarkSession)
+                        logger.info(f"Found {dark_files.count()} dark files")
 
-                # Get all unique filters used in light frames
-                filters = set([lf.fitsFileFilter for lf in light_files if lf.fitsFileFilter])
-                logger.info(f"Filters used in light frames: {filters}")
-                
-                for filter_name in filters:
-                    # Find flat session(s) matching this filter and other session parameters
-                    flat_sessions = FitsSessionModel.select().where(
-                        (FitsSessionModel.fitsSessionObjectName == 'Flat') &
-                        (FitsSessionModel.fitsSessionTelescope == session.fitsSessionTelescope) &
-                        (FitsSessionModel.fitsSessionImager == session.fitsSessionImager) &
-                        (FitsSessionModel.fitsSessionBinningX == session.fitsSessionBinningX) &
-                        (FitsSessionModel.fitsSessionBinningY == session.fitsSessionBinningY) &
-                        (FitsSessionModel.fitsSessionFilter == filter_name)
-                    )
-                    for flat_session in flat_sessions:
-                        these_flats = FitsFileModel.select().where(FitsFileModel.fitsFileSession == flat_session.fitsSessionId)
-                        flat_files.extend(list(these_flats))
-                        logger.info(f"Found {these_flats.count()} flat files for filter {filter_name}")
+                    # Get all unique filters used in light frames
+                    filters = set([lf.fitsFileFilter for lf in light_files if lf.fitsFileFilter])
+                    logger.info(f"Filters used in light frames: {filters}")
+                    
+                    for filter_name in filters:
+                        # Find flat session(s) matching this filter and other session parameters
+                        flat_sessions = FitsSessionModel.select().where(
+                            (FitsSessionModel.fitsSessionObjectName == 'Flat') &
+                            (FitsSessionModel.fitsSessionTelescope == session.fitsSessionTelescope) &
+                            (FitsSessionModel.fitsSessionImager == session.fitsSessionImager) &
+                            (FitsSessionModel.fitsSessionBinningX == session.fitsSessionBinningX) &
+                            (FitsSessionModel.fitsSessionBinningY == session.fitsSessionBinningY) &
+                            (FitsSessionModel.fitsSessionFilter == filter_name)
+                        )
+                        for flat_session in flat_sessions:
+                            these_flats = FitsFileModel.select().where(FitsFileModel.fitsFileSession == flat_session.fitsSessionId)
+                            flat_files.extend(list(these_flats))
+                            logger.info(f"Found {these_flats.count()} flat files for filter {filter_name}")
+                    
+                    # Find matching master frames
+                    from ..core.master_manager import get_master_manager
+                    from ..models import Masters
+                    
+                    master_manager = get_master_manager()
+                    session_data = {
+                        'telescope': session.fitsSessionTelescope,
+                        'instrument': session.fitsSessionImager,
+                        'exposure_time': session.fitsSessionExposure,
+                        'filter_name': session.fitsSessionFilter,
+                        'binning_x': session.fitsSessionBinningX,
+                        'binning_y': session.fitsSessionBinningY,
+                        'ccd_temp': session.fitsSessionCCDTemp,
+                        'gain': session.fitsSessionGain,
+                        'offset': session.fitsSessionOffset
+                    }
+                    
+                    master_bias = master_manager.find_matching_master(session_data, 'bias')
+                    master_dark = master_manager.find_matching_master(session_data, 'dark')
+                    master_flat = master_manager.find_matching_master(session_data, 'flat')
+                    
+                    if master_bias and os.path.exists(master_bias.master_path):
+                        master_files.append(('bias', master_bias.master_path))
+                        logger.info(f"Found matching bias master: {os.path.basename(master_bias.master_path)}")
+                    
+                    if master_dark and os.path.exists(master_dark.master_path):
+                        master_files.append(('dark', master_dark.master_path))
+                        logger.info(f"Found matching dark master: {os.path.basename(master_dark.master_path)}")
+                    
+                    if master_flat and os.path.exists(master_flat.master_path):
+                        master_files.append(('flat', master_flat.master_path))
+                        logger.info(f"Found matching flat master: {os.path.basename(master_flat.master_path)}")
+                else:
+                    logger.info(f"Light frames are already calibrated, skipping calibration files and masters")
 
             # Combine all files for progress tracking
             all_files = list(light_files) + list(dark_files) + list(bias_files) + list(flat_files)
@@ -219,18 +271,29 @@ class SessionsWidget(QWidget):
             # Create destination directory structure
             session_dir = os.path.join(dest_dir, f"{object_name}_{session_date.replace(':', '-')}")
             light_dir = os.path.join(session_dir, "lights")
-            dark_dir = os.path.join(session_dir, "darks")
-            flat_dir = os.path.join(session_dir, "flats")
-            bias_dir = os.path.join(session_dir, "bias")
-            process_dir = os.path.join(session_dir, "process")
             
-            # Create directories if they don't exist
+            # Create lights directory
             os.makedirs(light_dir, exist_ok=True)
-            os.makedirs(dark_dir, exist_ok=True)
-            os.makedirs(flat_dir, exist_ok=True)
-            os.makedirs(bias_dir, exist_ok=True)
-            os.makedirs(process_dir, exist_ok=True)
-            logger.info(f"Created session directory structure at {session_dir}")  
+            
+            # Create calibration and master directories only if lights are uncalibrated
+            dark_dir = None
+            flat_dir = None
+            bias_dir = None
+            masters_dir = None
+            
+            if not lights_calibrated and object_name not in ['Bias', 'Dark', 'Flat']:
+                dark_dir = os.path.join(session_dir, "darks")
+                flat_dir = os.path.join(session_dir, "flats")
+                bias_dir = os.path.join(session_dir, "bias")
+                masters_dir = os.path.join(session_dir, "masters")
+                
+                os.makedirs(dark_dir, exist_ok=True)
+                os.makedirs(flat_dir, exist_ok=True)
+                os.makedirs(bias_dir, exist_ok=True)
+                os.makedirs(masters_dir, exist_ok=True)
+                logger.info(f"Created session directory structure with calibration folders at {session_dir}")
+            else:
+                logger.info(f"Created session directory structure (lights only) at {session_dir}")  
 
             # Progress dialog
             progress = QProgressDialog("Creating symbolic links...", "Cancel", 0, 100, self)
@@ -238,9 +301,13 @@ class SessionsWidget(QWidget):
 
             # Create symbolic links for each file
             created_links = 0
-            for i, file in enumerate(all_files):
+            total_items = len(all_files) + len(master_files)
+            current_item = 0
+            
+            for file in all_files:
                 # Update progress
-                progress.setValue(int(i * 100 / total_files))
+                progress.setValue(int(current_item * 100 / total_items) if total_items > 0 else 0)
+                current_item += 1
                 if progress.wasCanceled():
                     break
                     
@@ -248,14 +315,18 @@ class SessionsWidget(QWidget):
                 if "LIGHT" in file.fitsFileType.upper():
                     dest_folder = light_dir
                 elif "DARK" in file.fitsFileType.upper():
-                    dest_folder = dark_dir
+                    dest_folder = dark_dir if dark_dir else None
                 elif "FLAT" in file.fitsFileType.upper():
-                    dest_folder = flat_dir
+                    dest_folder = flat_dir if flat_dir else None
                 elif "BIAS" in file.fitsFileType.upper():
-                    dest_folder = bias_dir
+                    dest_folder = bias_dir if bias_dir else None
                 else:
                     logger.warning(f"Unknown file type for {file.fitsFileName}, skipping")
                     continue  # Skip unknown file types
+                
+                if dest_folder is None:
+                    logger.debug(f"Skipping calibration file {file.fitsFileName} (lights already calibrated)")
+                    continue
                     
                 # Extract filename from path
                 logger.info(f"Processing file: {file.fitsFileName} of type {file.fitsFileType}")
@@ -270,9 +341,13 @@ class SessionsWidget(QWidget):
                         continue  # Skip if link already exists
                         
                     if sys.platform == "win32":
-                        # Windows - use directory junction or symlink (requires admin privileges)
+                        # Windows - use mklink (note: argument order is reversed from os.symlink)
                         import subprocess
-                        subprocess.run(["mklink", dest_path, file.fitsFileName], shell=True)
+                        # mklink syntax: mklink Link Target
+                        result = subprocess.run(f'mklink "{dest_path}" "{file.fitsFileName}"', 
+                                              shell=True, capture_output=True, text=True)
+                        if result.returncode != 0:
+                            raise Exception(f"mklink failed: {result.stderr}")
                     else:
                         # Mac/Linux - use symbolic link
                         os.symlink(file.fitsFileName, dest_path)
@@ -280,6 +355,32 @@ class SessionsWidget(QWidget):
                     logger.info(f"Created link for {file.fitsFileName} -> {dest_path}")
                 except Exception as e:
                     logger.error(f"Error creating link for {file.fitsFileName}: {e}")
+            
+            # Create links for master frames if lights are uncalibrated
+            if masters_dir and master_files:
+                for master_type, master_path in master_files:
+                    progress.setValue(int(current_item * 100 / total_items) if total_items > 0 else 0)
+                    current_item += 1
+                    if progress.wasCanceled():
+                        break
+                    
+                    filename = os.path.basename(master_path)
+                    dest_path = os.path.join(masters_dir, filename)
+                    
+                    try:
+                        if not os.path.exists(dest_path):
+                            if sys.platform == "win32":
+                                import subprocess
+                                result = subprocess.run(f'mklink "{dest_path}" "{master_path}"', 
+                                                      shell=True, capture_output=True, text=True)
+                                if result.returncode != 0:
+                                    raise Exception(f"mklink failed: {result.stderr}")
+                            else:
+                                os.symlink(master_path, dest_path)
+                            created_links += 1
+                            logger.info(f"Created link for {master_type} master: {filename}")
+                    except Exception as e:
+                        logger.error(f"Error creating link for master {master_path}: {e}")
             
             # Close progress dialog
             progress.setValue(100)
@@ -312,9 +413,20 @@ class SessionsWidget(QWidget):
             if not dest_dir:
                 return  # User cancelled
             
-            # Create main checkout directory
+            # Create main checkout directory with shared subdirectories
             checkout_dir = os.path.join(dest_dir, f"Sessions_Checkout_{dt.now().strftime('%Y%m%d_%H%M%S')}")
-            os.makedirs(checkout_dir, exist_ok=True)
+            light_dir = os.path.join(checkout_dir, "lights")
+            dark_dir = os.path.join(checkout_dir, "darks")
+            flat_dir = os.path.join(checkout_dir, "flats")
+            bias_dir = os.path.join(checkout_dir, "bias")
+            process_dir = os.path.join(checkout_dir, "process")
+            
+            # Create shared directories once
+            os.makedirs(light_dir, exist_ok=True)
+            os.makedirs(dark_dir, exist_ok=True)
+            os.makedirs(flat_dir, exist_ok=True)
+            os.makedirs(bias_dir, exist_ok=True)
+            os.makedirs(process_dir, exist_ok=True)
             
             # Calculate total work for progress tracking
             total_sessions = len(session_items)
@@ -333,37 +445,30 @@ class SessionsWidget(QWidget):
                     break
                     
                 try:
-                    # Get session information
-                    session_date = session_item.text(1)
-                    object_name = session_item.parent().text(0)
-                    
-                    overall_progress.setLabelText(f"Processing {object_name} - {session_date}...")
-                    overall_progress.setValue(current_session)
-                    
-                    # Get the session from database
-                    session = FitsSessionModel.select().where(
-                        (FitsSessionModel.fitsSessionObjectName == object_name) & 
-                        (FitsSessionModel.fitsSessionDate == session_date)
-                    ).first()
-                    
-                    if not session:
-                        failed_sessions.append(f"{object_name} - {session_date}: Not found in database")
+                    # Get session ID from tree item
+                    session_id = session_item.data(0, Qt.UserRole)
+                    if not session_id:
+                        logger.error(f"Session item has no session ID, skipping")
+                        failed_sessions.append(f"Session item missing ID")
+                        current_session += 1
                         continue
                     
-                    # Create session-specific directory
-                    session_dir = os.path.join(checkout_dir, f"{object_name}_{session_date.replace(':', '-')}")
-                    light_dir = os.path.join(session_dir, "lights")
-                    dark_dir = os.path.join(session_dir, "darks")
-                    flat_dir = os.path.join(session_dir, "flats")
-                    bias_dir = os.path.join(session_dir, "bias")
-                    process_dir = os.path.join(session_dir, "process")
+                    # Get the session from database using unique session ID
+                    session = FitsSessionModel.get_by_id(session_id)
                     
-                    # Create directories
-                    os.makedirs(light_dir, exist_ok=True)
-                    os.makedirs(dark_dir, exist_ok=True)
-                    os.makedirs(flat_dir, exist_ok=True)
-                    os.makedirs(bias_dir, exist_ok=True)
-                    os.makedirs(process_dir, exist_ok=True)
+                    if not session:
+                        failed_sessions.append(f"Session ID {session_id}: Not found in database")
+                        current_session += 1
+                        continue
+                    
+                    # Get display information
+                    parent_item = session_item.parent()
+                    object_name = parent_item.text(0) if parent_item else session.fitsSessionObjectName
+                    session_date = session.fitsSessionDate
+                    filter_name = session.fitsSessionFilter or "NoFilter"
+                    
+                    overall_progress.setLabelText(f"Processing {object_name} - {session_date} ({filter_name})...")
+                    overall_progress.setValue(current_session)
                     
                     # Get files
                     light_files = FitsFileModel.select().where(FitsFileModel.fitsFileSession == session.fitsSessionId)
@@ -415,48 +520,31 @@ class SessionsWidget(QWidget):
                         try:
                             if not os.path.exists(dest_path):
                                 if sys.platform == "win32":
+                                    # Windows - use mklink (note: argument order is reversed from os.symlink)
                                     import subprocess
-                                    subprocess.run(["mklink", dest_path, file.fitsFileName], shell=True)
+                                    # mklink syntax: mklink Link Target
+                                    result = subprocess.run(f'mklink "{dest_path}" "{file.fitsFileName}"', 
+                                                          shell=True, capture_output=True, text=True)
+                                    if result.returncode != 0:
+                                        raise Exception(f"mklink failed: {result.stderr}")
                                 else:
                                     os.symlink(file.fitsFileName, dest_path)
                                 session_links += 1
                         except Exception as e:
                             logger.error(f"Error creating link for {file.fitsFileName}: {e}")
                     
-                    # Create Siril script
-                    script_path = os.path.join(session_dir, "process.ssf")
-                    with open(script_path, "w") as f:
-                        f.write(f"# Siril processing script for {object_name} {session_date}\n")
-                        f.write("requires 1.0.0\n\n")
-                        f.write("# Convert to .fit files\n")
-                        f.write("cd lights\n")
-                        f.write("convert fits\n")
-                        f.write("cd ../darks\n")
-                        f.write("convert fits\n")
-                        f.write("cd ../flats\n")
-                        f.write("convert fits\n")
-                        f.write("cd ../bias\n")
-                        f.write("convert fits\n")
-                        f.write("cd ..\n\n")
-                        f.write("# Stack calibration frames\n")
-                        f.write("stack darks rej 3 3 -nonorm\n")
-                        f.write("stack bias rej 3 3 -nonorm\n")
-                        f.write("stack flats rej 3 3 -norm=mul\n\n")
-                        f.write("# Calibrate light frames\n")
-                        f.write("calibrate lights bias=bias_stacked flat=flat_stacked dark=dark_stacked\n\n")
-                        f.write("# Register light frames\n")
-                        f.write("register pp_lights\n\n")
-                        f.write("# Stack registered light frames\n")
-                        f.write("stack r_pp_lights rej 3 3 -norm=addscale\n")
-                    
                     successful_sessions += 1
                     logger.info(f"Successfully processed session {object_name} - {session_date} with {session_links} links")
                     
                 except Exception as e:
-                    failed_sessions.append(f"{object_name} - {session_date}: {str(e)}")
-                    logger.error(f"Error processing session {object_name} - {session_date}: {e}")
+                    error_msg = f"{object_name if 'object_name' in locals() else 'Unknown'} - {session_date if 'session_date' in locals() else 'Unknown'}: {str(e)}"
+                    failed_sessions.append(error_msg)
+                    logger.error(f"Error processing session: {error_msg}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                 
                 current_session += 1
+                logger.info(f"Completed session {current_session} of {total_sessions}")
             
             overall_progress.setValue(total_sessions)
             
@@ -476,6 +564,246 @@ class SessionsWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to checkout multiple sessions: {str(e)}")
             logger.error(f"Error in checkout_multiple_sessions: {str(e)}")
+
+    def calibrate_session(self, item):
+        """Calibrate light frames in a session using available master frames"""
+        try:
+            from astropy.io import fits
+            import numpy as np
+            from ..core.master_manager import get_master_manager
+            from ..models import Masters
+            
+            # Get session ID from tree item
+            session_id = item.data(0, Qt.UserRole)
+            if not session_id:
+                QMessageBox.warning(self, "Error", "Session ID not found")
+                return
+            
+            # Get the session from database
+            session = FitsSessionModel.get_by_id(session_id)
+            if not session:
+                QMessageBox.warning(self, "Error", "Session not found in database")
+                return
+            
+            parent_item = item.parent()
+            object_name = parent_item.text(0) if parent_item else session.fitsSessionObjectName
+            session_date = session.fitsSessionDate
+            
+            logger.info(f"Starting calibration for session: {object_name} on {session_date}")
+            
+            # Check if this is a calibration session
+            if object_name in ['Bias', 'Dark', 'Flat']:
+                QMessageBox.information(self, "Not Applicable", 
+                    "Calibration is only applicable to light frame sessions.")
+                return
+            
+            # Find matching master frames
+            master_manager = get_master_manager()
+            session_data = {
+                'telescope': session.fitsSessionTelescope,
+                'instrument': session.fitsSessionImager,
+                'exposure_time': session.fitsSessionExposure,
+                'filter_name': session.fitsSessionFilter,
+                'binning_x': session.fitsSessionBinningX,
+                'binning_y': session.fitsSessionBinningY,
+                'ccd_temp': session.fitsSessionCCDTemp,
+                'gain': session.fitsSessionGain,
+                'offset': session.fitsSessionOffset
+            }
+            
+            master_bias = master_manager.find_matching_master(session_data, 'bias')
+            master_dark = master_manager.find_matching_master(session_data, 'dark')
+            master_flat = master_manager.find_matching_master(session_data, 'flat')
+            
+            has_bias = master_bias is not None and os.path.exists(master_bias.master_path)
+            has_dark = master_dark is not None and os.path.exists(master_dark.master_path)
+            has_flat = master_flat is not None and os.path.exists(master_flat.master_path)
+            
+            if not (has_bias or has_dark or has_flat):
+                QMessageBox.warning(self, "No Master Frames", 
+                    f"No matching master frames found for this session.\n\n"
+                    f"Telescope: {session.fitsSessionTelescope}\n"
+                    f"Instrument: {session.fitsSessionImager}\n"
+                    f"Filter: {session.fitsSessionFilter}\n"
+                    f"Binning: {session.fitsSessionBinningX}x{session.fitsSessionBinningY}\n\n"
+                    f"Please create master frames first using Auto-Calibration.")
+                return
+            
+            # Show available masters
+            available_masters = []
+            if has_bias:
+                available_masters.append(f"Bias: {os.path.basename(master_bias.master_path)}")
+            if has_dark:
+                available_masters.append(f"Dark: {os.path.basename(master_dark.master_path)}")
+            if has_flat:
+                available_masters.append(f"Flat: {os.path.basename(master_flat.master_path)}")
+            
+            # Confirm calibration
+            reply = QMessageBox.question(self, "Calibrate Session",
+                f"Calibrate light frames in session {object_name} ({session_date})?\n\n"
+                f"Available master frames:\n" + "\n".join(available_masters) + "\n\n"
+                f"Calibrated frames will be saved with 'cal_' prefix.\n"
+                f"Source uncalibrated frames will be soft-deleted.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Get light frames from session
+            light_files = list(FitsFileModel.select().where(
+                FitsFileModel.fitsFileSession == session.fitsSessionId
+            ))
+            
+            if not light_files:
+                QMessageBox.information(self, "No Files", "No light frames found in this session.")
+                return
+            
+            # Progress dialog
+            progress = QProgressDialog("Calibrating light frames...", "Cancel", 0, len(light_files), self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setWindowTitle("Calibrating Session")
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+            progress.show()
+            QApplication.processEvents()
+            
+            # Load master frames
+            master_bias_data = None
+            master_dark_data = None
+            master_flat_data = None
+            
+            try:
+                if has_bias:
+                    progress.setLabelText("Loading bias master...")
+                    QApplication.processEvents()
+                    with fits.open(master_bias.master_path) as hdul:
+                        master_bias_data = hdul[0].data.astype(np.float32)
+                    logger.info(f"Loaded bias master: {os.path.basename(master_bias.master_path)}")
+                
+                if has_dark:
+                    progress.setLabelText("Loading dark master...")
+                    QApplication.processEvents()
+                    with fits.open(master_dark.master_path) as hdul:
+                        master_dark_data = hdul[0].data.astype(np.float32)
+                    logger.info(f"Loaded dark master: {os.path.basename(master_dark.master_path)}")
+                
+                if has_flat:
+                    progress.setLabelText("Loading flat master...")
+                    QApplication.processEvents()
+                    with fits.open(master_flat.master_path) as hdul:
+                        master_flat_data = hdul[0].data.astype(np.float32)
+                        flat_mean = np.mean(master_flat_data)
+                        if flat_mean > 0:
+                            master_flat_data = master_flat_data / flat_mean
+                        else:
+                            logger.warning("Flat frame has zero mean, skipping flat correction")
+                            master_flat_data = None
+                    if master_flat_data is not None:
+                        logger.info(f"Loaded and normalized flat master: {os.path.basename(master_flat.master_path)}")
+                
+            except Exception as e:
+                progress.close()
+                QMessageBox.critical(self, "Error", f"Failed to load master frames: {str(e)}")
+                logger.error(f"Error loading master frames: {e}")
+                return
+            
+            # Calibrate each light frame
+            calibrated_count = 0
+            skipped_count = 0
+            error_count = 0
+            
+            for i, light_file in enumerate(light_files):
+                if progress.wasCanceled():
+                    break
+                
+                try:
+                    progress.setLabelText(f"Calibrating {i+1}/{len(light_files)}: {os.path.basename(light_file.fitsFileName)}")
+                    progress.setValue(i)
+                    QApplication.processEvents()
+                    
+                    # Check if already calibrated
+                    if light_file.fitsFileCalibrated:
+                        logger.debug(f"File already calibrated, skipping: {os.path.basename(light_file.fitsFileName)}")
+                        skipped_count += 1
+                        continue
+                    
+                    if not os.path.exists(light_file.fitsFileName):
+                        logger.warning(f"File not found: {light_file.fitsFileName}")
+                        error_count += 1
+                        continue
+                    
+                    # Load light frame
+                    with fits.open(light_file.fitsFileName) as hdul:
+                        light_data = hdul[0].data.astype(np.float32)
+                        light_header = hdul[0].header.copy()
+                    
+                    # Apply calibration: (Light - Bias - Dark) / Flat
+                    calibrated_data = light_data.copy()
+                    
+                    if master_bias_data is not None:
+                        calibrated_data -= master_bias_data
+                        light_header['HISTORY'] = f'Bias corrected using {os.path.basename(master_bias.master_path)}'
+                    
+                    if master_dark_data is not None:
+                        calibrated_data -= master_dark_data
+                        light_header['HISTORY'] = f'Dark corrected using {os.path.basename(master_dark.master_path)}'
+                    
+                    if master_flat_data is not None:
+                        mask = master_flat_data > 0
+                        calibrated_data[mask] /= master_flat_data[mask]
+                        light_header['HISTORY'] = f'Flat corrected using {os.path.basename(master_flat.master_path)}'
+                    
+                    # Update header
+                    light_header['CALIBRAT'] = True
+                    light_header['CALDATE'] = datetime.now().isoformat()
+                    light_header['HISTORY'] = 'Calibrated by AstroFiler'
+                    
+                    # Save calibrated frame in same directory with cal_ prefix
+                    source_dir = os.path.dirname(light_file.fitsFileName)
+                    base_filename = os.path.basename(light_file.fitsFileName)
+                    calibrated_filename = f"cal_{base_filename}"
+                    calibrated_path = os.path.join(source_dir, calibrated_filename)
+                    
+                    # Clip and convert
+                    calibrated_data = np.clip(calibrated_data, 0, 65535).astype(np.uint16)
+                    
+                    hdu = fits.PrimaryHDU(data=calibrated_data, header=light_header)
+                    hdu.writeto(calibrated_path, overwrite=True)
+                    
+                    # Soft-delete source and mark as calibrated
+                    light_file.fitsFileSoftDelete = True
+                    light_file.fitsFileCalibrated = True
+                    light_file.save()
+                    
+                    calibrated_count += 1
+                    logger.info(f"Calibrated: {calibrated_filename}")
+                    
+                except Exception as e:
+                    logger.error(f"Error calibrating {light_file.fitsFileName}: {e}")
+                    error_count += 1
+            
+            progress.setValue(len(light_files))
+            progress.close()
+            
+            # Show results
+            message = f"Calibration complete!\n\n"
+            message += f"Processed: {len(light_files)} files\n"
+            message += f"Calibrated: {calibrated_count}\n"
+            message += f"Skipped: {skipped_count}\n"
+            message += f"Errors: {error_count}\n\n"
+            message += f"Calibrated frames saved with 'cal_' prefix.\n"
+            message += f"Source frames marked as soft-deleted."
+            
+            if calibrated_count > 0:
+                QMessageBox.information(self, "Calibration Complete", message)
+            else:
+                QMessageBox.warning(self, "Calibration Complete", message)
+            
+            logger.info(f"Session calibration complete: {calibrated_count} calibrated, {skipped_count} skipped, {error_count} errors")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to calibrate session: {str(e)}")
+            logger.error(f"Error in calibrate_session: {str(e)}")
 
         # === SESSION MANAGEMENT METHODS ===
 
@@ -789,6 +1117,9 @@ class SessionsWidget(QWidget):
                     child_item.setText(3, session.fitsSessionImager or "Unknown")
                     child_item.setText(4, session.fitsSessionFilter or "Unknown")
                     child_item.setText(5, str(session_image_count))  # Image count for this session
+                    
+                    # Store session ID in the item for later retrieval
+                    child_item.setData(0, Qt.UserRole, session.fitsSessionId)
                     
                     # Set resources status as simple text only
                     if calibration_info["text"]:

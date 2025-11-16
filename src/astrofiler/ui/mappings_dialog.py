@@ -115,6 +115,8 @@ class MappingsDialog(QDialog):
                 values = set([f.fitsFileFilter for f in FitsFileModel.select().distinct() if f.fitsFileFilter])
             elif card == "NOTES":
                 values = set([f.fitsFileNotes for f in FitsFileModel.select().distinct() if f.fitsFileNotes])
+            elif card == "OBJECT":
+                values = set([f.fitsFileObject for f in FitsFileModel.select().distinct() if f.fitsFileObject])
             else:
                 values = set()
             
@@ -137,7 +139,7 @@ class MappingsDialog(QDialog):
         
         # Card dropdown
         card_combo = QComboBox()
-        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES","FILTER"])
+        card_combo.addItems(["TELESCOP", "INSTRUME", "OBSERVER", "NOTES", "FILTER", "OBJECT"])
         card_combo.setCurrentText(card)
         card_combo.currentTextChanged.connect(lambda: self.update_current_values(row_widget))
         
@@ -316,6 +318,8 @@ class MappingsDialog(QDialog):
                 values = set([f.fitsFileFilter for f in FitsFileModel.select().distinct() if f.fitsFileFilter])
             elif card == "NOTES":
                 values = set([f.fitsFileNotes for f in FitsFileModel.select().distinct() if f.fitsFileNotes])
+            elif card == "OBJECT":
+                values = set([f.fitsFileObject for f in FitsFileModel.select().distinct() if f.fitsFileObject])
             else:
                 values = set()
             
@@ -428,8 +432,13 @@ class MappingsDialog(QDialog):
                 total_updates = 0
                 files_moved = 0
                 
-                if mapping_to_apply['card'] in ['TELESCOP', 'INSTRUME']:
-                    field_name = 'fitsFileTelescop' if mapping_to_apply['card'] == 'TELESCOP' else 'fitsFileInstrument'
+                if mapping_to_apply['card'] in ['TELESCOP', 'INSTRUME', 'OBJECT']:
+                    if mapping_to_apply['card'] == 'TELESCOP':
+                        field_name = 'fitsFileTelescop'
+                    elif mapping_to_apply['card'] == 'INSTRUME':
+                        field_name = 'fitsFileInstrument'
+                    else:  # OBJECT
+                        field_name = 'fitsFileObject'
                     
                     # Find files that match the current value
                     if mapping_to_apply['current']:
@@ -655,8 +664,22 @@ class MappingsDialog(QDialog):
                 else:  # Calibrate
                     remaining_path = '/'.join(remaining) + '/' if remaining else ''
                     new_path = f"{repo_base}{cal_type}/{telescope}/{new_instrument}/{remaining_path}{new_filename}"
+                    
+            elif mapping['card'] == 'OBJECT':
+                # Only applies to Light frames  
+                if path_parts[structure_index] != 'Light':
+                    return None
+                    
+                new_object = mapping['replace'].replace(" ", "_").replace("\\", "_")
+                old_object = mapping['current'].replace(" ", "_").replace("\\", "_") if mapping['current'] else object_name
+                
+                # Update filename: replace old object name with new object name
+                if old_object in filename:
+                    new_filename = filename.replace(old_object, new_object)
+                
+                new_path = f"{repo_base}{new_object}/{telescope}/{instrument}/{date}/{new_filename}"
             else:
-                # For other mappings (OBSERVER, NOTES, etc.), no file path change needed
+                # For other mappings (OBSERVER, NOTES, FILTER, etc.), no file path change needed
                 return None
             
             return new_path.replace('/', os.sep)  # Convert to OS-appropriate separators

@@ -7,11 +7,14 @@ It applies bias, dark, and flat corrections to produce calibrated light frames
 suitable for stacking and further processing.
 
 Key Features:
+- Fast, reliable numpy-based calibration
 - Comprehensive calibration pipeline (bias, dark, flat)
+- Force recalibrate option for already-calibrated frames
 - Robust error handling and validation
 - Detailed FITS header metadata
 - Progress callbacks for GUI integration
 - Professional astronomy-standard processing
+- Consistent cal_ prefix naming convention
 """
 
 import os
@@ -19,7 +22,7 @@ import logging
 import hashlib
 import numpy as np
 from datetime import datetime
-from typing import Optional, Callable, Dict, List
+from typing import Optional, Callable, Dict, List, Any
 from astropy.io import fits
 from ..models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 from ..models.masters import Masters
@@ -34,15 +37,16 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
     Calibrate a single light frame using master calibration frames.
     
     This function applies the standard astronomical calibration pipeline:
-    1. Bias subtraction (if bias master available)
-    2. Dark subtraction (if dark master available)
-    3. Flat field correction with normalization (if flat master available)
+    1. Dark subtraction (dark frames include bias from stacking)
+    2. Flat field correction with full-frame median normalization
+    
+    The calibration formula is: (Light - Dark) / (Flat / median(Flat))
     
     Args:
         light_path (str): Path to the light frame FITS file
         dark_master (str, optional): Path to master dark frame
         flat_master (str, optional): Path to master flat frame  
-        bias_master (str, optional): Path to master bias frame
+        bias_master (str, optional): Path to master bias frame (used if no dark available)
         output_path (str, optional): Path for calibrated output file (auto-generated if not provided)
         progress_callback (callable, optional): Callback for progress updates
         
@@ -52,7 +56,6 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
     Example:
         >>> result = calibrate_light_frame(
         ...     light_path='light_001.fits',
-        ...     bias_master='master_bias.fits',
         ...     dark_master='master_dark_300s.fits',
         ...     flat_master='master_flat_V.fits'
         ... )
@@ -66,85 +69,191 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         # Validate input file
         if not os.path.exists(light_path):
             return {"error": f"Light frame file not found: {light_path}"}
+        
+        # Load light frame with proper data type preservation
+        if progress_callback:
+            progress_callback("Loading light frame...")
             
-        # Load light frame
         with fits.open(light_path) as hdul:
-            light_data = hdul[0].data.astype(np.float32)
+            original_data = hdul[0].data
             light_header = hdul[0].header.copy()
+            
+            # Convert to float64 for precision during calibration
+            light_data = original_data.astype(np.float64)
         
         if light_data is None or light_data.size == 0:
             return {"error": "No image data found in light frame"}
-            
+        
+        # Get light frame exposure time for dark scaling
+        light_exptime = float(light_header.get('EXPTIME', light_header.get('EXPOSURE', 1.0)))
+        
         calibrated_data = light_data.copy()
         calibration_steps = []
         
-        # Apply bias correction first
-        if bias_master and os.path.exists(bias_master):
-            if progress_callback:
-                progress_callback("Applying bias correction...")
-            try:
-                with fits.open(bias_master) as hdul:
-                    bias_data = hdul[0].data.astype(np.float32)
-                calibrated_data -= bias_data
-                calibration_steps.append(f"BIAS: {os.path.basename(bias_master)}")
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(f"Warning: Failed to apply bias correction: {e}")
+        # =================================================================
+        # STEP 1: DARK SUBTRACTION (or BIAS if no dark available)
+        # =================================================================
+        # Note: Dark frames from stacking already include bias, so we subtract dark directly
         
-        # Apply dark correction
         if dark_master and os.path.exists(dark_master):
             if progress_callback:
                 progress_callback("Applying dark correction...")
             try:
                 with fits.open(dark_master) as hdul:
-                    dark_data = hdul[0].data.astype(np.float32)
+                    dark_data = hdul[0].data.astype(np.float64)
+                    dark_header = hdul[0].header
                     
-                calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
-                calibrated_data -= dark_data
+                    # Validate dimensions match
+                    if dark_data.shape != calibrated_data.shape:
+                        raise ValueError(f"Dark frame shape {dark_data.shape} doesn't match light frame {calibrated_data.shape}")
+                    
+                    # Get dark exposure time for scaling
+                    dark_exptime = float(dark_header.get('EXPTIME', dark_header.get('EXPOSURE', light_exptime)))
+                    
+                    # DISABLED: Dark frame scaling - use closest matching dark instead
+                    # # Scale dark frame if exposure times differ
+                    # if abs(dark_exptime - light_exptime) > 0.01:  # Allow small floating point differences
+                    #     scale_factor = light_exptime / dark_exptime
+                    #     dark_scaled = dark_data * scale_factor
+                    #     logger.info(f"Scaling dark frame: {dark_exptime}s -> {light_exptime}s (factor: {scale_factor:.3f})")
+                    #     calibration_steps.append(f"DARK: {os.path.basename(dark_master)} (scaled {scale_factor:.3f}x)")
+                    # else:
+                    #     dark_scaled = dark_data
+                    #     calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
+                    
+                    # Use dark directly without scaling - ensure dark exposure matches light
+                    dark_scaled = dark_data
+                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s)")
+                    logger.info(f"Using dark frame: {dark_exptime}s (light exposure: {light_exptime}s)")
+                    
+                    # Apply: Light - Dark
+                    calibrated_data = calibrated_data - dark_scaled
+                    logger.debug(f"Applied dark correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
+                    
             except Exception as e:
+                logger.error(f"Failed to apply dark correction: {e}")
                 if progress_callback:
                     progress_callback(f"Warning: Failed to apply dark correction: {e}")
+                    
+        elif bias_master and os.path.exists(bias_master):
+            # If we have bias but no dark, subtract bias from light
+            if progress_callback:
+                progress_callback("Applying bias correction...")
+            try:
+                with fits.open(bias_master) as hdul:
+                    bias_data = hdul[0].data.astype(np.float64)
+                    
+                    # Validate dimensions match
+                    if bias_data.shape != calibrated_data.shape:
+                        raise ValueError(f"Bias frame shape {bias_data.shape} doesn't match light frame {calibrated_data.shape}")
+                    
+                    calibrated_data = calibrated_data - bias_data
+                    calibration_steps.append(f"BIAS: {os.path.basename(bias_master)}")
+                    logger.debug(f"Applied bias correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
+                    
+            except Exception as e:
+                logger.error(f"Failed to apply bias correction: {e}")
+                if progress_callback:
+                    progress_callback(f"Warning: Failed to apply bias correction: {e}")
         
-        # Apply flat correction
+        # =================================================================
+        # STEP 2: FLAT FIELD CORRECTION
+        # =================================================================
+        # Normalize flat by full-frame median and divide
+        
         if flat_master and os.path.exists(flat_master):
             if progress_callback:
                 progress_callback("Applying flat correction...")
             try:
                 with fits.open(flat_master) as hdul:
-                    flat_data = hdul[0].data.astype(np.float32)
+                    flat_data = hdul[0].data.astype(np.float64)
                     
-                # Normalize flat field (avoid division by zero)
-                flat_mean = np.mean(flat_data[flat_data > 0])
-                flat_normalized = flat_data / flat_mean
-                flat_normalized[flat_normalized <= 0] = 1.0  # Avoid division by zero
-                
-                calibrated_data /= flat_normalized
-                calibration_steps.append(f"FLAT: {os.path.basename(flat_master)}")
+                    # Validate dimensions match
+                    if flat_data.shape != calibrated_data.shape:
+                        raise ValueError(f"Flat frame shape {flat_data.shape} doesn't match light frame {calibrated_data.shape}")
+                    
+                    # Normalize flat field by its FULL FRAME median (standard approach)
+                    flat_median = np.median(flat_data)
+                    
+                    if flat_median <= 0:
+                        raise ValueError("Flat frame median is zero or negative")
+                    
+                    flat_normalized = flat_data / flat_median
+                    
+                    # Protect against division by very small values
+                    # Use a threshold of 10% of normalized median (0.1)
+                    threshold = 0.1
+                    mask = flat_normalized < threshold
+                    if np.any(mask):
+                        logger.warning(f"Flat frame has {np.sum(mask)} pixels below threshold, clamping to {threshold}")
+                        flat_normalized = np.clip(flat_normalized, threshold, None)
+                    
+                    # Apply flat correction
+                    calibrated_data = calibrated_data / flat_normalized
+                    calibration_steps.append(f"FLAT: {os.path.basename(flat_master)} (median: {flat_median:.1f})")
+                    logger.debug(f"Applied flat correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
+                    
             except Exception as e:
+                logger.error(f"Failed to apply flat correction: {e}")
                 if progress_callback:
                     progress_callback(f"Warning: Failed to apply flat correction: {e}")
         
-        # Generate output path if not provided
+        # =================================================================
+        # GENERATE OUTPUT PATH
+        # =================================================================
+        
         if not output_path:
             base_dir = os.path.dirname(light_path)
-            base_name = os.path.splitext(os.path.basename(light_path))[0]
-            output_path = os.path.join(base_dir, f"{base_name}_calibrated.fits")
+            base_name = os.path.basename(light_path)
+            output_path = os.path.join(base_dir, f"cal_{base_name}")
+        
+        # =================================================================
+        # UPDATE FITS HEADER
+        # =================================================================
+        
+        if progress_callback:
+            progress_callback("Updating FITS header...")
             
-        # Update FITS header with comprehensive calibration information
-        _update_calibrated_frame_header(light_header, calibration_steps, 
-                                      bias_master, dark_master, flat_master, 
-                                      calibrated_data, light_path)
+        _update_calibrated_frame_header(
+            light_header, 
+            calibration_steps, 
+            bias_master, 
+            dark_master, 
+            flat_master, 
+            calibrated_data, 
+            light_path
+        )
+        light_header['CALMETOD'] = 'Numpy'
+        
+        # =================================================================
+        # SAVE CALIBRATED FRAME
+        # =================================================================
         
         if progress_callback:
             progress_callback("Saving calibrated frame...")
             
-        # Save calibrated frame
+        # Calculate statistics for return
+        data_min = float(np.min(calibrated_data))
+        data_max = float(np.max(calibrated_data))
+        data_range = data_max - data_min
+        data_mean = float(np.mean(calibrated_data))
+        data_std = float(np.std(calibrated_data))
+        
+        logger.info(f"Calibrated data statistics: min={data_min:.2f}, max={data_max:.2f}, mean={data_mean:.2f}, range={data_range:.2f}")
+        
+        # Save as float32 to preserve dynamic range while reducing file size
+        output_data = calibrated_data.astype(np.float32)
+        
+        # Update BITPIX to indicate 32-bit float
+        light_header['BITPIX'] = -32
+        light_header['BZERO'] = 0.0
+        light_header['BSCALE'] = 1.0
+        
+        # Create output directory if needed
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # Ensure data is in appropriate range and type
-        calibrated_data = np.clip(calibrated_data, 0, None)  # Remove negative values
-        
-        hdu = fits.PrimaryHDU(data=calibrated_data.astype(np.float32), header=light_header)
+        # Write calibrated frame
+        hdu = fits.PrimaryHDU(data=output_data, header=light_header)
         hdu.writeto(output_path, overwrite=True)
         
         if progress_callback:
@@ -155,13 +264,18 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
             "output_path": output_path,
             "input_path": light_path,
             "calibration_steps": calibration_steps,
-            "noise_level": float(np.std(calibrated_data)),
-            "mean_level": float(np.mean(calibrated_data)),
-            "dynamic_range": float(np.max(calibrated_data) - np.min(calibrated_data))
+            "method": "Numpy",
+            "noise_level": data_std,
+            "mean_level": data_mean,
+            "dynamic_range": data_range,
+            "data_min": data_min,
+            "data_max": data_max
         }
         
     except Exception as e:
+        logger.error(f"Failed to calibrate light frame: {e}")
         return {"error": f"Failed to calibrate light frame: {str(e)}"}
+
 
 
 def calibrate_session_lights(session_id: str, progress_callback: Optional[Callable] = None, 
@@ -232,13 +346,28 @@ def calibrate_session_lights(session_id: str, progress_callback: Optional[Callab
             if result.get('success'):
                 calibrated_count += 1
                 
-                # Update database record
-                try:
-                    light_file.fitsFileCalibrated = 1
-                    light_file.fitsFileCalibrationDate = datetime.now()
-                    light_file.save()
-                except Exception as e:
-                    logger.warning(f"Failed to update database for calibrated file {light_file.fitsFileName}: {e}")
+                # Update database record with retry logic for locked database
+                max_retries = 5
+                retry_delay = 0.1  # seconds
+                db_updated = False
+                for attempt in range(max_retries):
+                    try:
+                        light_file.fitsFileCalibrated = 1
+                        light_file.fitsFileCalibrationDate = datetime.now()
+                        light_file.save()
+                        db_updated = True
+                        break  # Success, exit retry loop
+                    except Exception as e:
+                        if 'database is locked' in str(e).lower() and attempt < max_retries - 1:
+                            import time
+                            time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                            logger.debug(f"Database locked, retrying ({attempt + 1}/{max_retries})...")
+                        else:
+                            logger.error(f"Failed to update database for calibrated file {light_file.fitsFileName} after {max_retries} retries: {e}")
+                            break
+                
+                if not db_updated:
+                    raise RuntimeError(f"Database update failed for {light_file.fitsFileName} after {max_retries} retry attempts")
                 
                 results.append({
                     "light_file": os.path.basename(light_file.fitsFileName or ''),

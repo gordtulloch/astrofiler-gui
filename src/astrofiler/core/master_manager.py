@@ -182,8 +182,14 @@ class MasterFrameManager:
             if progress_callback:
                 progress_callback(10, 100, f"Found {len(files)} {cal_type} frames...")
             
-            # Generate output filename with Master prefix following fitsFile naming convention
-            timestamp = datetime.datetime.now().strftime("%Y%m%d")
+            # Generate output filename with Master prefix using session date not current date
+            if session.fitsSessionDate:
+                # Use the session date (observation date) instead of current date
+                timestamp = session.fitsSessionDate.strftime("%Y%m%d")
+            else:
+                # Fallback to current date if session date is not available
+                timestamp = datetime.datetime.now().strftime("%Y%m%d")
+                logger.warning(f"Session {session_id} has no date, using current date for master filename")
             
             # Clean telescope and imager names for filename compatibility  
             telescope_clean = session.fitsSessionTelescope.replace(" ", "_").replace("\\", "_").replace("@", "_").replace("/", "_")
@@ -244,6 +250,21 @@ class MasterFrameManager:
                 cal_type=cal_type,
                 file_count=len(files)
             )
+            
+            # Soft-delete source calibration frames now that master is created
+            if progress_callback:
+                progress_callback(95, 100, f"Marking {len(files)} source frames as soft-deleted...")
+            
+            soft_deleted_count = 0
+            for source_file in files:
+                try:
+                    source_file.fitsFileSoftDelete = True
+                    source_file.save()
+                    soft_deleted_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to soft-delete source file {source_file.fitsFileName}: {e}")
+            
+            logger.info(f"Soft-deleted {soft_deleted_count} of {len(files)} source calibration frames for master {output_filename}")
             
             if progress_callback:
                 progress_callback(100, 100, f"Master {cal_type} frame created successfully")
@@ -392,9 +413,45 @@ class MasterFrameManager:
                     logger.info("Executing: stack dark type=rej sigma_low=3 sigma_high=3 norm=no")
                     cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="no")
                 elif cal_type == 'flat':
-                    # Stack flat frames with multiplicative normalization using rejection
-                    logger.info("Executing: stack flat type=rej sigma_low=3 sigma_high=3 norm=mul")
-                    cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
+                    # For flats, first calibrate with master bias if available, then stack
+                    # Find matching master bias for this session
+                    from ..models import Masters
+                    try:
+                        session = fitsSession.get_by_id(session_id)
+                        matching_bias = Masters.find_matching_master(
+                            telescope=session.fitsSessionTelescope,
+                            instrument=session.fitsSessionImager,
+                            master_type='bias',
+                            binning_x=session.fitsSessionBinningX,
+                            binning_y=session.fitsSessionBinningY
+                        )
+                        
+                        if matching_bias and os.path.exists(matching_bias.file_path):
+                            logger.info(f"Found matching bias master: {matching_bias.file_path}")
+                            if progress_callback:
+                                progress_callback(65, 100, "Calibrating flats with master bias...")
+                            
+                            # Copy master bias to working directory
+                            bias_dest = os.path.join(temp_dir, "master_bias.fits")
+                            shutil.copy2(matching_bias.file_path, bias_dest)
+                            
+                            # Calibrate flats with master bias
+                            logger.info("Executing: calibrate flat bias=master_bias")
+                            cmd.calibrate(f"{cal_type}", bias="master_bias")
+                            
+                            # Stack the calibrated (pp_) flat frames
+                            logger.info("Executing: stack pp_flat type=rej sigma_low=3 sigma_high=3 norm=mul")
+                            cmd.stack(f"pp_{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
+                        else:
+                            logger.warning("No matching bias master found, stacking flats without bias calibration")
+                            # Stack flat frames with multiplicative normalization using rejection
+                            logger.info("Executing: stack flat type=rej sigma_low=3 sigma_high=3 norm=mul")
+                            cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
+                    except Exception as e:
+                        logger.warning(f"Error finding/applying bias master for flats: {e}, stacking without calibration")
+                        # Stack flat frames with multiplicative normalization using rejection
+                        logger.info("Executing: stack flat type=rej sigma_low=3 sigma_high=3 norm=mul")
+                        cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
                 
                 logger.info("PySiril stacking command completed successfully")
             except Exception as e:
@@ -418,8 +475,17 @@ class MasterFrameManager:
                 progress_callback(80, 100, "Saving master frame...")
             
             # Check if output file was created (Siril creates files with _stacked suffix)
-            stacked_file = os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits"))
-            logger.info(f"Looking for stacked file: {stacked_file}")
+            # For calibrated flats, look for pp_flat_stacked.fits first
+            if cal_type == 'flat':
+                stacked_file = os.path.normpath(os.path.join(temp_dir, f"pp_{cal_type}_stacked.fits"))
+                logger.info(f"Looking for calibrated flat stacked file: {stacked_file}")
+                if not os.path.exists(stacked_file):
+                    # Fall back to uncalibrated flat stacked file
+                    stacked_file = os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits"))
+                    logger.info(f"Calibrated flat not found, looking for uncalibrated: {stacked_file}")
+            else:
+                stacked_file = os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits"))
+                logger.info(f"Looking for stacked file: {stacked_file}")
             
             if os.path.exists(stacked_file):
                 shutil.move(stacked_file, output_path)

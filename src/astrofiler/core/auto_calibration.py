@@ -273,6 +273,26 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
             session_files = fitsFile.select().where(fitsFile.fitsFileSession == session.fitsSessionId)
             file_count = session_files.count()
             
+            # Check if a matching master already exists (unless force flag is set)
+            if not force:
+                session_data = {
+                    'telescope': session.fitsSessionTelescope,
+                    'instrument': session.fitsSessionImager,
+                    'exposure_time': session.fitsSessionExposure,
+                    'filter_name': session.fitsSessionFilter,
+                    'binning_x': session.fitsSessionBinningX,
+                    'binning_y': session.fitsSessionBinningY,
+                    'ccd_temp': session.fitsSessionCCDTemp,
+                    'gain': session.fitsSessionGain,
+                    'offset': session.fitsSessionOffset
+                }
+                
+                existing_master = master_manager.find_matching_master(session_data, session.cal_type)
+                
+                if existing_master:
+                    logging.info(f"Master {session.cal_type} already exists for session {session.fitsSessionId}, skipping: {os.path.basename(existing_master.master_path)}")
+                    continue
+            
             logging.info(f"Processing session {session.fitsSessionId} for {session.cal_type} master ({file_count} files)")
             
             if dry_run:
@@ -309,7 +329,10 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
         if progress_callback:
             progress_callback(100, f"Master creation complete - {created_count} masters created")
         
-        logging.info(f"Master frame creation complete. Created {created_count} out of {total_sessions} potential masters")
+        skipped_count = total_sessions - created_count
+        logging.info(f"Master frame creation complete. Created {created_count} masters")
+        if skipped_count > 0 and not dry_run:
+            logging.info(f"Skipped {skipped_count} sessions (masters already exist). Use --force to recreate.")
         
         return True
         
@@ -319,9 +342,16 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
 
 
 def calibrate_light_frames(config: configparser.ConfigParser, session_id: Optional[str] = None, 
-                          dry_run: bool = False, progress_callback=None) -> bool:
+                          force_recalibrate: bool = False, dry_run: bool = False, progress_callback=None) -> bool:
     """
     Calibrate light frames using available master frames.
+    
+    Args:
+        config: Configuration object
+        session_id: Optional specific session ID to calibrate
+        force_recalibrate: If True, recalibrate even if frames are already calibrated
+        dry_run: If True, show what would be done without making changes
+        progress_callback: Optional callback for progress updates
     
     Returns:
         True if successful, False otherwise
@@ -330,6 +360,8 @@ def calibrate_light_frames(config: configparser.ConfigParser, session_id: Option
         from .light_calibration import calibrate_session_lights, find_light_sessions_for_calibration, get_calibration_statistics
         
         logging.info("Starting light frame calibration...")
+        if force_recalibrate:
+            logging.info("Force recalibration enabled - will recalibrate already-calibrated frames")
         
         if session_id:
             logging.info(f"Processing specific session: {session_id}")
@@ -383,7 +415,7 @@ def calibrate_light_frames(config: configparser.ConfigParser, session_id: Option
                 result = calibrate_session_lights(
                     session_id=session_id,
                     progress_callback=session_progress,
-                    force_recalibrate=False
+                    force_recalibrate=force_recalibrate
                 )
                 
                 if result.get('success'):

@@ -110,6 +110,11 @@ class ImagesWidget(QWidget):
         self.frame_filter_combo.addItems(["Light Frames Only", "All Frames", "Calibration Frames Only"])
         self.frame_filter_combo.setCurrentText("Light Frames Only")
         
+        # Add Show Deleted checkbox
+        self.show_deleted_checkbox = QCheckBox("Show Deleted")
+        self.show_deleted_checkbox.setToolTip("Show or hide soft-deleted frames")
+        self.show_deleted_checkbox.setChecked(False)
+        
         controls_layout.addWidget(self.regenerate_button)
         controls_layout.addWidget(self.load_new_button)
         controls_layout.addWidget(self.download_button)
@@ -121,6 +126,7 @@ class ImagesWidget(QWidget):
         controls_layout.addWidget(self.sort_combo)
         controls_layout.addWidget(filter_label)
         controls_layout.addWidget(self.frame_filter_combo)
+        controls_layout.addWidget(self.show_deleted_checkbox)
         controls_layout.addStretch()
         
         # File list
@@ -176,6 +182,7 @@ class ImagesWidget(QWidget):
         self.clear_search_button.clicked.connect(self.clear_search)
         self.sort_combo.currentTextChanged.connect(self.load_fits_data)
         self.frame_filter_combo.currentTextChanged.connect(self.load_fits_data)
+        self.show_deleted_checkbox.stateChanged.connect(self.load_fits_data)
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.prev_page_button.clicked.connect(self.prev_page)
         self.next_page_button.clicked.connect(self.next_page)
@@ -218,6 +225,10 @@ class ImagesWidget(QWidget):
         """Get the appropriate database query based on the frame filter selection and search term."""
         # Start with base query
         query = FitsFileModel.select()
+        
+        # Apply soft-delete filter (exclude soft-deleted by default unless checkbox is checked)
+        if not self.show_deleted_checkbox.isChecked():
+            query = query.where((FitsFileModel.fitsFileSoftDelete == False) | (FitsFileModel.fitsFileSoftDelete.is_null()))
         
         # Apply frame filter
         frame_filter = self.frame_filter_combo.currentText()
@@ -570,25 +581,32 @@ class ImagesWidget(QWidget):
                     return
             # If warnings are suppressed, proceed directly without confirmation
             
-            # Delete the file
-            os.remove(filename)
-            
-            # Remove the file record from database
+            # Soft-delete the file (mark as deleted in database, don't remove from disk)
             try:
-                deleted_count = FitsFileModel.delete().where(FitsFileModel.fitsFileName == filename).execute()
-                if deleted_count > 0:
-                    logger.info(f"Deleted file from database: {filename}")
+                # Update the database record to mark as soft-deleted
+                update_count = (FitsFileModel
+                               .update(fitsFileSoftDelete=True)
+                               .where(FitsFileModel.fitsFileName == filename)
+                               .execute())
+                
+                if update_count > 0:
+                    logger.info(f"Soft-deleted file in database: {filename}")
+                    
+                    # Refresh the display
+                    self.load_fits_data()
+                    
+                    QMessageBox.information(self, "File Soft-Deleted", 
+                                          f"File marked as deleted:\n{os.path.basename(filename)}\n\n"
+                                          f"The file remains on disk but is hidden from view.\n"
+                                          f"Check 'Show Deleted' to see it again.")
+                    logger.info(f"Successfully soft-deleted file: {filename}")
                 else:
                     logger.warning(f"File not found in database: {filename}")
+                    QMessageBox.warning(self, "File Not Found", f"File not found in database: {filename}")
+                    
             except Exception as db_error:
-                logger.error(f"Error removing file from database: {db_error}")
-                QMessageBox.warning(self, "Database Error", f"File deleted from disk but could not remove from database:\n{str(db_error)}")
-            
-            # Refresh the display
-            self.load_fits_data()
-            
-            QMessageBox.information(self, "File Deleted", f"File successfully deleted:\n{os.path.basename(filename)}")
-            logger.info(f"Successfully deleted file: {filename}")
+                logger.error(f"Error soft-deleting file from database: {db_error}")
+                QMessageBox.warning(self, "Database Error", f"Could not mark file as deleted:\n{str(db_error)}")
             
         except PermissionError:
             QMessageBox.critical(self, "Permission Error", f"Permission denied. Cannot delete file:\n{os.path.basename(filename)}")
@@ -609,7 +627,7 @@ class ImagesWidget(QWidget):
         layout = QVBoxLayout(dialog)
         
         # Message label
-        message = QLabel(f"Are you sure you want to delete this file from disk?\n\n{os.path.basename(filename)}\n\nThis action cannot be undone.")
+        message = QLabel(f"Are you sure you want to delete this file?\n\n{os.path.basename(filename)}\n\nThe file will be marked as deleted but will remain on disk.\nYou can view deleted files using the 'Show Deleted' checkbox.")
         message.setWordWrap(True)
         layout.addWidget(message)
         

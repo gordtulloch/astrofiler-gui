@@ -51,14 +51,105 @@ import logging
 import configparser
 from pathlib import Path
 
-# Add parent directory to path to import astrofiler modules
-script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-parent_dir = os.path.dirname(script_dir)
-sys.path.insert(0, parent_dir)
-import setup_path  # Configure Python path for new package structure
+# Configure Python path for new package structure - must be before any astrofiler imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_path = os.path.join(project_root, 'src')
+
+# Ensure src path is first in path to avoid conflicts with root astrofiler.py
+if src_path in sys.path:
+    sys.path.remove(src_path)
+sys.path.insert(0, src_path)
+
+def ensure_astrofiler_imports():
+    """Ensure astrofiler package can be imported correctly from src directory"""
+    global src_path
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
 
 from astrofiler.services.telescope import SmartTelescopeManager
 from astrofiler.core import fitsProcessing
+from astrofiler.models import Mapping as MappingModel
+from astropy.io import fits as astropy_fits
+
+def apply_mappings_to_fits(file_path):
+    """
+    Apply header mappings to a FITS file before registration.
+    
+    This function reads the FITS header, applies any defined mappings
+    from the database, and updates the FITS file with the new values.
+    This ensures files are named correctly during registration.
+    
+    Args:
+        file_path: Path to the FITS file
+        
+    Returns:
+        bool: True if any mappings were applied, False otherwise
+    """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Get all mappings from database
+        mappings = list(MappingModel.select())
+        
+        if not mappings:
+            logger.debug(f"No mappings defined, skipping header mapping for {os.path.basename(file_path)}")
+            return False
+        
+        # Open FITS file and apply mappings
+        changes_made = False
+        with astropy_fits.open(file_path, mode='update') as hdul:
+            header = hdul[0].header
+            
+            # Apply each mapping
+            for mapping in mappings:
+                card = mapping.card
+                current = mapping.current
+                replace = mapping.replace
+                
+                # Skip if no replacement value
+                if not replace:
+                    continue
+                
+                # Check if this card exists in the header
+                if card in header:
+                    header_value = str(header[card]).strip()
+                    
+                    # Check if the current value matches (or if current is None/empty for default mapping)
+                    if current:
+                        # Specific value mapping (including "Unknown" mappings)
+                        if header_value.upper() == current.upper():
+                            header[card] = replace
+                            logger.info(f"Applied mapping to {os.path.basename(file_path)}: {card} '{current}' -> '{replace}'")
+                            changes_made = True
+                    else:
+                        # Default mapping for null/empty values - replace if current value is empty/none
+                        if not header_value or header_value.upper() in ['', 'NONE', 'NULL', 'UNKNOWN']:
+                            header[card] = replace
+                            logger.info(f"Applied default mapping to {os.path.basename(file_path)}: {card} (empty/unknown) -> '{replace}'")
+                            changes_made = True
+                else:
+                    # Card doesn't exist in header
+                    if not current or current == '':
+                        # We have a default mapping (empty current) and card is missing - add it
+                        header[card] = replace
+                        header.comments[card] = 'Added via AstroFiler mapping'
+                        logger.info(f"Added missing card to {os.path.basename(file_path)}: {card} -> '{replace}'")
+                        changes_made = True
+                    elif current.upper() == 'UNKNOWN':
+                        # We have an "Unknown" mapping and card is missing - treat missing as Unknown
+                        header[card] = replace
+                        header.comments[card] = 'Added via AstroFiler mapping'
+                        logger.info(f"Added missing card (Unknown mapping) to {os.path.basename(file_path)}: {card} -> '{replace}'")
+                        changes_made = True
+            
+            if changes_made:
+                hdul.flush()
+        
+        return changes_made
+        
+    except Exception as e:
+        logger.error(f"Error applying mappings to {file_path}: {e}")
+        return False
 
 def setup_logging(verbose=False):
     """Configure logging based on verbosity level."""
@@ -213,6 +304,13 @@ def download_files(telescope_type, hostname, network, destination, username=None
                         
                 except Exception as e:
                     logger.warning(f"Error extracting {file_name}: {e}")
+            
+            # Apply mappings to FITS header before registration
+            if local_path.lower().endswith(('.fit', '.fits')):
+                try:
+                    apply_mappings_to_fits(local_path)
+                except Exception as e:
+                    logger.warning(f"Error applying mappings to {file_name}: {e}")
             
             # Register in database
             try:

@@ -94,11 +94,67 @@
 ### AutoCalibration.py
 - **Complete Automation**: Full CLI interface for batch processing and automation
 - **Operation Modes**: Analyze, masters, calibrate, quality, and complete workflow options
+- **Enhanced Analysis**: Reports uncalibrated light frames, soft-deleted frame statistics by type
 - **Scheduling Support**: Windows and Linux automation scripts for cron/Task Scheduler
 - **Progress Reporting**: Detailed status updates and comprehensive result summaries
 
+### LoadRepo.py Enhancements
+- **Temporary Mappings**: New `-s` flag for one-time FITS header mappings (e.g., `-s OBJECT/Unknown/M31`)
+- **Multiple Mappings**: Support for multiple temporary mappings in a single run
+- **Auto Cleanup**: Temporary mappings automatically removed after processing completes
+- **Batch Processing**: Ideal for importing files that need special handling without permanent database changes
+
+## 🏷️ **FITS Header Mapping System**
+
+### Standardized Header Management
+- **Database-Driven Mappings**: Define FITS header value standardizations in the GUI that are automatically applied during file ingestion
+- **Comprehensive Card Support**: Map TELESCOP, INSTRUME, OBSERVER, OBJECT, FILTER, and NOTES headers
+- **Automatic Application**: Mappings applied during telescope downloads (Download.py) and local file loads (LoadRepo.py)
+- **Unknown Value Handling**: Support for default mappings when expected header values are missing
+- **File Organization**: Correct header values ensure proper file naming and folder structure in repository
+- **Temporary Mappings**: LoadRepo.py now supports one-time mappings via `-s CARD/INPUT/OUTPUT` flag for batch-specific adjustments without permanent database entries
+
+### Mapping Dialog Enhancements
+- **OBJECT Card Support**: Added OBJECT to mappable cards for standardizing target names
+- **Visual Interface**: Easy-to-use dialog for creating and managing header value mappings
+- **Current Value Detection**: Shows existing header values to help identify mapping needs
+
+## 🗂️ **File Management**
+
+### Soft Delete System
+- **Non-Destructive Deletion**: Files marked as deleted remain on disk but hidden from view
+- **Automatic Soft-Delete**: Source calibration frames automatically soft-deleted after master creation
+- **Show Deleted Toggle**: Images view includes "Show Deleted" checkbox to view/hide soft-deleted frames
+- **Recovery Capability**: Soft-deleted files can be recovered or permanently removed via Duplicates widget
+- **Analysis Reporting**: AutoCalibration analyze command reports soft-deleted frame statistics
+
+### Images View Enhancements
+- **Soft Delete Support**: Delete operation now performs soft-delete instead of permanent removal
+- **Visual Feedback**: Clear messaging about soft-delete vs permanent delete operations
+- **Filtered Views**: Soft-deleted frames hidden by default, toggle to show when needed
+
 ## 🐛 **Bug Fixes**
 
+### Session Creation Fixes
+- **Calibration Session Grouping**: Fixed bug where each calibration frame was creating its own session instead of proper grouping
+- **Session Counting**: Corrected session counting logic to count unique sessions, not file assignments
+- **Workflow Alignment**: Session creation now properly matches astronomical workflows (bias ~n/100, dark/flat ~n/25 frames per session)
+
+### Master Frame Improvements
+- **Observation Date Usage**: Master calibration filenames now use observation date from session instead of processing date
+- **Proper Dating**: Ensures master frames are correctly dated for historical tracking
+- **Source Frame Management**: Source calibration frames automatically soft-deleted after successful master creation
+
+### Logging Centralization
+- **Unified Log File**: All command-line utilities now log to single `astrofiler.log` file with 5MB rotation
+- **Consistent Logging**: Download.py, LoadRepo.py, CreateSessions.py, and all other commands use centralized logging
+- **Improved Debugging**: Single log location simplifies troubleshooting and monitoring
+
+### Path Configuration
+- **Download.py Module Loading**: Fixed ModuleNotFoundError by applying proper Python path configuration
+- **Import Consistency**: Ensured consistent module loading across all command-line utilities
+
+### Previous Fixes
 - **Cloud Download Workflow**: Fixed file organization and registration issues
 - **registerFitsImage Calls**: Corrected parameter handling across all cloud sync operations
 - **Installation Dependencies**: Resolved pysiril installation and dependency management
