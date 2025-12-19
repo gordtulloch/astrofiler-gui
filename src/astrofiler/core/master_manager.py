@@ -151,7 +151,8 @@ class MasterFrameManager:
     
     def create_master_from_session(self, session_id: str, cal_type: str, 
                                  min_files: int = 2, 
-                                 progress_callback: Optional[Callable] = None) -> Optional[Masters]:
+                                 progress_callback: Optional[Callable] = None,
+                                 verbose: bool = False) -> Optional[Masters]:
         """
         Create a master calibration frame from a session's files using advanced Siril integration.
         
@@ -160,6 +161,7 @@ class MasterFrameManager:
             cal_type: Type of calibration ('bias', 'dark', 'flat')
             min_files: Minimum number of files required
             progress_callback: Progress reporting function
+            verbose: Enable verbose output showing which files are used
             
         Returns:
             Created master frame record or None if creation failed
@@ -181,6 +183,24 @@ class MasterFrameManager:
             
             if progress_callback:
                 progress_callback(10, 100, f"Found {len(files)} {cal_type} frames...")
+            
+            # Verbose output: List all files being used to create the master
+            if verbose:
+                logger.info(f"\n{'='*80}")
+                logger.info(f"Creating {cal_type.upper()} master from {len(files)} files:")
+                logger.info(f"Session ID: {session_id}")
+                logger.info(f"Telescope: {session.fitsSessionTelescope}")
+                logger.info(f"Camera: {session.fitsSessionImager}")
+                logger.info(f"Exposure: {session.fitsSessionExposure}s")
+                logger.info(f"Binning: {session.fitsSessionBinningX}x{session.fitsSessionBinningY}")
+                logger.info(f"Temperature: {session.fitsSessionCCDTemp}°C")
+                logger.info(f"\nFiles being stacked:")
+                for i, f in enumerate(files, 1):
+                    logger.info(f"  {i:3d}. {os.path.basename(f.fitsFileName)}")
+                    if verbose and cal_type.lower() == 'dark':
+                        # For dark frames, also show exposure time from file
+                        logger.info(f"       Exposure: {f.fitsFileExpTime}s, Temp: {f.fitsFileCCDTemp}°C")
+                logger.info(f"{'='*80}\n")
             
             # Generate output filename with Master prefix using session date not current date
             if session.fitsSessionDate:
@@ -212,10 +232,10 @@ class MasterFrameManager:
             file_paths = [f.fitsFileName for f in files]
             
             if progress_callback:
-                progress_callback(20, 100, "Creating master frame with Siril...")
+                progress_callback(20, 100, "Creating master frame with internal stacking...")
             
-            # Create master frame using Siril
-            success = self._create_master_with_siril(file_paths, output_path, cal_type, progress_callback)
+            # Create master frame using internal sigma-clipped stacking
+            success = self._create_master_sigma_clip(file_paths, output_path, cal_type, progress_callback)
             
             if not success or not os.path.exists(output_path):
                 logger.error(f"Failed to create master {cal_type} frame")
@@ -278,10 +298,10 @@ class MasterFrameManager:
                 progress_callback(100, 100, f"Error creating master {cal_type} frame")
             return None
     
-    def _create_master_with_siril(self, file_paths: List[str], output_path: str, 
+    def _create_master_sigma_clip(self, file_paths: List[str], output_path: str, 
                                 cal_type: str, progress_callback: Optional[Callable] = None) -> bool:
         """
-        Create master frame using PySiril Python interface.
+        Create master frame using sigma-clipped averaging (internal implementation).
         
         Args:
             file_paths: List of input FITS file paths
@@ -293,265 +313,195 @@ class MasterFrameManager:
             True if successful, False otherwise
         """
         try:
-            # Try to import PySiril
-            try:
-                from pysiril.siril import Siril
-                from pysiril.wrapper import Wrapper
-            except ImportError:
-                logger.warning("PySiril not available, falling back to simple averaging")
-                return self._create_master_simple_average(file_paths, output_path)
+            from astropy.io import fits
+            import numpy as np
+            
+            if not file_paths:
+                logger.error("No input files provided")
+                return False
+            
+            logger.info(f"Creating {cal_type} master from {len(file_paths)} files using sigma-clipped stacking")
             
             if progress_callback:
-                progress_callback(20, 100, "Initializing PySiril...")
+                progress_callback(25, 100, f"Loading {len(file_paths)} {cal_type} frames...")
             
-            # Get Siril CLI path from config
-            siril_path = self.config.get('DEFAULT', 'siril_cli_path', fallback='siril-cli')
-            
-            # Initialize PySiril with custom Siril path
-            app = Siril(siril_path)
-            
-            if progress_callback:
-                progress_callback(30, 100, "Starting Siril...")
-            
-            app.Open()
-            cmd = Wrapper(app)
+            # Read first file to get dimensions and header
+            with fits.open(file_paths[0]) as hdul:
+                header = hdul[0].header.copy()
+                data_shape = hdul[0].data.shape
+                dtype = hdul[0].data.dtype
+                logger.info(f"Frame dimensions: {data_shape}, dtype: {dtype}")
             
             if progress_callback:
-                progress_callback(40, 100, "Setting up working directory...")
+                progress_callback(30, 100, "Computing statistics (pass 1/2)...")
             
-            # Create working directory with normalized paths using configured temp folder
-            configured_temp = get_temp_folder()
-            temp_base_dir = os.path.normpath(configured_temp)
-            temp_dir = os.path.normpath(os.path.join(temp_base_dir, f'astrofiler_pysiril_{cal_type}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}'))
-            os.makedirs(temp_dir, exist_ok=True)
+            # Streaming approach using chunked processing
+            # Determine optimal chunk size based on available memory
+            # Process frames in chunks small enough to fit in memory
+            max_chunk_size = min(20, len(file_paths))  # Process up to 20 frames at a time
             
-            logger.info(f"Using configured temp folder: {configured_temp}")
-            logger.info(f"PySiril working directory: {temp_dir}")
+            valid_files = []
+            frame_medians = []
             
-            # Set working directory in Siril
-            cmd.cd(temp_dir)
-            cmd.setext('fits')
-            
-            if progress_callback:
-                progress_callback(50, 100, f"Processing {len(file_paths)} {cal_type} frames...")
-            
-            # Check symlink support before processing
-            symlink_supported = check_symlink_support()
-            if not symlink_supported and os.name == 'nt':
-                dev_mode = check_windows_developer_mode()
-                if not dev_mode:
-                    logger.info("Windows Developer Mode not enabled. Consider enabling it for faster processing with symlinks.")
-                    logger.info("Go to Settings > Update & Security > For developers > Developer mode")
-            
-            # Link or copy files to working directory with sequential naming
-            use_symlinks = symlink_supported
-            method_logged = False
-            
+            # First pass: validate files and compute frame medians for flats
+            logger.info("Pass 1: Validating files and computing frame medians...")
             for i, file_path in enumerate(file_paths):
-                dest_file = os.path.join(temp_dir, f"{cal_type}_{i+1:05d}.fits")
-                
-                if use_symlinks:
-                    try:
-                        # Try to create a symbolic link first (more efficient)
-                        if os.path.exists(dest_file):
-                            os.remove(dest_file)  # Remove if exists
-                        
-                        os.symlink(file_path, dest_file)
-                        if not method_logged:
-                            logger.info(f"Using symbolic links for {cal_type} files (faster, space-efficient)")
-                            method_logged = True
-                        logger.debug(f"Symlinked {file_path} to {dest_file}")
-                    except (OSError, NotImplementedError, PermissionError) as e:
-                        if not method_logged:
-                            logger.warning(f"Symlinks failed ({type(e).__name__}: {e}), using file copying")
-                            use_symlinks = False  # Don't try symlinks for remaining files
-                            method_logged = True
-                        
-                        # Fall back to copying
-                        if os.path.exists(dest_file):
-                            os.remove(dest_file)  # Remove failed symlink attempt
-                        shutil.copy2(file_path, dest_file)
-                        logger.debug(f"Copied {file_path} to {dest_file}")
-                else:
-                    # Use copying from the start
-                    if not method_logged:
-                        logger.info(f"Using file copying for {cal_type} files")
-                        method_logged = True
-                    shutil.copy2(file_path, dest_file)
-                    logger.debug(f"Copied {file_path} to {dest_file}")
+                try:
+                    with fits.open(file_path) as hdul:
+                        if hdul[0].data.shape != data_shape:
+                            logger.warning(f"Skipping file with different dimensions: {file_path}")
+                            continue
+                        valid_files.append(file_path)
+                        if cal_type == 'flat':
+                            frame_medians.append(np.median(hdul[0].data))
+                    
+                    if (i + 1) % 10 == 0 and progress_callback:
+                        progress = 30 + int((i + 1) / len(file_paths) * 10)
+                        progress_callback(progress, 100, f"Validating: {i+1}/{len(file_paths)} files...")
+                except Exception as e:
+                    logger.warning(f"Skipping corrupted file {file_path}: {e}")
+                    continue
             
-            # Convert to sequence
-            sequence_name = f"{cal_type}_seq"
-            logger.info(f"Converting files to sequence: {sequence_name}")
-            try:
-                cmd.convert(cal_type, out=".", fitseq=True)
-                logger.info("Convert command completed successfully")
-            except Exception as e:
-                logger.error(f"Convert command failed: {e}")
+            if not valid_files:
+                logger.error("No valid frames loaded")
+                return False
             
-            # List files after convert to see what was created
-            try:
-                temp_files_after_convert = os.listdir(temp_dir)
-                logger.info(f"Files after convert: {temp_files_after_convert}")
-            except Exception as e:
-                logger.error(f"Error listing temp dir after convert: {e}")
+            n_frames = len(valid_files)
+            logger.info(f"Processing {n_frames} valid frames")
             
             if progress_callback:
-                progress_callback(70, 100, f"Stacking {cal_type} frames...")
+                progress_callback(40, 100, "Computing sigma clipping bounds...")
             
-            # Stack based on calibration type  
-            output_name = os.path.splitext(os.path.basename(output_path))[0]
-            logger.info(f"Stacking {len(file_paths)} {cal_type} frames")
+            # Compute median and std using chunked processing
+            logger.info(f"Computing statistics in chunks of {max_chunk_size} frames...")
+            median = None
+            M2 = None  # For Welford's online variance algorithm
             
-            try:
-                if cal_type == 'bias':
-                    # Stack bias frames without normalization using rejection
-                    logger.info("Executing: stack bias type=rej sigma_low=3 sigma_high=3 norm=no")
-                    cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="no")
-                elif cal_type == 'dark':
-                    # Stack dark frames without normalization using rejection  
-                    logger.info("Executing: stack dark type=rej sigma_low=3 sigma_high=3 norm=no")
-                    cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="no")
-                elif cal_type == 'flat':
-                    # For flats, first calibrate with master bias if available, then stack
-                    # Find matching master bias for this session
-                    from ..models import Masters
-                    try:
-                        session = fitsSession.get_by_id(session_id)
-                        matching_bias = Masters.find_matching_master(
-                            telescope=session.fitsSessionTelescope,
-                            instrument=session.fitsSessionImager,
-                            master_type='bias',
-                            binning_x=session.fitsSessionBinningX,
-                            binning_y=session.fitsSessionBinningY
-                        )
+            for chunk_start in range(0, n_frames, max_chunk_size):
+                chunk_end = min(chunk_start + max_chunk_size, n_frames)
+                chunk_files = valid_files[chunk_start:chunk_end]
+                
+                # Load chunk into memory
+                chunk_data = []
+                for file_path in chunk_files:
+                    with fits.open(file_path) as hdul:
+                        chunk_data.append(hdul[0].data.astype(np.float32))
+                
+                chunk_array = np.array(chunk_data)
+                
+                # Update running statistics
+                if median is None:
+                    median = np.median(chunk_array, axis=0)
+                    M2 = np.sum((chunk_array - median[np.newaxis, :, :]) ** 2, axis=0)
+                else:
+                    # Combine statistics from chunks
+                    chunk_median = np.median(chunk_array, axis=0)
+                    median = (median + chunk_median) / 2  # Approximate for speed
+                    M2 += np.sum((chunk_array - median[np.newaxis, :, :]) ** 2, axis=0)
+                
+                del chunk_data, chunk_array
+                
+                if progress_callback:
+                    progress = 40 + int((chunk_end / n_frames) * 20)
+                    progress_callback(progress, 100, f"Statistics: {chunk_end}/{n_frames} frames...")
+            
+            std = np.sqrt(M2 / n_frames)
+            del M2
+            
+            # Sigma clipping parameters
+            sigma_low = 3.0
+            sigma_high = 3.0
+            lower_bound = median - sigma_low * std
+            upper_bound = median + sigma_high * std
+            
+            logger.info("Sigma clipping bounds computed")
+            
+            if progress_callback:
+                progress_callback(60, 100, f"Combining {n_frames} frames with sigma clipping (pass 2/2)...")
+            
+            # Pass 2 - Accumulate with sigma clipping
+            logger.info("Pass 2: Combining frames with sigma clipping...")
+            accumulator = np.zeros(data_shape, dtype=np.float32)
+            count = np.zeros(data_shape, dtype=np.uint16)
+            rejected_pixels = 0
+            total_pixels = 0
+            
+            for i, file_path in enumerate(valid_files):
+                try:
+                    with fits.open(file_path) as hdul:
+                        data = hdul[0].data.astype(np.float32)
                         
-                        if matching_bias and os.path.exists(matching_bias.file_path):
-                            logger.info(f"Found matching bias master: {matching_bias.file_path}")
-                            if progress_callback:
-                                progress_callback(65, 100, "Calibrating flats with master bias...")
-                            
-                            # Copy master bias to working directory
-                            bias_dest = os.path.join(temp_dir, "master_bias.fits")
-                            shutil.copy2(matching_bias.file_path, bias_dest)
-                            
-                            # Calibrate flats with master bias
-                            logger.info("Executing: calibrate flat bias=master_bias")
-                            cmd.calibrate(f"{cal_type}", bias="master_bias")
-                            
-                            # Stack the calibrated (pp_) flat frames
-                            logger.info("Executing: stack pp_flat type=rej sigma_low=3 sigma_high=3 norm=mul")
-                            cmd.stack(f"pp_{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
-                        else:
-                            logger.warning("No matching bias master found, stacking flats without bias calibration")
-                            # Stack flat frames with multiplicative normalization using rejection
-                            logger.info("Executing: stack flat type=rej sigma_low=3 sigma_high=3 norm=mul")
-                            cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
-                    except Exception as e:
-                        logger.warning(f"Error finding/applying bias master for flats: {e}, stacking without calibration")
-                        # Stack flat frames with multiplicative normalization using rejection
-                        logger.info("Executing: stack flat type=rej sigma_low=3 sigma_high=3 norm=mul")
-                        cmd.stack(f"{cal_type}", type="rej", sigma_low=3, sigma_high=3, norm="mul")
-                
-                logger.info("PySiril stacking command completed successfully")
-            except Exception as e:
-                logger.error(f"PySiril stack command failed: {e}")
+                        # Apply flat normalization if needed
+                        if cal_type == 'flat':
+                            data = data / frame_medians[i]
+                        
+                        # Apply sigma clipping mask
+                        mask = (data >= lower_bound) & (data <= upper_bound)
+                        
+                        # Accumulate valid pixels
+                        accumulator += np.where(mask, data, 0)
+                        count += mask.astype(np.uint16)
+                        
+                        rejected_pixels += np.sum(~mask)
+                        total_pixels += data.size
+                    
+                    if (i + 1) % 5 == 0 and progress_callback:
+                        progress = 60 + int((i + 1) / n_frames * 20)
+                        progress_callback(progress, 100, f"Pass 2: {i+1}/{n_frames} frames...")
+                        
+                except Exception as e:
+                    logger.warning(f"Error processing {file_path}: {e}")
+                    continue
             
-            # List all files after stacking to see what was actually created
-            try:
-                temp_files_after_stack = os.listdir(temp_dir)
-                logger.info(f"Files after stacking: {temp_files_after_stack}")
-                
-                # Show file sizes too
-                for file in temp_files_after_stack:
-                    if file.endswith(('.fits', '.fit', '.fts')):
-                        file_path = os.path.join(temp_dir, file)
-                        size = os.path.getsize(file_path)
-                        logger.info(f"  {file}: {size} bytes")
-            except Exception as e:
-                logger.error(f"Error listing temp dir after stack: {e}")
+            rejection_rate = (rejected_pixels / total_pixels) * 100 if total_pixels > 0 else 0
+            logger.info(f"Sigma clipping: {rejected_pixels}/{total_pixels} pixels rejected ({rejection_rate:.3f}%)")
+            
+            if progress_callback:
+                progress_callback(80, 100, "Computing final master frame...")
+            
+            # Compute final master (avoid division by zero)
+            master_data = np.where(count > 0, accumulator / count, median)
+            
+            if cal_type == 'flat':
+                logger.info("Applied multiplicative normalization for flat frames")
+            else:
+                logger.info("Applied additive combination for bias/dark frames")
             
             if progress_callback:
                 progress_callback(80, 100, "Saving master frame...")
             
-            # Check if output file was created (Siril creates files with _stacked suffix)
-            # For calibrated flats, look for pp_flat_stacked.fits first
+            # Update header with metadata
+            header['HISTORY'] = f'Master {cal_type} created from {n_frames} files'
+            header['NFILES'] = n_frames
+            header['CREATOR'] = 'AstroFiler Internal Stacking'
+            header['METHOD'] = f'Sigma-clipped mean (sigma_low={sigma_low}, sigma_high={sigma_high})'
+            header['REJECTED'] = f'{rejection_rate:.3f}%'
+            header['DATE'] = datetime.datetime.now().isoformat()
+            
+            # Convert to appropriate dtype (preserve as uint16 for most cases, float32 for flats)
             if cal_type == 'flat':
-                stacked_file = os.path.normpath(os.path.join(temp_dir, f"pp_{cal_type}_stacked.fits"))
-                logger.info(f"Looking for calibrated flat stacked file: {stacked_file}")
-                if not os.path.exists(stacked_file):
-                    # Fall back to uncalibrated flat stacked file
-                    stacked_file = os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits"))
-                    logger.info(f"Calibrated flat not found, looking for uncalibrated: {stacked_file}")
+                output_data = master_data.astype(np.float32)
             else:
-                stacked_file = os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits"))
-                logger.info(f"Looking for stacked file: {stacked_file}")
+                # Clip to uint16 range and convert
+                output_data = np.clip(master_data, 0, 65535).astype(np.uint16)
             
-            if os.path.exists(stacked_file):
-                shutil.move(stacked_file, output_path)
-                success = True
-                logger.info(f"PySiril master {cal_type} creation successful")
-            else:
-                # List all files in temp dir for debugging
-                try:
-                    temp_files = os.listdir(temp_dir)
-                    logger.info(f"Files in temp dir: {temp_files}")
-                    
-                    # Look for any .fits files
-                    fits_files = [f for f in temp_files if f.endswith('.fits')]
-                    logger.info(f"FITS files in temp dir: {fits_files}")
-                except Exception as e:
-                    logger.error(f"Error listing temp dir: {e}")
-                
-                # Try alternative naming patterns that PySiril commonly uses
-                alt_files = [
-                    # Most common patterns first
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fits")),     # Expected default
-                    os.path.normpath(os.path.join(temp_dir, f"stacked.fits")),               # Simple stacked output
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}.fits")),            # Direct cal_type name
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_seq_stacked.fits")), # Sequence stacked
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_result.fits")),     # Result naming
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_r_stacked.fits")),  # Rejection stacked
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_out.fits")),        # Output file
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_master.fits")),     # Master naming
-                    os.path.normpath(os.path.join(temp_dir, f"master_{cal_type}.fits")),     # Master prefix
-                    # Alternative extensions
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}_stacked.fit")),     # .fit extension
-                    os.path.normpath(os.path.join(temp_dir, f"stacked.fit")),                # .fit extension
-                    os.path.normpath(os.path.join(temp_dir, f"{cal_type}.fit")),             # .fit extension
-                ]
-                success = False
-                for alt_file in alt_files:
-                    logger.info(f"Checking alternative file: {alt_file}")
-                    if os.path.exists(alt_file):
-                        shutil.move(alt_file, output_path)
-                        success = True
-                        logger.info(f"PySiril master {cal_type} creation successful (found: {os.path.basename(alt_file)})")
-                        break
-                
-                if not success:
-                    logger.warning(f"PySiril stacking completed but output file not found. Expected: {stacked_file}")
-                    logger.warning(f"Checked alternatives: {[os.path.basename(f) for f in alt_files]}")
+            # Save master frame
+            hdu = fits.PrimaryHDU(data=output_data, header=header)
+            hdu.writeto(output_path, overwrite=True)
             
-            # Close PySiril
-            app.Close()
-            del app
-            
-            # Clean up temporary files
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info(f"Internal stacking: Master {cal_type} created successfully: {output_path}")
+            logger.info(f"  Output shape: {output_data.shape}, dtype: {output_data.dtype}")
+            logger.info(f"  Data range: [{np.min(output_data):.1f}, {np.max(output_data):.1f}]")
+            logger.info(f"  Mean: {np.mean(output_data):.1f}, Median: {np.median(output_data):.1f}")
             
             if progress_callback:
-                progress_callback(90, 100, "PySiril processing completed")
+                progress_callback(100, 100, "Master frame created successfully")
             
-            if success:
-                return True
-            else:
-                logger.info(f"Falling back to simple averaging for {cal_type} master")
-                return self._create_master_simple_average(file_paths, output_path)
+            return True
                 
         except Exception as e:
-            logger.warning(f"Error in PySiril master creation, falling back to simple averaging: {e}")
-            return self._create_master_simple_average(file_paths, output_path)
+            logger.error(f"Error in sigma-clipped master creation: {e}", exc_info=True)
+            return False
     
     def _create_master_simple_average(self, file_paths: List[str], output_path: str) -> bool:
         """

@@ -202,9 +202,17 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
 
 
 def create_master_frames(config: configparser.ConfigParser, session_id: Optional[str] = None, 
-                        force: bool = False, dry_run: bool = False, progress_callback=None) -> bool:
+                        force: bool = False, dry_run: bool = False, verbose: bool = False, progress_callback=None) -> bool:
     """
     Create master calibration frames from calibration sessions.
+    
+    Args:
+        config: Configuration object
+        session_id: Optional specific session ID to process
+        force: Force recreation even if masters exist
+        dry_run: Show what would be done without making changes
+        verbose: Enable verbose output showing which files are used
+        progress_callback: Optional callback for progress updates
     
     Returns:
         True if successful, False otherwise
@@ -313,7 +321,8 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
                     session.fitsSessionId, 
                     session.cal_type,
                     min_files_per_master,
-                    master_progress
+                    master_progress,
+                    verbose=verbose
                 )
                 
                 if master_path:

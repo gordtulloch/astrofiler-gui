@@ -379,7 +379,7 @@ def analyze_calibration_opportunities(config, session_id=None, min_files=None):
         logging.error(f"Error analyzing calibration opportunities: {e}")
         return {'error': str(e)}
 
-def create_master_frames(config, session_id=None, force=False, dry_run=False):
+def create_master_frames(config, session_id=None, force=False, dry_run=False, verbose=False):
     """Create master calibration frames - wrapper for core library function"""
     ensure_astrofiler_imports()
     
@@ -394,6 +394,7 @@ def create_master_frames(config, session_id=None, force=False, dry_run=False):
             session_id=session_id,
             force=force,
             dry_run=dry_run,
+            verbose=verbose,
             progress_callback=create_cli_progress_callback("Creating masters")
         )
         
@@ -823,7 +824,7 @@ def main():
             success = opportunities is not None
             
         elif args.operation == 'masters':
-            success = create_master_frames(config, args.session, args.force, args.dry_run)
+            success = create_master_frames(config, args.session, args.force, args.dry_run, args.verbose)
             
         elif args.operation == 'calibrate-lights':
             success = calibrate_light_frames(config, args.session, args.force, args.dry_run)

@@ -241,13 +241,27 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         
         logger.info(f"Calibrated data statistics: min={data_min:.2f}, max={data_max:.2f}, mean={data_mean:.2f}, range={data_range:.2f}")
         
+        # If data has negative values, shift it positive for proper display in FITS viewers
+        # Many viewers (like ASIFitsView) don't handle negative values well
+        bzero_offset = 0.0
+        if data_min < 0:
+            bzero_offset = abs(data_min) + 100  # Add 100 ADU safety margin
+            calibrated_data = calibrated_data + bzero_offset
+            logger.info(f"Applied BZERO offset of {bzero_offset:.2f} to shift negative values positive")
+        
         # Save as float32 to preserve dynamic range while reducing file size
         output_data = calibrated_data.astype(np.float32)
         
         # Update BITPIX to indicate 32-bit float
         light_header['BITPIX'] = -32
-        light_header['BZERO'] = 0.0
+        
+        # Set BZERO and BSCALE for proper FITS scaling
+        # BZERO tells viewers to subtract this value to get true calibrated data
+        light_header['BZERO'] = bzero_offset
         light_header['BSCALE'] = 1.0
+        
+        if bzero_offset > 0:
+            light_header['HISTORY'] = f'Applied BZERO offset of {bzero_offset:.2f} for viewer compatibility'
         
         # Create output directory if needed
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
