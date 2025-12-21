@@ -47,33 +47,99 @@ class DatabaseManager:
         Raises:
             DatabaseError: If database setup fails critically
         """
-        try:
-            # Connect to database
-            if not self.db.is_closed():
-                self.db.close()
-            self.db.connect()
-            
-            # Ensure migrations directory exists
-            os.makedirs('migrations', exist_ok=True)
-            
-            # Run any pending migrations
-            self.router.run()
-            
-            # Create tables if they don't exist (initial setup)
-            self.db.create_tables([fitsFile, fitsSession, Mapping, Masters], safe=True)
-            
-            self.db.close()
-            self.logger.info("Database setup complete with peewee-migrate. Tables created/updated.")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Database setup error: {e}")
+        import time
+        import peewee as pw
+        
+        max_retries = 5
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
             try:
-                if self.db.is_connection_usable():
+                # Connect to database
+                if not self.db.is_closed():
                     self.db.close()
-            except:
-                pass
-            raise DatabaseError(f"Failed to setup database: {e}") from e
+                self.db.connect()
+                
+                # Ensure migrations directory exists
+                os.makedirs('migrations', exist_ok=True)
+                
+                # Run any pending migrations
+                self.router.run()
+                
+                # Create tables if they don't exist (initial setup)
+                self.db.create_tables([fitsFile, fitsSession, Mapping, Masters], safe=True)
+                
+                self.db.close()
+                self.logger.info("Database setup complete with peewee-migrate. Tables created/updated.")
+                return True
+                
+            except pw.OperationalError as e:
+                # Handle database locked errors with retries
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    self.logger.warning(
+                        f"Database is locked (another process may be using it). "
+                        f"Retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries})"
+                    )
+                    try:
+                        if self.db.is_connection_usable():
+                            self.db.close()
+                    except:
+                        pass
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # Final attempt failed or non-lock error
+                    self.logger.error(f"Database operational error: {e}")
+                    try:
+                        if self.db.is_connection_usable():
+                            self.db.close()
+                    except:
+                        pass
+                    
+                    error_msg = str(e)
+                    if "database is locked" in error_msg.lower():
+                        raise DatabaseError(
+                            f"Database is locked after {max_retries} attempts. "
+                            f"Another AstroFiler process may be running. "
+                            f"Please close other instances and try again."
+                        ) from e
+                    else:
+                        raise DatabaseError(f"Database operational error: {error_msg}") from e
+                        
+            except Exception as e:
+                self.logger.error(f"Database setup error: {e}")
+                error_msg = str(e)
+                
+                try:
+                    if self.db.is_connection_usable():
+                        self.db.close()
+                except:
+                    pass
+                
+                # Provide more helpful error messages
+                if "no such table" in error_msg.lower():
+                    raise DatabaseError(
+                        f"Database tables not found. Please run migrations: python migrate.py"
+                    ) from e
+                elif "Model" in error_msg and "not found" in error_msg:
+                    raise DatabaseError(
+                        f"Model configuration error: {error_msg}. "
+                        f"This may indicate a database structure mismatch. "
+                        f"Try running: python migrate.py"
+                    ) from e
+                elif "unable to open database file" in error_msg.lower():
+                    raise DatabaseError(
+                        f"Cannot open database file. Check that:\n"
+                        f"  1. The database path is correct in astrofiler.ini\n"
+                        f"  2. You have read/write permissions\n"
+                        f"  3. The directory exists"
+                    ) from e
+                else:
+                    raise DatabaseError(f"Failed to setup database: {error_msg}") from e
+        
+        # Should never reach here, but just in case
+        raise DatabaseError("Database setup failed after all retry attempts")
     
     def create_migration(self, name: str) -> bool:
         """

@@ -28,13 +28,8 @@
 - **Database Integration**: Quality metrics stored and searchable (Migration 009)
 - **Dual Detection Methods**: Primary SEP with photutils fallback for maximum reliability
 - **Real-Time Analysis**: Quality assessment integrated into calibration workflow
+- **Quality Per Session**: In the session view a tooltip will show average quality scores across the session
 
-### UI Enhancements
-- **Visual Status Indicators**: Color-coded calibration status throughout the interface
-- **Progress Tracking**: Real-time progress with descriptive status messages and ETA
-- **Context Menus**: Professional right-click menus with calibration operations
-- **Smart Session Linking**: Automatic linking of calibration and light sessions
-- **Master Frame Management**: Browse, validate, and maintain master calibration files
 
 ## ☁️ **Cloud Sync Enhancements**
 

@@ -54,7 +54,7 @@ class Masters(BaseModel):
             telescope (str): Telescope name
             instrument (str): Instrument name  
             master_type (str): Type of master ('bias', 'dark', 'flat')
-            **criteria: Additional matching criteria (exposure_time, filter_name, etc.)
+            **criteria: Additional matching criteria (exposure_time, filter_name, binning_x, binning_y)
             
         Returns:
             Masters: Matching master frame or None
@@ -72,8 +72,8 @@ class Masters(BaseModel):
         elif master_type == 'flat' and 'filter_name' in criteria:
             query = query.where(cls.filter_name == criteria['filter_name'])
             
-        # Add common criteria
-        for field in ['binning_x', 'binning_y', 'ccd_temp', 'gain', 'offset']:
+        # Add binning criteria only (removed ccd_temp, gain, offset for more flexible matching)
+        for field in ['binning_x', 'binning_y']:
             if field in criteria and criteria[field] is not None:
                 query = query.where(getattr(cls, field) == criteria[field])
                 

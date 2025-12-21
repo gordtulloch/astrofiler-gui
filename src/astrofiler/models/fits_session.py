@@ -31,6 +31,14 @@ class fitsSession(BaseModel):
     auto_calibration_dark_session_id = pw.TextField(null=True)
     auto_calibration_flat_session_id = pw.TextField(null=True)
     auto_calibration_bias_session_id = pw.TextField(null=True)
+    
+    # Session-level quality metrics (averaged from files)
+    fitsSessionAvgFWHMArcsec = pw.FloatField(null=True)  # Average FWHM in arcseconds
+    fitsSessionAvgEccentricity = pw.FloatField(null=True)  # Average star eccentricity (0-1)
+    fitsSessionAvgHFRArcsec = pw.FloatField(null=True)  # Average HFR in arcseconds
+    fitsSessionImageSNR = pw.FloatField(null=True)  # Average signal-to-noise ratio
+    fitsSessionStarCount = pw.IntegerField(null=True)  # Average detected stars
+    fitsSessionImageScale = pw.FloatField(null=True)  # Image scale in arcsec/pixel
 
     class Meta:
         table_name = 'fitsSession'

@@ -2,7 +2,33 @@
 
 ## Version 1.2.1 - Compression Enhancement (In Development)
 
+### Breaking Changes
+
+- **Quality Analysis Consolidation**: Replaced basic `QualityAnalyzer` with `EnhancedQualityAnalyzer` as the sole quality assessment system
+  - **Removed**: Basic quality_analysis.py module (moved to backups/quality_analysis_basic.py)
+  - **Enhanced AutoCalibration**: Quality assessment now uses SEP star detection and saves metrics to database
+  - **Database Integration**: Quality metrics automatically saved to fitsFile fields (FWHM, eccentricity, HFR, SNR, star count, image scale)
+  - **Import Changes**: `from astrofiler.core import QualityAnalyzer` now imports `EnhancedQualityAnalyzer`
+  - **Real Measurements**: All quality assessments now provide quantitative astrometric measurements instead of qualitative scores
+
 ### New Features
+
+- **Improved Database Error Handling**: Enhanced error messages for database setup failures
+  - **Database Lock Detection**: Automatic retry with exponential backoff (5 attempts) when database is locked
+  - **Clear Error Messages**: Specific guidance for common errors (locked database, missing tables, permission issues)
+  - **User-Friendly Feedback**: Explains that another AstroFiler process may be running and suggests closing other instances
+  - **Migration Guidance**: Prompts user to run migrations when tables are missing
+  - **Permission Checks**: Provides checklist for database file access issues
+  - **Retry Logic**: Waits progressively longer between retry attempts (1s, 2s, 4s, 8s, 16s)
+
+- **Session-Level Quality Metrics**: Light sessions now track average quality metrics from all files
+  - **New Migration 010**: Adds session quality fields to fitsSession table
+  - **New Model Fields**: `fitsSessionAvgFWHMArcsec`, `fitsSessionAvgEccentricity`, `fitsSessionAvgHFRArcsec`, `fitsSessionImageSNR`, `fitsSessionStarCount`, `fitsSessionImageScale`
+  - **Automatic Calculation**: Session creation automatically calculates and stores quality metric averages
+  - **GUI Tooltips**: Hovering over sessions in GUI displays bubble help with average quality metrics
+  - **Method**: `updateSessionQualityMetrics()` computes averages from all files in session
+  - **CLI Support**: `python commands/CreateSessions.py -q` updates quality metrics for existing sessions
+  - **Integration**: Works seamlessly with enhanced quality analysis system
 
 - **Intelligent FITS Compression System**: Smart compression algorithm selection based on data type analysis
   - **Smart Algorithm Selection**: Automatic optimal compression based on FITS data type
@@ -21,6 +47,44 @@
   - **Data Protection**: Automatic prevention of lossy compression on floating-point data
   - **Universal Compatibility**: Full support across astropy, Siril, NINA, and PySiril workflows
   - **Extensive Testing**: Comprehensive test suite with real astronomical data validation
+
+### Performance
+
+- **Sessions View Speedups**: Reduced UI load time by eliminating N+1 database query patterns
+  - **Batch Counts**: Session image counts are computed via a single grouped query instead of per-session `.count()`
+  - **Batch Master Flags**: Master existence checks use a single `Masters.source_session_id` query
+  - **Cached Resource Counts**: Linked calibration session frame counts reuse precomputed session counts
+
+- **Database Indexes for Common Queries**: New Migration 011 adds targeted SQLite indexes to accelerate frequent lookups
+  - `fitsfile`: indexes for `(fitsFileSession)`, `(fitsFileSession, fitsFileSoftDelete)`, `(fitsFileHash)`, `(fitsFileObject)`, `(fitsFileOriginalFile)`
+  - `fitssession`: index for `(fitsSessionObjectName, fitsSessionDate)`
+  - `masters`: indexes for `(source_session_id, soft_delete)` plus matching-criteria accelerators
+
+### Fixes
+
+- **Sessions Calibration Reliability**:
+  - Fixed calibration flow that could silently fail due to datetime usage errors
+  - Calibrated outputs are now registered in the database so they appear immediately in the UI
+  - Added a test reset utility command to clear soft-deletes and remove generated calibrated outputs during iterative testing
+
+- **Sessions UI Polish**:
+  - Removed unused “Properties” context menu action
+  - Added “(master)” indicator for calibration sessions when a master exists
+  - Added a “View Master” context menu action to open the master in the configured external FITS viewer
+
+- **Sample Stack Workflow (Sessions Context Menu)**:
+  - Added “Sample Stack” action to calibrate (if needed), stack calibrated frames, and open the stacked result in the external viewer
+  - Fixed Sample Stack flow so when it triggers calibration it skips calibration summary dialogs and continues directly to stacking
+
+- **Startup UX**:
+  - Added splash screen with logo/title/version and granular progress messages during initialization
+
+- **Quality Analysis Improvements**:
+  - Limited star measurements to the top 10 brightest detections for more stable metrics
+  - Suppressed noisy FITS warnings during analysis
+
+- **Windows Logging Compatibility**:
+  - Replaced Unicode status glyphs with ASCII to avoid encoding-related log failures
 
 ## Version 1.2.0 - Current Development
 

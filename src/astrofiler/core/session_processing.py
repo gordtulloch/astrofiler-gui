@@ -117,7 +117,77 @@ class SessionProcessor:
         # Get unique sessions count
         unique_sessions = len(set(sessionsCreated))
         logger.info(f"Light session creation complete: {unique_sessions} sessions created for {total_files} files")
+        
+        # Update quality metrics for all created sessions
+        if sessionsCreated:
+            logger.info("Calculating quality metric averages for sessions...")
+            self.updateSessionQualityMetrics(list(set(sessionsCreated)))
+        
         return sessionsCreated
+    
+    def updateSessionQualityMetrics(self, session_ids):
+        """
+        Calculate and update average quality metrics for sessions.
+        
+        Args:
+            session_ids: List of session IDs to update
+        """
+        import numpy as np
+        
+        for session_id in session_ids:
+            try:
+                # Get all files in this session with quality metrics
+                session_files = FitsFileModel.select().where(
+                    FitsFileModel.fitsFileSession == session_id
+                )
+                
+                # Collect quality metrics
+                fwhm_values = []
+                ecc_values = []
+                hfr_values = []
+                snr_values = []
+                star_counts = []
+                scale_values = []
+                
+                for f in session_files:
+                    if f.fitsFileAvgFWHMArcsec is not None:
+                        fwhm_values.append(f.fitsFileAvgFWHMArcsec)
+                    if f.fitsFileAvgEccentricity is not None:
+                        ecc_values.append(f.fitsFileAvgEccentricity)
+                    if f.fitsFileAvgHFRArcsec is not None:
+                        hfr_values.append(f.fitsFileAvgHFRArcsec)
+                    if f.fitsFileImageSNR is not None:
+                        snr_values.append(f.fitsFileImageSNR)
+                    if f.fitsFileStarCount is not None:
+                        star_counts.append(f.fitsFileStarCount)
+                    if f.fitsFileImageScale is not None:
+                        scale_values.append(f.fitsFileImageScale)
+                
+                # Calculate averages and update session
+                update_data = {}
+                if fwhm_values:
+                    update_data['fitsSessionAvgFWHMArcsec'] = float(np.mean(fwhm_values))
+                if ecc_values:
+                    update_data['fitsSessionAvgEccentricity'] = float(np.mean(ecc_values))
+                if hfr_values:
+                    update_data['fitsSessionAvgHFRArcsec'] = float(np.mean(hfr_values))
+                if snr_values:
+                    update_data['fitsSessionImageSNR'] = float(np.mean(snr_values))
+                if star_counts:
+                    update_data['fitsSessionStarCount'] = int(np.mean(star_counts))
+                if scale_values:
+                    update_data['fitsSessionImageScale'] = float(np.mean(scale_values))
+                
+                if update_data:
+                    query = fitsSessionModel.update(**update_data).where(
+                        fitsSessionModel.fitsSessionId == session_id
+                    )
+                    query.execute()
+                    logger.debug(f"Updated quality metrics for session {session_id}")
+                    
+            except Exception as e:
+                logger.error(f"Error updating quality metrics for session {session_id}: {e}")
+                continue
 
     def shouldCreateNewCalibrationSession(self, currentFile, currentSession, calType):
         """

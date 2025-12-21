@@ -7,7 +7,7 @@ astrofiler_file.py for better maintainability and organization:
 - utils: Common utility functions
 - file_processing: FITS file handling and database operations  
 - calibration: Master frame creation and calibration processing
-- quality_analysis: Image quality assessment and metrics
+- enhanced_quality: Advanced image quality assessment with SEP star detection
 - repository: File organization and repository management
 """
 
@@ -22,7 +22,7 @@ __version__ = "1.2.0"
 # Import key classes and functions for convenient access
 from .file_processing import FileProcessor
 from .calibration import CalibrationProcessor
-from .quality_analysis import QualityAnalyzer
+from .enhanced_quality import EnhancedQualityAnalyzer
 from .repository import RepositoryManager
 from .master_manager import MasterFrameManager, get_master_manager
 from .compress_files import get_fits_compressor, compress_fits_file, is_compression_enabled
@@ -49,7 +49,7 @@ class fitsProcessing:
         """Initialize all processor components."""
         self.file_processor = FileProcessor()
         self.calibration_processor = CalibrationProcessor()
-        self.quality_analyzer = QualityAnalyzer()
+        self.quality_analyzer = EnhancedQualityAnalyzer()
         self.repository_manager = RepositoryManager()
         self.master_manager = get_master_manager()  # Advanced master frame management
         self.session_processor = SessionProcessor()  # Session creation and linking
@@ -314,7 +314,7 @@ __all__ = [
     'fitsProcessing',
     'FileProcessor', 
     'CalibrationProcessor',
-    'QualityAnalyzer',
+    'EnhancedQualityAnalyzer',
     'RepositoryManager',
     'MasterFrameManager',
     'SessionProcessor',

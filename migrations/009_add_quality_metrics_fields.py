@@ -17,7 +17,7 @@ def migrate(migrator, database, fake=False, **kwargs):
     Add quality metrics fields to fitsFile table
     """
     # Add quality metrics fields
-    migrator.add_fields('fitsFile', 
+    migrator.add_fields('fitsfile', 
         fitsFileAvgFWHMArcsec=pw.FloatField(null=True),
         fitsFileAvgEccentricity=pw.FloatField(null=True),
         fitsFileAvgHFRArcsec=pw.FloatField(null=True),
@@ -31,7 +31,7 @@ def rollback(migrator, database, fake=False, **kwargs):
     Remove quality metrics fields from fitsFile table
     """
     # Remove the quality metrics fields
-    migrator.remove_fields('fitsFile', 
+    migrator.remove_fields('fitsfile', 
         'fitsFileAvgFWHMArcsec',
         'fitsFileAvgEccentricity', 
         'fitsFileAvgHFRArcsec',

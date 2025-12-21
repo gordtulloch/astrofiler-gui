@@ -176,6 +176,7 @@ def validate_database_access():
         
         from astrofiler.database import setup_database
         from astrofiler.models import fitsFile, fitsSession
+        from astrofiler.exceptions import DatabaseError
         
         # Setup database connection
         setup_database()
@@ -186,6 +187,10 @@ def validate_database_access():
         
         logging.info(f"Database validation successful: {file_count} files, {session_count} sessions")
         return True
+    
+    except DatabaseError:
+        # Re-raise DatabaseError to be handled at top level
+        raise
         
     except Exception as e:
         raise Exception(f"Database validation failed: {e}")
@@ -549,19 +554,29 @@ def clear_all_masters(config, dry_run=False):
         return False
 
 def perform_quality_assessment(config, session_id=None, generate_report=False):
-    """Perform quality assessment on frames"""
-    from astrofiler.core import fitsProcessing
-    from astrofiler.models import fitsFile, fitsSession
+    """Perform enhanced quality assessment with SEP star detection and database updates"""
+    from astrofiler.core.enhanced_quality import EnhancedQualityAnalyzer
+    from astrofiler.models import fitsFile
     
-    logging.info("Starting quality assessment...")
+    logging.info("Starting enhanced quality assessment with SEP star detection...")
     
     try:
-        processor = fitsProcessing()
+        analyzer = EnhancedQualityAnalyzer()
         
-        # Get files to assess
-        query = fitsFile.select()
+        # Get files to assess - focus on light frames
         if session_id:
-            query = query.where(fitsFile.fitsFileSessionId == session_id)
+            query = fitsFile.select().where(
+                fitsFile.fitsFileSession == session_id,
+                fitsFile.fitsFileName.is_null(False),
+                fitsFile.fitsFileSoftDelete == False
+            )
+        else:
+            # Analyze light frames by default
+            query = fitsFile.select().where(
+                fitsFile.fitsFileType == 'LIGHT',
+                fitsFile.fitsFileName.is_null(False),
+                fitsFile.fitsFileSoftDelete == False
+            )
         
         files_to_assess = list(query)
         
@@ -569,37 +584,58 @@ def perform_quality_assessment(config, session_id=None, generate_report=False):
             logging.info("No files found for quality assessment")
             return True
         
-        # Convert to file paths
-        file_paths = [f.fitsFileId for f in files_to_assess]
+        logging.info(f"Analyzing quality for {len(files_to_assess)} files...")
         
-        logging.info(f"Assessing quality of {len(file_paths)} files...")
+        # Analyze each file and update database
+        successful = 0
+        failed = 0
+        quality_metrics = []
         
-        # Batch quality assessment
-        results = processor.batchAssessQuality(
-            file_paths=file_paths,
-            progress_callback=create_cli_progress_callback("Quality assessment")
-        )
+        for i, fits_file in enumerate(files_to_assess):
+            try:
+                logging.info(f"[{i+1}/{len(files_to_assess)}] Analyzing {fits_file.fitsFileObject}...")
+                
+                # Analyze and update database
+                results = analyzer.analyze_and_update_file(
+                    fits_file.fitsFileName,
+                    fits_file.fitsFileId,
+                    progress_callback=None
+                )
+                
+                if results.get("status") == "success":
+                    successful += 1
+                    quality_metrics.append(results)
+                    
+                    # Log key metrics
+                    fwhm = results.get('avg_fwhm_arcsec', 'N/A')
+                    stars = results.get('star_count', 'N/A')
+                    snr = results.get('image_snr', 'N/A')
+                    logging.info(f"  [OK] FWHM: {fwhm}, Stars: {stars}, SNR: {snr:.1f}")
+                else:
+                    failed += 1
+                    logging.warning(f"  [FAIL] Failed: {results.get('message', 'Unknown error')}")
+                    
+            except Exception as e:
+                failed += 1
+                logging.error(f"  [ERROR] Error: {e}")
+                continue
         
-        # Analyze results
-        if results:
-            scores = [r.get('overall_score', 0) for r in results if 'overall_score' in r]
-            if scores:
-                avg_score = sum(scores) / len(scores)
-                logging.info(f"Quality assessment complete: Average score {avg_score:.1f}/100")
-                
-                # Quality distribution
-                excellent = len([s for s in scores if s >= 90])
-                good = len([s for s in scores if 75 <= s < 90])
-                acceptable = len([s for s in scores if 60 <= s < 75])
-                poor = len([s for s in scores if 40 <= s < 60])
-                unusable = len([s for s in scores if s < 40])
-                
-                logging.info(f"Quality distribution: Excellent: {excellent}, Good: {good}, "
-                           f"Acceptable: {acceptable}, Poor: {poor}, Unusable: {unusable}")
-                
-                if generate_report:
-                    generate_quality_report(results, config)
+        # Summary statistics
+        logging.info(f"\nQuality assessment complete: {successful} successful, {failed} failed")
+        
+        if quality_metrics:
+            # Calculate average metrics
+            fwhm_values = [m.get('avg_fwhm_arcsec') for m in quality_metrics if m.get('avg_fwhm_arcsec')]
+            snr_values = [m.get('image_snr') for m in quality_metrics if m.get('image_snr')]
+            star_counts = [m.get('star_count') for m in quality_metrics if m.get('star_count')]
             
+            if fwhm_values:
+                logging.info(f"Average FWHM: {sum(fwhm_values)/len(fwhm_values):.2f} arcsec")
+            if snr_values:
+                logging.info(f"Average SNR: {sum(snr_values)/len(snr_values):.1f}")
+            if star_counts:
+                logging.info(f"Average star count: {sum(star_counts)/len(star_counts):.0f}")
+        
         return True
         
     except Exception as e:
@@ -851,12 +887,29 @@ def main():
     except KeyboardInterrupt:
         logging.info("Operation cancelled by user")
         return 130
-        
+    
     except Exception as e:
+        # Import DatabaseError for special handling
+        from astrofiler.exceptions import DatabaseError
+        
+        # Handle database errors gracefully without traceback
+        if isinstance(e, DatabaseError):
+            logging.error(f"Database error: {e}")
+            print(f"\n{'='*70}")
+            print("DATABASE ERROR")
+            print(f"{'='*70}")
+            print(f"\n{e}\n")
+            print(f"{'='*70}\n")
+            return 1
+        
+        # For other exceptions, show traceback if verbose
         logging.error(f"Fatal error: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()
+        else:
+            print(f"\nError: {e}")
+            print("Use -v/--verbose for detailed error information")
         return 1
 
 if __name__ == '__main__':

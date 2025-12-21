@@ -19,12 +19,14 @@ from astropy.io import fits
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
+from astropy.wcs import FITSFixedWarning
 from astropy.stats import sigma_clipped_stats, mad_std
 import datetime
 
-# Suppress warnings for cleaner output during prototyping
+# Suppress warnings for cleaner output
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=FITSFixedWarning)  # Suppress WCS auto-correction warnings
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ class EnhancedQualityAnalyzer:
     def __init__(self):
         """Initialize the enhanced quality analyzer."""
         self.min_star_count = 3  # Minimum stars needed for reliable analysis
-        self.max_star_count = 200  # Maximum stars to analyze (for performance)
+        self.max_star_count = 10  # Maximum stars to analyze (top brightest for quality metrics)
         
         # SEP detection parameters - optimized from notebook development
         self.detection_threshold = 5.0  # Sigma threshold for star detection

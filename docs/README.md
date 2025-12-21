@@ -160,7 +160,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 
 ### **Future Versions**
 - **XISF import**: Load XISF files, extract headers and data, save to FITS format (optional)
-- **Thumbnails/Sample Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
+- **Thumbnails/Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
 
 ## 🔧 Technical Requirements
 

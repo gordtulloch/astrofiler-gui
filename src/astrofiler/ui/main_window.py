@@ -1,20 +1,10 @@
 import os
 import logging
+from typing import Callable, Optional
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QMainWindow, 
                                QStackedWidget, QStatusBar, QMessageBox, QDialog)
 from PySide6.QtGui import QAction, QDesktopServices
-
-from .images_widget import ImagesWidget
-from .sessions_widget import SessionsWidget
-from .merge_widget import MergeWidget
-from .stats_widget import StatsWidget
-from .config_widget import ConfigWidget
-from .duplicates_widget import DuplicatesWidget
-from .log_widget import LogWidget
-from .about_widget import AboutWidget
-from .download_dialog import SmartTelescopeDownloadDialog
-from .cloud_sync_dialog import CloudSyncDialog
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +50,20 @@ def detect_system_theme():
 class AstroFilerGUI(QMainWindow):
     """Main GUI class that encapsulates the entire AstroFiler application interface"""
     
-    def __init__(self):
+    def __init__(self, status_callback: Optional[Callable[[str], None]] = None):
         super().__init__()
+        self._status_callback = status_callback
         self.current_theme = "Dark"
         self.init_ui()
         self.apply_initial_theme()
+
+    def _status(self, message: str) -> None:
+        if callable(self._status_callback):
+            try:
+                self._status_callback(message)
+            except Exception:
+                # Status updates must never break startup
+                pass
     
     def init_ui(self):
         """Initialize the user interface"""
@@ -88,13 +87,36 @@ class AstroFilerGUI(QMainWindow):
         main_layout.addWidget(self.stacked_widget)
         
         # Create the different view widgets
+        self._status("Loading Images view...")
+        from .images_widget import ImagesWidget
         self.images_widget = ImagesWidget()
+
+        self._status("Loading Sessions view...")
+        from .sessions_widget import SessionsWidget
         self.sessions_widget = SessionsWidget()
+
+        self._status("Loading Merge view...")
+        from .merge_widget import MergeWidget
         self.merge_widget = MergeWidget()
+
+        self._status("Loading Statistics view...")
+        from .stats_widget import StatsWidget
         self.stats_widget = StatsWidget()
+
+        self._status("Loading Configuration view...")
+        from .config_widget import ConfigWidget
         self.config_widget = ConfigWidget()
+
+        self._status("Loading Duplicates view...")
+        from .duplicates_widget import DuplicatesWidget
         self.duplicates_widget = DuplicatesWidget()
+
+        self._status("Loading Log view...")
+        from .log_widget import LogWidget
         self.log_widget = LogWidget()
+
+        self._status("Loading About view...")
+        from .about_widget import AboutWidget
         self.about_widget = AboutWidget()
         
         # Set up widget connections for refreshing
@@ -247,6 +269,7 @@ class AstroFilerGUI(QMainWindow):
     def open_download_dialog(self):
         """Open the telescope download dialog"""
         try:
+            from .download_dialog import SmartTelescopeDownloadDialog
             dialog = SmartTelescopeDownloadDialog(self)
             result = dialog.exec()
             
@@ -289,6 +312,7 @@ class AstroFilerGUI(QMainWindow):
         """Open the Cloud Sync dialog"""
         try:
             logger.info("Opening Cloud Sync dialog")
+            from .cloud_sync_dialog import CloudSyncDialog
             dialog = CloudSyncDialog(self)
             dialog.exec()
         except Exception as e:

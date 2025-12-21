@@ -26,7 +26,7 @@ def test_imports():
     try:
         # Test core module imports
         from astrofiler.core import fitsProcessing
-        from astrofiler.core import FileProcessor, CalibrationProcessor, QualityAnalyzer, RepositoryManager
+        from astrofiler.core import FileProcessor, CalibrationProcessor, EnhancedQualityAnalyzer, RepositoryManager
         from astrofiler.core import normalize_file_path, sanitize_filesystem_name, dwarfFixHeader
         logger.info("✓ Core module imports successful")
         
@@ -34,7 +34,7 @@ def test_imports():
         from astrofiler.core.utils import normalize_file_path, sanitize_filesystem_name
         from astrofiler.core.file_processing import FileProcessor
         from astrofiler.core.calibration import CalibrationProcessor
-        from astrofiler.core.quality_analysis import QualityAnalyzer
+        from astrofiler.core.enhanced_quality import EnhancedQualityAnalyzer
         from astrofiler.core.repository import RepositoryManager
         logger.info("✓ Individual module imports successful")
         
@@ -78,7 +78,7 @@ def test_processor_classes():
     
     try:
         from astrofiler.core import fitsProcessing
-        from astrofiler.core import FileProcessor, CalibrationProcessor, QualityAnalyzer, RepositoryManager
+        from astrofiler.core import FileProcessor, CalibrationProcessor, EnhancedQualityAnalyzer, RepositoryManager
         
         # Test main fitsProcessing class
         processor = fitsProcessing()
@@ -96,9 +96,9 @@ def test_processor_classes():
         assert calib_proc is not None, "CalibrationProcessor should instantiate"
         logger.info("✓ CalibrationProcessor class working")
         
-        quality_analyzer = QualityAnalyzer()
-        assert quality_analyzer is not None, "QualityAnalyzer should instantiate"
-        logger.info("✓ QualityAnalyzer class working")
+        quality_analyzer = EnhancedQualityAnalyzer()
+        assert quality_analyzer is not None, "EnhancedQualityAnalyzer should instantiate"
+        logger.info("✓ EnhancedQualityAnalyzer class working")
         
         repo_manager = RepositoryManager()
         assert repo_manager is not None, "RepositoryManager should instantiate"

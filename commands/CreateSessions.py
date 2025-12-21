@@ -17,6 +17,7 @@ Options:
     -C, --calibs     Only create calibration sessions
     -r, --regenerate Clear all existing sessions first, then regenerate all session data
     -n, --new-only   Only create sessions for files without existing sessions
+    -q, --update-quality Update quality metrics for all existing light sessions
 
 Requirements:
     - astrofiler.ini configuration file
@@ -41,6 +42,9 @@ Example:
     
     # Only create sessions for unassigned files
     python CreateSessions.py -n
+    
+    # Update quality metrics for all existing sessions
+    python CreateSessions.py -q
 """
 
 import sys
@@ -102,9 +106,33 @@ def create_light_sessions(processor, logger):
     try:
         created_sessions = processor.createLightSessions(progress_callback=None)
         logger.info(f"Light sessions created: {len(created_sessions)}")
+        # Quality metrics are automatically updated by createLightSessions
         return len(created_sessions)
     except Exception as e:
         logger.error(f"Error creating light sessions: {e}")
+        raise
+
+def update_session_quality_metrics(processor, logger):
+    """Update quality metrics for all existing light sessions."""
+    logger.info("Updating quality metrics for all sessions...")
+    try:
+        # Get all light sessions (non-calibration)
+        sessions = FitsSessionModel.select().where(
+            (FitsSessionModel.is_auto_calibration == False) | 
+            (FitsSessionModel.is_auto_calibration.is_null())
+        )
+        
+        session_ids = [str(s.fitsSessionId) for s in sessions]
+        if not session_ids:
+            logger.info("No light sessions found to update")
+            return 0
+        
+        logger.info(f"Updating quality metrics for {len(session_ids)} sessions...")
+        processor.session_processor.updateSessionQualityMetrics(session_ids)
+        logger.info(f"Quality metrics updated for {len(session_ids)} sessions")
+        return len(session_ids)
+    except Exception as e:
+        logger.error(f"Error updating session quality metrics: {e}")
         raise
 
 def create_calibration_sessions(processor, logger):
@@ -148,6 +176,7 @@ Examples:
     python CreateSessions.py -C            # Only calibration sessions
     python CreateSessions.py -r            # Clear all sessions and regenerate
     python CreateSessions.py -n            # Only create sessions for unassigned files
+    python CreateSessions.py -q            # Update quality metrics for existing sessions
         """
     )
     
@@ -163,14 +192,18 @@ Examples:
                         help='Clear all existing sessions first, then regenerate all session data')
     parser.add_argument('-n', '--new-only', action='store_true',
                         help='Only create sessions for files without existing sessions')
+    parser.add_argument('-q', '--update-quality', action='store_true',
+                        help='Update quality metrics for all existing light sessions')
     
     args = parser.parse_args()
     
     # Validate argument combinations
-    if args.regenerate and (args.lights or args.calibs or args.new_only):
+    if args.regenerate and (args.lights or args.calibs or args.new_only or args.update_quality):
         parser.error("--regenerate cannot be used with other options (regenerate always creates both types for all files)")
     if args.new_only and (args.lights or args.calibs):
         parser.error("--new-only cannot be used with --lights or --calibs (new-only always processes both types)")
+    if args.update_quality and (args.lights or args.calibs or args.new_only or args.regenerate):
+        parser.error("--update-quality must be used alone (only updates quality metrics for existing sessions)")
     
     # Setup logging
     logger = setup_logging(args.verbose)
@@ -189,6 +222,14 @@ Examples:
         
         # Create processor instance
         processor = fitsProcessing()
+        
+        # Handle update-quality flag
+        if args.update_quality:
+            logger.info("Update-quality mode: Will update quality metrics for all existing sessions")
+            sessions_updated = update_session_quality_metrics(processor, logger)
+            logger.info(f"=== Quality Metrics Update Complete ===")
+            logger.info(f"Updated quality metrics for {sessions_updated} sessions")
+            return 0
         
         # Handle regenerate flag - this overrides other options
         if args.regenerate:
@@ -281,10 +322,27 @@ Examples:
         logger.info("Operation cancelled by user (Ctrl+C)")
         return 1
     except Exception as e:
+        # Import DatabaseError for special handling
+        from astrofiler.exceptions import DatabaseError
+        
+        # Handle database errors gracefully without traceback
+        if isinstance(e, DatabaseError):
+            logger.error(f"Database error: {e}")
+            print(f"\n{'='*70}")
+            print("DATABASE ERROR")
+            print(f"{'='*70}")
+            print(f"\n{e}\n")
+            print(f"{'='*70}\n")
+            return 1
+        
+        # For other exceptions, show traceback if verbose
         logger.error(f"Error during session creation: {e}")
         if args.verbose:
             import traceback
             logger.error(traceback.format_exc())
+        else:
+            print(f"\nError: {e}")
+            print("Use -v/--verbose for detailed error information")
         return 1
 
 if __name__ == "__main__":

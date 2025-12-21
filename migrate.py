@@ -33,6 +33,7 @@ sys.path.insert(0, src_path)
 # Now import astrofiler modules
 try:
     from astrofiler.database import setup_database, create_migration, run_migrations, get_migration_status
+    from astrofiler.exceptions import DatabaseError
 except ImportError as e:
     print(f"Error importing astrofiler modules: {e}")
     print("Make sure you're running this from the project root directory.")
@@ -78,41 +79,59 @@ def main():
         parser.print_help()
         return
     
-    if args.command == 'status':
-        status = get_migration_status()
-        if status:
-            print("Migration Status:")
-            print(f"Current migration: {status['current']}")
-            print(f"Completed migrations: {len(status['done'])}")
-            if status['done']:
-                for migration in status['done']:
-                    print(f"  ✓ {migration}")
-            print(f"Pending migrations: {len(status['undone'])}")
-            if status['undone']:
-                for migration in status['undone']:
-                    print(f"  ○ {migration}")
-            if not status['undone']:
-                print("  No pending migrations")
-        else:
-            print("Error getting migration status")
-            
-    elif args.command == 'create':
-        if create_migration(args.name):
-            print(f"Migration '{args.name}' created successfully")
-        else:
-            print(f"Error creating migration '{args.name}'")
-            
-    elif args.command == 'run':
-        if run_migrations():
-            print("All migrations completed successfully")
-        else:
-            print("Error running migrations")
-            
-    elif args.command == 'setup':
-        if setup_database():
-            print("Database setup completed successfully")
-        else:
-            print("Error during database setup")
+    try:
+        if args.command == 'status':
+            status = get_migration_status()
+            if status:
+                print("Migration Status:")
+                print(f"Current migration: {status['current']}")
+                print(f"Completed migrations: {len(status['done'])}")
+                if status['done']:
+                    for migration in status['done']:
+                        print(f"  [OK] {migration}")
+                print(f"Pending migrations: {len(status['undone'])}")
+                if status['undone']:
+                    for migration in status['undone']:
+                        print(f"  [ ] {migration}")
+                if not status['undone']:
+                    print("  No pending migrations")
+            else:
+                print("Error getting migration status")
+                
+        elif args.command == 'create':
+            if create_migration(args.name):
+                print(f"Migration '{args.name}' created successfully")
+            else:
+                print(f"Error creating migration '{args.name}'")
+                
+        elif args.command == 'run':
+            if run_migrations():
+                print("All migrations completed successfully")
+            else:
+                print("Error running migrations")
+                
+        elif args.command == 'setup':
+            if setup_database():
+                print("Database setup completed successfully")
+            else:
+                print("Error during database setup")
+                
+    except DatabaseError as e:
+        # Handle database errors gracefully without traceback
+        print(f"\n{'='*70}")
+        print("DATABASE ERROR")
+        print(f"{'='*70}")
+        print(f"\n{e}\n")
+        print(f"{'='*70}\n")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
