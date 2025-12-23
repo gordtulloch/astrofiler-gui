@@ -20,10 +20,9 @@ logger = logging.getLogger(__name__)
 
 class ImagesWidget(QWidget):
     """
-    Images widget for viewing and managing FITS files with pagination and search.
+    Images widget for viewing and managing FITS files with search.
     
     Features:
-    - Paginated view of FITS files for better performance
     - Text search functionality on object field
     - Sortable by Object (default) or Date
     - File loading and repository synchronization
@@ -31,17 +30,13 @@ class ImagesWidget(QWidget):
     """
     def __init__(self):
         super().__init__()
-        # Pagination variables
-        self.page_size = 24
-        self.current_page = 0
-        self.total_items = 0  # Count of top-level items (objects or dates)
         self.search_term = ""
         
         # Setup icons for local and cloud status
         self.setup_icons()
         
         self.init_ui()
-        # Load first page on startup
+        # Load all items on startup
         self.load_fits_data()
     
     def setup_icons(self):
@@ -150,31 +145,9 @@ class ImagesWidget(QWidget):
         self.file_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_tree.customContextMenuRequested.connect(self.show_file_context_menu)
         
-        # Pagination controls at the bottom
-        pagination_layout = QHBoxLayout()
-        self.page_info_label = QLabel("Page 1 of 1 (0 items)")
-        self.prev_page_button = QPushButton("◀ Previous")
-        self.prev_page_button.setMaximumSize(90, 28)
-        self.prev_page_button.setStyleSheet("QPushButton { font-size: 10px; }")
-        self.next_page_button = QPushButton("Next ▶")
-        self.next_page_button.setMaximumSize(90, 28)
-        self.next_page_button.setStyleSheet("QPushButton { font-size: 10px; }")
-        self.page_size_label = QLabel("Items per page:")
-        self.page_size_combo = QComboBox()
-        self.page_size_combo.addItems(["24", "50", "100", "200", "500"])
-        self.page_size_combo.setCurrentText("24")
-        
-        pagination_layout.addWidget(self.page_info_label)
-        pagination_layout.addStretch()
-        pagination_layout.addWidget(self.prev_page_button)
-        pagination_layout.addWidget(self.next_page_button)
-        pagination_layout.addWidget(self.page_size_label)
-        pagination_layout.addWidget(self.page_size_combo)
-        
         # Add all layouts to main layout
         layout.addLayout(controls_layout)
         layout.addWidget(self.file_tree)
-        layout.addLayout(pagination_layout)
         
         # Connect signals
         self.search_input.returnPressed.connect(self.perform_search)
@@ -184,14 +157,11 @@ class ImagesWidget(QWidget):
         self.frame_filter_combo.currentTextChanged.connect(self.load_fits_data)
         self.show_deleted_checkbox.stateChanged.connect(self.load_fits_data)
         self.file_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
-        self.prev_page_button.clicked.connect(self.prev_page)
-        self.next_page_button.clicked.connect(self.next_page)
-        self.page_size_combo.currentTextChanged.connect(self.change_page_size)
 
     # ...existing code for other methods...
     
     def load_fits_data(self):
-        """Load FITS file data from the database with pagination"""
+        """Load FITS file data from the database."""
         try:
             self.file_tree.clear()
             
@@ -213,8 +183,7 @@ class ImagesWidget(QWidget):
                 self._load_fits_data_by_filter_paginated()
             else:
                 self._load_fits_data_by_object_paginated()  # Default
-                
-            self._update_pagination_controls()
+
             logger.debug(f"Loaded FITS data with {sort_method} sorting")
             
         except Exception as e:
@@ -249,8 +218,7 @@ class ImagesWidget(QWidget):
         return query
 
     def _load_fits_data_by_object_paginated(self):
-        """Load FITS file data grouped by object name with pagination of top-level objects."""
-        from peewee import fn
+        """Load FITS file data grouped by object name."""
         
         # Get unique objects with search and frame filter applied
         base_query = self._get_fits_files_query()
@@ -261,14 +229,9 @@ class ImagesWidget(QWidget):
         
         # Get all unique objects
         all_objects = [obj.fitsFileObject or "Unknown" for obj in objects_query]
-        self.total_items = len(all_objects)
+        page_objects = all_objects
         
-        # Calculate pagination
-        start_idx = self.current_page * self.page_size
-        end_idx = start_idx + self.page_size
-        page_objects = all_objects[start_idx:end_idx]
-        
-        # Load files for each object on current page
+        # Load files for each object
         for object_name in page_objects:
             # Query files for this object
             if object_name == "Unknown":
@@ -325,7 +288,7 @@ class ImagesWidget(QWidget):
             parent_item.setExpanded(False)  # Start collapsed
 
     def _load_fits_data_by_date_paginated(self):
-        """Load FITS file data grouped by date with pagination of top-level dates."""
+        """Load FITS file data grouped by date."""
         from peewee import fn
         
         # Get unique dates (date only, not time) with search and frame filter applied
@@ -337,14 +300,9 @@ class ImagesWidget(QWidget):
         
         # Get all unique dates (date only)
         all_dates = [row.date_only for row in dates_query if row.date_only]
-        self.total_items = len(all_dates)
+        page_dates = all_dates
         
-        # Calculate pagination
-        start_idx = self.current_page * self.page_size
-        end_idx = start_idx + self.page_size
-        page_dates = all_dates[start_idx:end_idx]
-        
-        # Load files for each date on current page
+        # Load files for each date
         for date_obj in page_dates:
             # Query files for this date (all files on this date regardless of time)
             date_files = self._get_fits_files_query().where(fn.DATE(FitsFileModel.fitsFileDate) == date_obj)
@@ -397,7 +355,7 @@ class ImagesWidget(QWidget):
             parent_item.setExpanded(False)  # Start collapsed
 
     def _load_fits_data_by_filter_paginated(self):
-        """Load FITS file data grouped by filter with pagination of top-level filters."""
+        """Load FITS file data grouped by filter."""
         # Get unique filters with search and frame filter applied
         base_query = self._get_fits_files_query()
         filters_query = (base_query
@@ -407,14 +365,9 @@ class ImagesWidget(QWidget):
         
         # Get all unique filters
         all_filters = [filt.fitsFileFilter or "No Filter" for filt in filters_query]
-        self.total_items = len(all_filters)
+        page_filters = all_filters
         
-        # Calculate pagination
-        start_idx = self.current_page * self.page_size
-        end_idx = start_idx + self.page_size
-        page_filters = all_filters[start_idx:end_idx]
-        
-        # Load files for each filter on current page
+        # Load files for each filter
         for filter_name in page_filters:
             # Query files for this filter
             if filter_name == "No Filter":
@@ -470,19 +423,6 @@ class ImagesWidget(QWidget):
             self.file_tree.addTopLevelItem(parent_item)
             parent_item.setExpanded(False)  # Start collapsed
 
-    def _update_pagination_controls(self):
-        """Update pagination control states and labels."""
-        # Calculate total pages
-        total_pages = (self.total_items + self.page_size - 1) // self.page_size if self.total_items > 0 else 1
-        current_page_display = self.current_page + 1
-        
-        # Update page info label
-        self.page_info_label.setText(f"Page {current_page_display} of {total_pages} ({self.total_items} items)")
-        
-        # Enable/disable navigation buttons
-        self.prev_page_button.setEnabled(self.current_page > 0)
-        self.next_page_button.setEnabled(self.current_page < total_pages - 1)
-    
     def show_file_context_menu(self, position):
         """Show context menu for file items"""
         item = self.file_tree.itemAt(position)
@@ -660,35 +600,14 @@ class ImagesWidget(QWidget):
             self._view_file(filename)
     
     def perform_search(self):
-        """Perform search and reset to first page."""
+        """Perform search."""
         self.search_term = self.search_input.text().strip()
-        self.current_page = 0
         self.load_fits_data()
     
     def clear_search(self):
-        """Clear search and reset to first page."""
+        """Clear search."""
         self.search_input.clear()
         self.search_term = ""
-        self.current_page = 0
-        self.load_fits_data()
-    
-    def prev_page(self):
-        """Go to previous page."""
-        if self.current_page > 0:
-            self.current_page -= 1
-            self.load_fits_data()
-    
-    def next_page(self):
-        """Go to next page."""
-        max_page = (self.total_items - 1) // self.page_size
-        if self.current_page < max_page:
-            self.current_page += 1
-            self.load_fits_data()
-    
-    def change_page_size(self):
-        """Change page size and reset to first page."""
-        self.page_size = int(self.page_size_combo.currentText())
-        self.current_page = 0
         self.load_fits_data()
     
     def show_download_dialog(self):

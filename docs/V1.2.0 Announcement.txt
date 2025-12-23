@@ -1,0 +1,46 @@
+AstroFiler 1.2.0 BETA – New Features
+
+I’ve been heads-down on AstroFiler and just pushed a major 1.2.0 update focused on calibration automation, quality metrics, and safer repository/cloud workflows. All batchable functions in the GUI have been implemented as command line utilities to facilitate automation. 
+
+Highlights:
+
+Advanced quality analysis 
+
+Real quantitative metrics per light frame: FWHM, eccentricity, HFR, SNR, star count, and image scale
+Robust (SEP-based) star detection
+Metrics stored in the database automatically (so they’re searchable and can drive workflows)
+
+Auto-Calibration system
+
+Automated master bias/dark/flat creation and tracking
+Batch light-frame calibration with correct correction order and proper provenance
+Session-aware master selection (telescope/instrument/binning/temp/filter matching)
+FITS headers updated with calibration history + master references (counts/checksums/timestamps)
+
+Stacking for Image Previews
+
+Automated image stacking to create thumbnails displayed in Sessions menu
+Image registration with Astroalign before stacking
+Pretty Picture / Deepsky stacking with sigma clipping
+Photometric safe stacking (star-registers frames (astroalign), then combines via mean with no sigma clipping, and writes float32 FITS to preserve linear photometry.) to support Photometry in version 1.3
+
+Cloud Sync (Google Cloud Storage)
+
+Full GUI-driven sync with profiles (Complete / Backup / On-Demand) and analysis mode
+Cloud URL tracking in the DB, improved matching, and hash-based duplicate prevention
+Safer cleanup behavior: verification before deleting local files in backup-style workflows
+Backup soft deleted files (e.g. raw images after calibration completed) and remove from repo
+
+New tabbed configuration dialog (General / Cloud / Calibration / Smart Telescopes) to reduce clutter and make setup clearer
+Smart telescope integration upgrades
+
+iTelescope support (secure FTPS download + calibrated file discovery)
+Stellarmate support (SMB access to pictures folder)
+Improved telescope download workflows with metadata extraction and progress reporting
+
+FITS handling and automation improvements
+
+Lossless FITS compression support integrated into the ingest workflow
+Expanded CLI tooling and more consistent logging for unattended runs
+
+If anyone wants to kick the tires, I’d love feedback specifically on: (1) calibration/master matching behavior, (2) quality metric usefulness, and (3) cloud sync reliability on large repos.

@@ -112,6 +112,90 @@ class MasterFrameManager:
         masters_dir = self.masters_dir
         os.makedirs(masters_dir, exist_ok=True)
         return masters_dir
+
+    def _get_thumbnails_directory(self) -> str:
+        """Return the Thumbnails directory path under the configured repository, creating it if needed."""
+        try:
+            config = _get_config()
+            repo_folder = config.get('DEFAULT', 'repo', fallback='.')
+        except Exception as e:
+            logger.warning(f"Could not get repository folder from config: {e}")
+            repo_folder = os.getcwd()
+
+        thumbs_dir = os.path.join(repo_folder, 'Thumbnails')
+        os.makedirs(thumbs_dir, exist_ok=True)
+        return thumbs_dir
+
+    def _write_light_session_thumbnail(self, stacked_fits_path: str, session_id: str, width_px: int = 150) -> Optional[str]:
+        """Write a PNG thumbnail for a stacked FITS file into the repository Thumbnails folder.
+
+        The thumbnail will be width_px wide and preserve aspect ratio. File is named "<session_id>.png".
+        """
+        try:
+            if not stacked_fits_path or not os.path.exists(stacked_fits_path):
+                return None
+            if not session_id:
+                return None
+
+            from astropy.io import fits
+            import numpy as np
+            from PIL import Image
+
+            with fits.open(stacked_fits_path) as hdul:
+                data = hdul[0].data
+            if data is None:
+                return None
+
+            arr = np.asarray(data)
+
+            # Normalize to 2D grayscale for thumbnailing.
+            if arr.ndim == 3:
+                # Common FITS conventions are (C,H,W) or (H,W,C)
+                if arr.shape[0] in (3, 4) and arr.shape[1] > 1 and arr.shape[2] > 1:
+                    # (C,H,W) -> luminance-ish mean
+                    arr2 = np.nanmean(arr[:3, :, :].astype(np.float32, copy=False), axis=0)
+                elif arr.shape[-1] in (3, 4) and arr.shape[0] > 1 and arr.shape[1] > 1:
+                    arr2 = np.nanmean(arr[..., :3].astype(np.float32, copy=False), axis=-1)
+                else:
+                    # Fallback: flatten extra dims
+                    arr2 = np.nanmean(arr.astype(np.float32, copy=False), axis=0)
+            elif arr.ndim == 2:
+                arr2 = arr.astype(np.float32, copy=False)
+            else:
+                # Unsupported dimensionality for a quick preview
+                return None
+
+            finite = np.isfinite(arr2)
+            if not np.any(finite):
+                return None
+
+            lo, hi = np.nanpercentile(arr2[finite], [1.0, 99.0])
+            if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                lo = float(np.nanmin(arr2[finite]))
+                hi = float(np.nanmax(arr2[finite]))
+                if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                    return None
+
+            scaled = (arr2 - lo) / (hi - lo)
+            scaled = np.clip(scaled, 0.0, 1.0)
+            img8 = (scaled * 255.0).astype(np.uint8)
+
+            im = Image.fromarray(img8, mode='L')
+            w, h = im.size
+            if w <= 0 or h <= 0:
+                return None
+            new_w = int(width_px)
+            new_h = max(1, int(round((new_w * h) / float(w))))
+            im = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            thumbs_dir = self._get_thumbnails_directory()
+            out_path = os.path.join(thumbs_dir, f"{session_id}.png")
+            im.save(out_path, format='PNG')
+            return out_path
+
+        except Exception as e:
+            logger.warning(f"Failed to write thumbnail for session {session_id}: {e}")
+            return None
     
     def find_matching_master(self, session_data: Dict[str, Any], cal_type: str) -> Optional[Masters]:
         """
@@ -298,8 +382,15 @@ class MasterFrameManager:
                 progress_callback(100, 100, f"Error creating master {cal_type} frame")
             return None
     
-    def _create_master_sigma_clip(self, file_paths: List[str], output_path: str, 
-                                cal_type: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _create_master_sigma_clip(
+        self,
+        file_paths: List[str],
+        output_path: str,
+        cal_type: str,
+        progress_callback: Optional[Callable] = None,
+        reference_path: Optional[str] = None,
+        thumbnail_session_id: Optional[str] = None,
+    ) -> bool:
         """
         Create master frame using sigma-clipped averaging (internal implementation).
         
@@ -315,6 +406,10 @@ class MasterFrameManager:
         try:
             from astropy.io import fits
             import numpy as np
+            try:
+                import astroalign as aa  # type: ignore
+            except Exception:
+                aa = None
             
             if not file_paths:
                 logger.error("No input files provided")
@@ -331,6 +426,58 @@ class MasterFrameManager:
                 data_shape = hdul[0].data.shape
                 dtype = hdul[0].data.dtype
                 logger.info(f"Frame dimensions: {data_shape}, dtype: {dtype}")
+
+            is_light_stack = str(cal_type).lower() == 'light'
+
+            # Prepare reference for star registration (light stacking only)
+            ref_full = None
+            ref_path = None
+            if is_light_stack:
+                if aa is None:
+                    raise RuntimeError(
+                        "Light-frame stacking requires astroalign for star registration. "
+                        "Install it (pip install astroalign) and try again."
+                    )
+
+                candidate = reference_path if (reference_path and os.path.exists(reference_path)) else file_paths[0]
+                ref_path = candidate
+                with fits.open(candidate) as hdul:
+                    ref_full = hdul[0].data.astype(np.float32)
+
+            def _is_astroalign_maxiter_error(exc: Exception) -> bool:
+                max_iter_error = getattr(aa, 'MaxIterError', None) if aa is not None else None
+                if max_iter_error is not None:
+                    try:
+                        if isinstance(exc, max_iter_error):
+                            return True
+                    except Exception:
+                        pass
+                return exc.__class__.__name__ == 'MaxIterError'
+
+            def _register_to_reference(data: np.ndarray, file_path: str) -> np.ndarray:
+                """Register a light frame to the reference frame using astroalign."""
+                if not is_light_stack or aa is None or ref_full is None:
+                    return data
+                if ref_path is not None and os.path.abspath(file_path) == os.path.abspath(ref_path):
+                    return data
+
+                try:
+                    aligned, footprint = aa.register(data.astype(np.float32, copy=False), ref_full, fill_value=np.nan)
+                    aligned = aligned.astype(np.float32, copy=False)
+                    if footprint is not None:
+                        aligned = aligned.copy()
+                        aligned[footprint] = np.nan
+                    return aligned
+                except Exception as e:
+                    # If astroalign can't find a match, fall back to stacking the unaligned image.
+                    if _is_astroalign_maxiter_error(e):
+                        logger.warning(
+                            "Star registration failed for %s: %s. Proceeding without alignment for this frame.",
+                            os.path.basename(file_path),
+                            e,
+                        )
+                        return data.astype(np.float32, copy=False)
+                    raise
             
             if progress_callback:
                 progress_callback(30, 100, "Computing statistics (pass 1/2)...")
@@ -385,19 +532,22 @@ class MasterFrameManager:
                 chunk_data = []
                 for file_path in chunk_files:
                     with fits.open(file_path) as hdul:
-                        chunk_data.append(hdul[0].data.astype(np.float32))
+                            data = hdul[0].data.astype(np.float32)
+                            if is_light_stack and ref_full is not None:
+                                data = _register_to_reference(data, file_path)
+                            chunk_data.append(data)
                 
                 chunk_array = np.array(chunk_data)
                 
                 # Update running statistics
                 if median is None:
                     median = np.median(chunk_array, axis=0)
-                    M2 = np.sum((chunk_array - median[np.newaxis, :, :]) ** 2, axis=0)
+                    M2 = np.sum((chunk_array - median[np.newaxis, ...]) ** 2, axis=0)
                 else:
                     # Combine statistics from chunks
                     chunk_median = np.median(chunk_array, axis=0)
                     median = (median + chunk_median) / 2  # Approximate for speed
-                    M2 += np.sum((chunk_array - median[np.newaxis, :, :]) ** 2, axis=0)
+                    M2 += np.sum((chunk_array - median[np.newaxis, ...]) ** 2, axis=0)
                 
                 del chunk_data, chunk_array
                 
@@ -430,13 +580,17 @@ class MasterFrameManager:
                 try:
                     with fits.open(file_path) as hdul:
                         data = hdul[0].data.astype(np.float32)
+
+                        # For light stacks, register stars to the reference frame
+                        if is_light_stack and ref_full is not None:
+                            data = _register_to_reference(data, file_path)
                         
                         # Apply flat normalization if needed
                         if cal_type == 'flat':
                             data = data / frame_medians[i]
                         
                         # Apply sigma clipping mask
-                        mask = (data >= lower_bound) & (data <= upper_bound)
+                        mask = np.isfinite(data) & (data >= lower_bound) & (data <= upper_bound)
                         
                         # Accumulate valid pixels
                         accumulator += np.where(mask, data, 0)
@@ -488,6 +642,10 @@ class MasterFrameManager:
             # Save master frame
             hdu = fits.PrimaryHDU(data=output_data, header=header)
             hdu.writeto(output_path, overwrite=True)
+
+            # If this is a light stack, emit/update a session thumbnail.
+            if is_light_stack and thumbnail_session_id:
+                self._write_light_session_thumbnail(output_path, str(thumbnail_session_id), width_px=150)
             
             logger.info(f"Internal stacking: Master {cal_type} created successfully: {output_path}")
             logger.info(f"  Output shape: {output_data.shape}, dtype: {output_data.dtype}")
@@ -501,6 +659,155 @@ class MasterFrameManager:
                 
         except Exception as e:
             logger.error(f"Error in sigma-clipped master creation: {e}", exc_info=True)
+            return False
+
+    def _create_light_stack_photometric_mean(
+        self,
+        file_paths: List[str],
+        output_path: str,
+        progress_callback: Optional[Callable] = None,
+        reference_path: Optional[str] = None,
+        thumbnail_session_id: Optional[str] = None,
+    ) -> bool:
+        """Create a photometry-safe light stack.
+
+        This uses star registration (astroalign) and a NaN-aware mean combine.
+        It intentionally performs no sigma clipping / outlier rejection and
+        writes float32 output to preserve linearity for photometry.
+        """
+        try:
+            from astropy.io import fits
+            import numpy as np
+
+            try:
+                import astroalign as aa  # type: ignore
+            except Exception:
+                aa = None
+
+            if not file_paths:
+                logger.error("No input files provided")
+                return False
+
+            if aa is None:
+                raise RuntimeError(
+                    "Photometric stacking requires astroalign for star registration. "
+                    "Install it (pip install astroalign) and try again."
+                )
+
+            logger.info(
+                "Creating photometric light stack from %d files using registered mean (no clipping)",
+                len(file_paths),
+            )
+
+            if progress_callback:
+                progress_callback(0, 100, f"Loading {len(file_paths)} light frames...")
+
+            with fits.open(file_paths[0]) as hdul:
+                header = hdul[0].header.copy()
+                data_shape = hdul[0].data.shape
+
+            # Prepare reference
+            candidate = reference_path if (reference_path and os.path.exists(reference_path)) else file_paths[0]
+            ref_path = candidate
+            with fits.open(candidate) as hdul:
+                ref_full = hdul[0].data.astype(np.float32)
+
+            def _is_astroalign_maxiter_error(exc: Exception) -> bool:
+                max_iter_error = getattr(aa, 'MaxIterError', None)
+                if max_iter_error is not None:
+                    try:
+                        if isinstance(exc, max_iter_error):
+                            return True
+                    except Exception:
+                        pass
+                return exc.__class__.__name__ == 'MaxIterError'
+
+            def _register_to_reference(data: np.ndarray, file_path: str) -> np.ndarray:
+                if os.path.abspath(file_path) == os.path.abspath(ref_path):
+                    return data.astype(np.float32, copy=False)
+                try:
+                    aligned, footprint = aa.register(
+                        data.astype(np.float32, copy=False),
+                        ref_full,
+                        fill_value=np.nan,
+                    )
+                    aligned = aligned.astype(np.float32, copy=False)
+                    if footprint is not None:
+                        aligned = aligned.copy()
+                        aligned[footprint] = np.nan
+                    return aligned
+                except Exception as e:
+                    if _is_astroalign_maxiter_error(e):
+                        logger.warning(
+                            "Star registration failed for %s: %s. Proceeding without alignment for this frame.",
+                            os.path.basename(file_path),
+                            e,
+                        )
+                        return data.astype(np.float32, copy=False)
+                    raise
+
+            # Validate and stream accumulate
+            valid_files: List[str] = []
+            for i, file_path in enumerate(file_paths):
+                try:
+                    with fits.open(file_path) as hdul:
+                        if hdul[0].data.shape != data_shape:
+                            logger.warning("Skipping file with different dimensions: %s", file_path)
+                            continue
+                    valid_files.append(file_path)
+                except Exception as e:
+                    logger.warning("Skipping corrupted file %s: %s", file_path, e)
+
+                if progress_callback and (i + 1) % 10 == 0:
+                    progress_callback(5, 100, f"Validated {i+1}/{len(file_paths)} frames...")
+
+            if len(valid_files) < 2:
+                logger.error("Not enough valid frames to stack (%d)", len(valid_files))
+                return False
+
+            accumulator = np.zeros(data_shape, dtype=np.float64)
+            count = np.zeros(data_shape, dtype=np.uint16)
+
+            for i, file_path in enumerate(valid_files):
+                with fits.open(file_path) as hdul:
+                    data = hdul[0].data.astype(np.float32)
+                data = _register_to_reference(data, file_path)
+                mask = np.isfinite(data)
+                accumulator += np.where(mask, data, 0.0).astype(np.float64, copy=False)
+                count += mask.astype(np.uint16)
+
+                if progress_callback and (i + 1) % 2 == 0:
+                    progress = 10 + int(((i + 1) / len(valid_files)) * 80)
+                    progress_callback(progress, 100, f"Stacking {i+1}/{len(valid_files)} frames...")
+
+            mean = np.full(data_shape, np.nan, dtype=np.float32)
+            valid = count > 0
+            mean[valid] = (accumulator[valid] / count[valid]).astype(np.float32)
+
+            header['HISTORY'] = f'Photometric light stack created from {len(valid_files)} files'
+            header['NFILES'] = len(valid_files)
+            header['CREATOR'] = 'AstroFiler Photometric Stacking'
+            header['METHOD'] = 'Registered mean (no clipping)'
+            header['REFPATH'] = os.path.basename(ref_path)
+            header['DATE'] = datetime.datetime.now().isoformat()
+
+            if progress_callback:
+                progress_callback(95, 100, "Saving stack...")
+
+            hdu = fits.PrimaryHDU(data=mean.astype(np.float32, copy=False), header=header)
+            hdu.writeto(output_path, overwrite=True)
+
+            if progress_callback:
+                progress_callback(100, 100, "Stack created")
+
+            logger.info("Photometric stack created successfully: %s", output_path)
+
+            if thumbnail_session_id:
+                self._write_light_session_thumbnail(output_path, str(thumbnail_session_id), width_px=150)
+            return True
+
+        except Exception as e:
+            logger.error("Error creating photometric light stack: %s", e, exc_info=True)
             return False
     
     def _create_master_simple_average(self, file_paths: List[str], output_path: str) -> bool:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stack.py - Command line utility for batch stacking light sessions
+r"""Stack.py - Command line utility for batch stacking light sessions
 
 This command stacks light sessions using AstroFiler's internal sigma-clipped stacker.
 
@@ -19,6 +19,7 @@ Examples:
   .venv\Scripts\python commands\Stack.py --unstacked
   .venv\Scripts\python commands\Stack.py --session 12345
   .venv\Scripts\python commands\Stack.py --unstacked --dry-run
+    .venv\Scripts\python commands\Stack.py --session 12345 --photometric
 """
 
 import argparse
@@ -142,7 +143,7 @@ def _mark_files_stacked(file_ids: List[str]) -> None:
     FitsFileModel.update(fitsFileStacked=1).where(FitsFileModel.fitsFileId.in_(file_ids)).execute()
 
 
-def stack_session(session_id: str, dry_run: bool, logger: logging.Logger) -> bool:
+def stack_session(session_id: str, dry_run: bool, logger: logging.Logger, photometric: bool = False) -> bool:
     from astrofiler.core.master_manager import get_master_manager
     from astrofiler.models import fitsSession as FitsSessionModel
 
@@ -174,12 +175,21 @@ def stack_session(session_id: str, dry_run: bool, logger: logging.Logger) -> boo
         logger.info(f"Not enough frames to stack for session {session_id} (found {len(file_paths)}); skipping")
         return True
 
-    output_path = _default_output_path(session, file_paths, object_name)
+    if photometric:
+        from astrofiler.core.utils import sanitize_filesystem_name
+
+        out_dir = os.path.dirname(file_paths[0])
+        safe_object = sanitize_filesystem_name(object_name or 'Unknown')
+        date_str = str(session.fitsSessionDate) if session.fitsSessionDate else 'unknown_date'
+        output_path = os.path.join(out_dir, f"photometric_stack_{safe_object}_{date_str}_{session.fitsSessionId}.fits")
+    else:
+        output_path = _default_output_path(session, file_paths, object_name)
 
     best_ref_path = _select_best_reference_path(candidates)
 
     if dry_run:
-        logger.info(f"[DRY RUN] Would stack session {session_id} -> {output_path}")
+        mode = 'photometric' if photometric else 'deep'
+        logger.info(f"[DRY RUN] Would stack ({mode}) session {session_id} -> {output_path}")
         logger.info(f"[DRY RUN]   Frames: {len(file_paths)}")
         if best_ref_path:
             logger.info(f"[DRY RUN]   Reference: {best_ref_path}")
@@ -194,17 +204,28 @@ def stack_session(session_id: str, dry_run: bool, logger: logging.Logger) -> boo
         if message:
             logger.info(str(message))
 
-    logger.info(f"Stacking session {session_id} ({object_name})")
+    mode = 'photometric' if photometric else 'deep'
+    logger.info(f"Stacking ({mode}) session {session_id} ({object_name})")
     logger.info(f"Output: {output_path}")
 
     master_manager = get_master_manager()
-    ok = master_manager._create_master_sigma_clip(
-        file_paths=file_paths,
-        output_path=output_path,
-        cal_type='light',
-        reference_path=best_ref_path,
-        progress_callback=_progress_callback,
-    )
+    if photometric:
+        ok = master_manager._create_light_stack_photometric_mean(
+            file_paths=file_paths,
+            output_path=output_path,
+            reference_path=best_ref_path,
+            progress_callback=_progress_callback,
+            thumbnail_session_id=str(session.fitsSessionId),
+        )
+    else:
+        ok = master_manager._create_master_sigma_clip(
+            file_paths=file_paths,
+            output_path=output_path,
+            cal_type='light',
+            reference_path=best_ref_path,
+            progress_callback=_progress_callback,
+            thumbnail_session_id=str(session.fitsSessionId),
+        )
 
     if not ok or not os.path.exists(output_path):
         logger.error(f"Stack failed for session {session_id}")
@@ -256,6 +277,11 @@ def main() -> int:
     group.add_argument('--session', type=str, help='Stack a single session by session ID')
 
     parser.add_argument('--dry-run', action='store_true', help='Show what would be done without writing output files')
+    parser.add_argument(
+        '--photometric',
+        action='store_true',
+        help='Use photometry-safe stacking (registered mean, no sigma clipping). Default is deep/pretty sigma-clipped stacking.',
+    )
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging')
 
     args = parser.parse_args()
@@ -277,7 +303,12 @@ def main() -> int:
 
         failures = 0
         for s in sessions:
-            ok = stack_session(str(s.fitsSessionId), dry_run=args.dry_run, logger=logger)
+            ok = stack_session(
+                str(s.fitsSessionId),
+                dry_run=args.dry_run,
+                logger=logger,
+                photometric=bool(args.photometric),
+            )
             if not ok:
                 failures += 1
 

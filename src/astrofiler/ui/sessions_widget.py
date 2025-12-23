@@ -4,6 +4,7 @@ import logging
 import datetime
 from datetime import datetime as dt
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QTreeWidget, QTreeWidgetItem, QAbstractItemView,
                                QMenu, QProgressDialog, QApplication, QMessageBox,
@@ -47,19 +48,21 @@ class SessionsWidget(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Object Name", "Date", "Telescope", "Imager", "Filter", "Images", "Resources"])
+        self.sessions_tree.setHeaderLabels(["Object Name", "Thumbnail", "Date", "Telescope", "Imager", "Filter", "Images", "Resources"])
+        self.sessions_tree.setIconSize(QSize(150, 150))
         
         # Enable multi-selection
         self.sessions_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         
         # Set column widths for better display
         self.sessions_tree.setColumnWidth(0, 200)  # Object Name
-        self.sessions_tree.setColumnWidth(1, 150)  # Date
-        self.sessions_tree.setColumnWidth(2, 150)  # Telescope
-        self.sessions_tree.setColumnWidth(3, 150)  # Imager
-        self.sessions_tree.setColumnWidth(4, 100)  # Filter
-        self.sessions_tree.setColumnWidth(5, 80)   # Images
-        self.sessions_tree.setColumnWidth(6, 140)  # Resources
+        self.sessions_tree.setColumnWidth(1, 160)  # Thumbnail
+        self.sessions_tree.setColumnWidth(2, 150)  # Date
+        self.sessions_tree.setColumnWidth(3, 150)  # Telescope
+        self.sessions_tree.setColumnWidth(4, 150)  # Imager
+        self.sessions_tree.setColumnWidth(5, 100)  # Filter
+        self.sessions_tree.setColumnWidth(6, 80)   # Images
+        self.sessions_tree.setColumnWidth(7, 140)  # Resources
         
         # Enable context menu
         self.sessions_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -125,9 +128,15 @@ class SessionsWidget(QWidget):
             sample_stack_action.setToolTip(
                 "Stack light frames and open the result in the external FITS viewer. If the session is not precalibrated, calibration runs automatically if needed."
             )
+
+            photometric_stack_action = context_menu.addAction("📚 Stack (photometric)")
+            photometric_stack_action.setToolTip(
+                "Create a photometry-safe stack (registered mean, no sigma clipping) and open the result in the external FITS viewer. If the session is not precalibrated, calibration runs automatically if needed."
+            )
         else:
             calibrate_action = None
             sample_stack_action = None
+            photometric_stack_action = None
         
         # === MASTER FRAME OPTIONS ===
         view_master_action = None
@@ -162,7 +171,7 @@ class SessionsWidget(QWidget):
         # Checkout actions
         if action == checkout_action:
             if len(light_sessions) == 1:
-                logger.info(f"Checking out session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(1)}")
+                logger.info(f"Checking out session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(2)}")
                 self.checkout_session(light_sessions[0])
             else:
                 logger.info(f"Checking out {len(light_sessions)} sessions")
@@ -170,13 +179,18 @@ class SessionsWidget(QWidget):
         
         # Calibrate action
         elif action == calibrate_action:
-            logger.info(f"Calibrating session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(1)}")
+            logger.info(f"Calibrating session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(2)}")
             self.calibrate_session(light_sessions[0])
 
         # Stack action
         elif action == sample_stack_action:
-            logger.info(f"Stacking session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(1)}")
+            logger.info(f"Stacking session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(2)}")
             self.sample_stack_session(light_sessions[0])
+
+        # Photometric stack action
+        elif action == photometric_stack_action:
+            logger.info(f"Photometric stacking session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(2)}")
+            self.photometric_stack_session(light_sessions[0])
         
         # View master action
         elif action == view_master_action:
@@ -252,7 +266,7 @@ class SessionsWidget(QWidget):
         """Create symbolic links for session files in a Siril-friendly format"""
         try:
             # Get session information from the tree item
-            session_date = item.text(1)
+            session_date = item.text(2)
             object_name = item.parent().text(0)
             
             # Get the session from database
@@ -1082,6 +1096,7 @@ class SessionsWidget(QWidget):
                 output_path=output_path,
                 cal_type='light',
                 progress_callback=_progress_callback,
+                thumbnail_session_id=str(session.fitsSessionId),
             )
 
             progress.setValue(100)
@@ -1093,6 +1108,7 @@ class SessionsWidget(QWidget):
 
             logger.info(f"Stack created: {output_path}")
             self._open_path_in_external_viewer(output_path)
+            self.load_sessions_data()
 
         except RuntimeError as e:
             # Cancellation
@@ -1100,6 +1116,149 @@ class SessionsWidget(QWidget):
         except Exception as e:
             logger.error(f"Error creating stack: {e}")
             QMessageBox.critical(self, "Error", f"Failed to create stack:\n{str(e)}")
+
+    def photometric_stack_session(self, item):
+        """Create a photometry-safe stack of light frames and open it in the external viewer."""
+        try:
+            from astrofiler.core.master_manager import get_master_manager
+            from astrofiler.models import fitsSession as FitsSessionModel
+            from astrofiler.models import fitsFile as FitsFileModel
+
+            session_id = item.data(0, Qt.UserRole)
+            if not session_id:
+                QMessageBox.warning(self, "Error", "Session ID not found")
+                return
+
+            session = FitsSessionModel.get_by_id(session_id)
+            if not session:
+                QMessageBox.warning(self, "Error", "Session not found in database")
+                return
+
+            parent_item = item.parent()
+            object_name = parent_item.text(0) if parent_item else (session.fitsSessionObjectName or "Unknown")
+            if object_name in ['Bias', 'Dark', 'Flat']:
+                QMessageBox.information(self, "Not Applicable", "Photometric stack is only available for light sessions.")
+                return
+
+            telescope = session.fitsSessionTelescope or ""
+            instrument = session.fitsSessionImager or ""
+            is_precalibrated_session = (
+                ('itelescope' in telescope.lower()) or
+                ('seestar' in instrument.lower())
+            )
+
+            if is_precalibrated_session:
+                stack_candidates = list(FitsFileModel.select().where(
+                    (FitsFileModel.fitsFileSession == session.fitsSessionId) &
+                    (FitsFileModel.fitsFileSoftDelete == False) &
+                    (FitsFileModel.fitsFileType.in_(['LIGHT', 'LIGHT FRAME']))
+                ))
+            else:
+                stack_candidates = list(FitsFileModel.select().where(
+                    (FitsFileModel.fitsFileSession == session.fitsSessionId) &
+                    (FitsFileModel.fitsFileSoftDelete == False) &
+                    (FitsFileModel.fitsFileCalibrated == 1) &
+                    (FitsFileModel.fitsFileType.in_(['LIGHT', 'LIGHT FRAME']))
+                ))
+
+                if not stack_candidates:
+                    logger.info(f"No calibrated frames found for session {session.fitsSessionId}; running calibration")
+                    cal_result = self.calibrate_session(item, confirm=False, show_results=False)
+                    if isinstance(cal_result, dict) and cal_result.get("cancelled"):
+                        return
+                    if isinstance(cal_result, dict) and cal_result.get("error"):
+                        details = cal_result.get("details")
+                        msg = cal_result.get("error")
+                        if details:
+                            msg = f"{msg}\n\n{details}"
+                        QMessageBox.warning(self, "Calibration Failed", f"Calibration failed:\n{msg}")
+                        return
+
+                    stack_candidates = list(FitsFileModel.select().where(
+                        (FitsFileModel.fitsFileSession == session.fitsSessionId) &
+                        (FitsFileModel.fitsFileSoftDelete == False) &
+                        (FitsFileModel.fitsFileCalibrated == 1) &
+                        (FitsFileModel.fitsFileType.in_(['LIGHT', 'LIGHT FRAME']))
+                    ))
+
+            if not stack_candidates:
+                QMessageBox.information(self, "No Frames", "No light frames were found to stack.")
+                return
+
+            file_paths = [f.fitsFileName for f in stack_candidates if f.fitsFileName and os.path.exists(f.fitsFileName)]
+            if len(file_paths) < 2:
+                QMessageBox.information(self, "Not Enough Frames", "Need at least 2 frames to create a stack.")
+                return
+
+            # Prefer best-HFR as reference if available
+            best_ref_path = None
+            best_hfr = None
+            for f in stack_candidates:
+                p = getattr(f, 'fitsFileName', None)
+                if not p or not os.path.exists(p):
+                    continue
+                hfr = getattr(f, 'fitsFileAvgHFRArcsec', None)
+                if hfr is None:
+                    continue
+                try:
+                    hfr_val = float(hfr)
+                except Exception:
+                    continue
+                if best_hfr is None or hfr_val < best_hfr:
+                    best_hfr = hfr_val
+                    best_ref_path = p
+
+            out_dir = os.path.dirname(file_paths[0])
+            date_str = str(session.fitsSessionDate) if session.fitsSessionDate else "unknown_date"
+            safe_object = sanitize_filesystem_name(object_name)
+            output_path = os.path.join(out_dir, f"photometric_stack_{safe_object}_{date_str}.fits")
+
+            progress = QProgressDialog("Creating photometric stack...", "Cancel", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setWindowTitle("Stack (photometric)")
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+            progress.show()
+            QApplication.processEvents()
+
+            def _progress_callback(current, total, message):
+                if progress.wasCanceled():
+                    raise RuntimeError("Stack cancelled by user")
+                try:
+                    pct = int((float(current) / float(total)) * 100) if total else 0
+                except Exception:
+                    pct = 0
+                pct = max(0, min(100, pct))
+                progress.setValue(pct)
+                if message:
+                    progress.setLabelText(str(message))
+                QApplication.processEvents()
+
+            master_manager = get_master_manager()
+            ok = master_manager._create_light_stack_photometric_mean(
+                file_paths=file_paths,
+                output_path=output_path,
+                progress_callback=_progress_callback,
+                reference_path=best_ref_path,
+                thumbnail_session_id=str(session.fitsSessionId),
+            )
+
+            progress.setValue(100)
+            progress.close()
+
+            if not ok or not os.path.exists(output_path):
+                QMessageBox.warning(self, "Stack Failed", "Failed to create photometric stack.")
+                return
+
+            logger.info(f"Photometric stack created: {output_path}")
+            self._open_path_in_external_viewer(output_path)
+            self.load_sessions_data()
+
+        except RuntimeError as e:
+            logger.info(f"Photometric stack cancelled: {e}")
+        except Exception as e:
+            logger.error(f"Error creating photometric stack: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to create photometric stack:\n{str(e)}")
 
     def show_session_properties(self, session_item):
         """Show detailed properties for a session"""
@@ -1113,7 +1272,7 @@ class SessionsWidget(QWidget):
             
             # Get session information
             object_name = parent.text(0)
-            session_date = session_item.text(1)
+            session_date = session_item.text(2)
             
             # Find session in database
             session = FitsSessionModel.select().where(
@@ -1401,20 +1560,21 @@ class SessionsWidget(QWidget):
                 # Create parent item for each object
                 parent_item = QTreeWidgetItem()
                 parent_item.setText(0, object_name)
-                parent_item.setText(1, "")  # No date for parent
-                parent_item.setText(2, "")  # No telescope for parent
-                parent_item.setText(3, "")  # No imager for parent
-                parent_item.setText(4, "")  # No filter for parent
-                parent_item.setText(5, str(total_images))  # Total images for this object
+                parent_item.setText(1, "")  # No thumbnail for parent
+                parent_item.setText(2, "")  # No date for parent
+                parent_item.setText(3, "")  # No telescope for parent
+                parent_item.setText(4, "")  # No imager for parent
+                parent_item.setText(5, "")  # No filter for parent
+                parent_item.setText(6, str(total_images))  # Total images for this object
                 
                 # Show resource summary for parent
                 if total_light_sessions > 0:
                     cal_percentage = (calibrated_sessions / total_light_sessions) * 100
                     cal_summary = f"{calibrated_sessions}/{total_light_sessions} ({cal_percentage:.0f}%)"
-                    parent_item.setText(6, cal_summary)
-                    parent_item.setToolTip(6, f"Resource Coverage: {calibrated_sessions} of {total_light_sessions} sessions have calibration resources")
+                    parent_item.setText(7, cal_summary)
+                    parent_item.setToolTip(7, f"Resource Coverage: {calibrated_sessions} of {total_light_sessions} sessions have calibration resources")
                 else:
-                    parent_item.setText(6, "")
+                    parent_item.setText(7, "")
                 
                 # Style parent item differently
                 font = parent_item.font(0)
@@ -1443,26 +1603,37 @@ class SessionsWidget(QWidget):
                         child_item.setText(0, "(master)")
                     else:
                         child_item.setText(0, "")  # Empty object name for child
-                    child_item.setText(1, str(session.fitsSessionDate) if session.fitsSessionDate else "Unknown Date")
-                    child_item.setText(2, session.fitsSessionTelescope or "Unknown")
-                    child_item.setText(3, session.fitsSessionImager or "Unknown")
-                    child_item.setText(4, session.fitsSessionFilter or "Unknown")
-                    child_item.setText(5, str(session_image_count))  # Image count for this session
+                    child_item.setText(1, "")  # Thumbnail column
+                    child_item.setText(2, str(session.fitsSessionDate) if session.fitsSessionDate else "Unknown Date")
+                    child_item.setText(3, session.fitsSessionTelescope or "Unknown")
+                    child_item.setText(4, session.fitsSessionImager or "Unknown")
+                    child_item.setText(5, session.fitsSessionFilter or "Unknown")
+                    child_item.setText(6, str(session_image_count))  # Image count for this session
                     
                     # Store session ID in the item for later retrieval
                     child_item.setData(0, Qt.UserRole, session.fitsSessionId)
+
+                    # Attach thumbnail icon if it exists (light sessions only)
+                    if session.fitsSessionObjectName not in ['Bias', 'Dark', 'Flat']:
+                        thumb_path = self._get_thumbnail_path(str(session.fitsSessionId))
+                        if thumb_path and os.path.exists(thumb_path):
+                            pix = QPixmap(thumb_path)
+                            if not pix.isNull():
+                                pix = pix.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                                child_item.setIcon(1, QIcon(pix))
+                                child_item.setToolTip(1, f"Thumbnail: {thumb_path}")
                     
                     # Set resources status as simple text only
                     if calibration_info["text"]:
-                        child_item.setText(6, calibration_info["text"])
-                        child_item.setToolTip(6, calibration_info["tooltip"])
+                        child_item.setText(7, calibration_info["text"])
+                        child_item.setToolTip(7, calibration_info["tooltip"])
                     else:
-                        child_item.setText(6, "")
+                        child_item.setText(7, "")
                     
                     # Build quality metrics tooltip for all columns
                     quality_tooltip = self._build_quality_tooltip(session)
-                    for col in range(7):  # Apply tooltip to all columns
-                        if col == 6 and calibration_info["tooltip"]:
+                    for col in range(8):  # Apply tooltip to all columns
+                        if col == 7 and calibration_info["tooltip"]:
                             # Combine calibration tooltip with quality metrics
                             combined_tooltip = f"{calibration_info['tooltip']}\n\n{quality_tooltip}"
                             child_item.setToolTip(col, combined_tooltip)
@@ -1487,6 +1658,20 @@ class SessionsWidget(QWidget):
             # Don't show error dialog on startup if database is just empty
             if "no such table" not in str(e).lower():
                 QMessageBox.warning(self, "Error", f"Failed to load Sessions data: {e}")
+
+    def _get_thumbnail_path(self, session_id: str) -> str:
+        """Return the expected thumbnail path for a session id."""
+        try:
+            import configparser
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            repo_path = config.get('DEFAULT', 'repo', fallback='')
+        except Exception:
+            repo_path = ''
+
+        if not repo_path:
+            return ''
+        return os.path.join(repo_path, 'Thumbnails', f"{session_id}.png")
     
     def _build_quality_tooltip(self, session):
         """

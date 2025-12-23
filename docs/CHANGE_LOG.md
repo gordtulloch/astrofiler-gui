@@ -1,17 +1,14 @@
 # AstroFiler Change Log
 
-## Version 1.2.1 - Compression Enhancement (In Development)
-
-### Breaking Changes
+## Version 1.2.0
 
 - **Quality Analysis Consolidation**: Replaced basic `QualityAnalyzer` with `EnhancedQualityAnalyzer` as the sole quality assessment system
-  - **Removed**: Basic quality_analysis.py module (moved to backups/quality_analysis_basic.py)
   - **Enhanced AutoCalibration**: Quality assessment now uses SEP star detection and saves metrics to database
   - **Database Integration**: Quality metrics automatically saved to fitsFile fields (FWHM, eccentricity, HFR, SNR, star count, image scale)
   - **Import Changes**: `from astrofiler.core import QualityAnalyzer` now imports `EnhancedQualityAnalyzer`
   - **Real Measurements**: All quality assessments now provide quantitative astrometric measurements instead of qualitative scores
-
-### New Features
+- **Images View: Removed Pagination**: Images view now loads all images/groups at startup (no Previous/Next paging controls)
+  - Search/sort/frame-type filters continue to work, but results are no longer split into pages
 
 - **Improved Database Error Handling**: Enhanced error messages for database setup failures
   - **Database Lock Detection**: Automatic retry with exponential backoff (5 attempts) when database is locked
@@ -47,6 +44,11 @@
   - **Data Protection**: Automatic prevention of lossy compression on floating-point data
   - **Universal Compatibility**: Full support across astropy, Siril, NINA, and PySiril workflows
   - **Extensive Testing**: Comprehensive test suite with real astronomical data validation
+
+- **Photometry-Safe Light Stacking**: Added an optional photometry-safe stacking mode for light frames
+  - **Sessions Context Menu**: New “Stack (photometric)” action creates a registered-mean stack with no sigma clipping (float32 output)
+  - **CLI Support**: `python commands/Stack.py --photometric` selects photometric stacking (default remains deep/pretty sigma-clipped stacking)
+  - **Output Naming**: Photometric stacks are written as `photometric_stack_*.fits` alongside the source frames
 
 ### Performance
 
