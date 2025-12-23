@@ -6,12 +6,10 @@ from PySide6.QtGui import QFont, QPixmap
 
 logger = logging.getLogger(__name__)
 
-# Version should be imported from main_window or defined here
-VERSION = "1.1.2"
-
 class AboutWidget(QWidget):
-    def __init__(self):
+    def __init__(self, version: str = ""):
         super().__init__()
+        self._version = str(version or "").strip()
         self.init_ui()
     
     def init_ui(self):
@@ -34,7 +32,10 @@ class AboutWidget(QWidget):
         text_layout.setAlignment(Qt.AlignCenter)
         
         # Main title
-        self.title_label = QLabel(f"AstroFiler Version {VERSION}")
+        title = "AstroFiler"
+        if self._version:
+            title = f"AstroFiler Version {self._version}"
+        self.title_label = QLabel(title)
         title_font = QFont()
         title_font.setPointSize(32)
         title_font.setBold(True)
@@ -51,7 +52,7 @@ class AboutWidget(QWidget):
         """)
         
         # Subtitle
-        self.subtitle_label = QLabel("By Gord Tulloch\nJuly 2025\n\nQuestions to:\nEmail: gord.tulloch@gmail.com\nGithub: https://github.com/gordtulloch/astrofiler-gui\n\nContributions gratefully accepted via\nPaypal to the above email address.")
+        self.subtitle_label = QLabel("By Gord Tulloch\nCopyright (C) 2025\nALL RIGHTS RESERVED\n\nPlease submit questions and bug reports to\nGithub: https://github.com/gordtulloch/astrofiler-gui\n\nContributions gratefully accepted via\nPaypal to the above email address.")
         subtitle_font = QFont()
         subtitle_font.setPointSize(16)
         self.subtitle_label.setFont(subtitle_font)

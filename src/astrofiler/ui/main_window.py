@@ -117,7 +117,7 @@ class AstroFilerGUI(QMainWindow):
 
         self._status("Loading About view...")
         from .about_widget import AboutWidget
-        self.about_widget = AboutWidget()
+        self.about_widget = AboutWidget(version=VERSION)
         
         # Set up widget connections for refreshing
         # Allow merge widget to refresh images view after operations
