@@ -1,5 +1,6 @@
 import os
 import sys
+import glob
 import logging
 import datetime
 from datetime import datetime as dt
@@ -68,12 +69,144 @@ class SessionsWidget(QWidget):
         self.sessions_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.sessions_tree.customContextMenuRequested.connect(self.show_context_menu)
 
+        # Double-click behavior (e.g., open stack from thumbnail)
+        self.sessions_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+
         layout.addLayout(controls_layout)
         layout.addWidget(self.sessions_tree)
         
         # Connect signals
         self.regenerate_button.clicked.connect(self.regenerate_sessions)
         self.auto_calibration_button.clicked.connect(self.run_auto_calibration)
+
+    def on_item_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        """Handle double-clicks in the sessions tree.
+
+        Requirement: double-clicking the Thumbnail column opens the stacked image
+        for that light session (if available) in the external viewer.
+        """
+        try:
+            THUMBNAIL_COLUMN = 1
+            if column != THUMBNAIL_COLUMN:
+                return
+
+            parent = item.parent()
+            if not parent:
+                return  # ignore parent object rows
+
+            session_id = item.data(0, Qt.UserRole)
+            if not session_id:
+                return
+
+            # Only respond if a thumbnail exists for this session
+            thumb_path = self._get_thumbnail_path(str(session_id))
+            if not (thumb_path and os.path.exists(thumb_path)):
+                return
+
+            # Resolve session + find best matching stack output
+            try:
+                session = FitsSessionModel.get_by_id(str(session_id))
+            except Exception:
+                session = None
+            if not session:
+                QMessageBox.warning(self, "Error", "Session not found in database")
+                return
+
+            object_name = parent.text(0) or (session.fitsSessionObjectName or "Unknown")
+            if object_name in ['Bias', 'Dark', 'Flat']:
+                return
+
+            out_dir = self._get_session_stack_output_dir(session)
+            if not out_dir:
+                QMessageBox.information(self, "No Stack", "No stack location found for this session.")
+                return
+
+            stack_path = self._find_best_stack_for_session(session=session, object_name=object_name, out_dir=out_dir)
+            if not stack_path:
+                QMessageBox.information(self, "No Stack", "No stacked FITS file found for this session.")
+                return
+
+            self._open_path_in_external_viewer(stack_path)
+
+        except Exception as e:
+            logger.error(f"Error handling thumbnail double-click: {e}")
+
+    def _get_session_stack_output_dir(self, session: FitsSessionModel) -> str:
+        """Best-effort directory where stack outputs are expected to be written."""
+        try:
+            telescope = getattr(session, 'fitsSessionTelescope', None) or ''
+            instrument = getattr(session, 'fitsSessionImager', None) or ''
+            is_precalibrated_session = (
+                ('itelescope' in telescope.lower()) or
+                ('seestar' in instrument.lower())
+            )
+
+            base = (
+                (FitsFileModel.fitsFileSession == session.fitsSessionId)
+                & (FitsFileModel.fitsFileSoftDelete == False)
+                & (FitsFileModel.fitsFileType.in_(['LIGHT', 'LIGHT FRAME', 'Light Frame']))
+            )
+
+            if is_precalibrated_session:
+                candidates = list(FitsFileModel.select().where(base))
+            else:
+                candidates = list(FitsFileModel.select().where(base & (FitsFileModel.fitsFileCalibrated == 1)))
+
+            for f in candidates:
+                p = getattr(f, 'fitsFileName', None)
+                if p and os.path.exists(p):
+                    return os.path.dirname(p)
+
+        except Exception:
+            pass
+
+        return ''
+
+    def _find_best_stack_for_session(self, session: FitsSessionModel, object_name: str, out_dir: str) -> str:
+        """Find the most likely stack FITS file for a session.
+
+        Preference order:
+          1) photometric stacks
+          2) deep stacks (stack_*)
+          3) sample stacks
+        If multiple matches exist, choose the newest by mtime.
+        """
+        try:
+            from astrofiler.core.utils import sanitize_filesystem_name
+
+            safe_object = sanitize_filesystem_name(object_name or 'Unknown')
+            date_str = str(session.fitsSessionDate) if session.fitsSessionDate else 'unknown_date'
+            session_id = str(session.fitsSessionId)
+
+            patterns = [
+                os.path.join(out_dir, f"photometric_stack_{safe_object}_{date_str}*.fits"),
+                os.path.join(out_dir, f"stack_{safe_object}_{date_str}_{session_id}*.fits"),
+                os.path.join(out_dir, f"stack_{safe_object}_{date_str}*.fits"),
+                os.path.join(out_dir, f"sample_stack_{safe_object}_{date_str}*.fits"),
+                os.path.join(out_dir, f"*stack*{session_id}*.fits"),
+            ]
+
+            matches = []
+            for pat in patterns:
+                matches.extend([p for p in glob.glob(pat) if os.path.isfile(p)])
+
+            # De-dupe while preserving order
+            seen = set()
+            unique = []
+            for p in matches:
+                if p not in seen:
+                    seen.add(p)
+                    unique.append(p)
+
+            if not unique:
+                return ''
+
+            # Pick newest mtime
+            best = max(unique, key=lambda p: os.path.getmtime(p))
+            return best if os.path.exists(best) else ''
+
+        except Exception:
+            return ''
     
     def show_context_menu(self, position):
         """Show context menu for session items with master frame management"""
@@ -107,6 +240,16 @@ class SessionsWidget(QWidget):
         
         # Create context menu based on selection
         context_menu = QMenu(self)
+
+        # Session ID clipboard helper
+        session_items_for_clipboard = [si for si in selected_items if si.parent() is not None]
+        session_ids_for_clipboard = [str(si.data(0, Qt.UserRole)) for si in session_items_for_clipboard if si.data(0, Qt.UserRole)]
+        if session_ids_for_clipboard:
+            label = "📋 Copy Session ID" if len(session_ids_for_clipboard) == 1 else f"📋 Copy Session IDs ({len(session_ids_for_clipboard)})"
+            copy_session_id_action = context_menu.addAction(label)
+            copy_session_id_action.setToolTip("Copy the selected session ID(s) to the clipboard")
+        else:
+            copy_session_id_action = None
         
         # === CHECKOUT OPTIONS ===
         if light_sessions:
@@ -133,10 +276,16 @@ class SessionsWidget(QWidget):
             photometric_stack_action.setToolTip(
                 "Create a photometry-safe stack (registered mean, no sigma clipping) and open the result in the external FITS viewer. If the session is not precalibrated, calibration runs automatically if needed."
             )
+
+            regenerate_thumbnail_action = context_menu.addAction("🖼️ Regenerate Thumbnail")
+            regenerate_thumbnail_action.setToolTip(
+                "Recreate the session thumbnail from the most recent stack file (photometric/deep/sample) if available."
+            )
         else:
             calibrate_action = None
             sample_stack_action = None
             photometric_stack_action = None
+            regenerate_thumbnail_action = None
         
         # === MASTER FRAME OPTIONS ===
         view_master_action = None
@@ -191,11 +340,75 @@ class SessionsWidget(QWidget):
         elif action == photometric_stack_action:
             logger.info(f"Photometric stacking session: {light_sessions[0].parent().text(0)} on {light_sessions[0].text(2)}")
             self.photometric_stack_session(light_sessions[0])
+
+        # Regenerate thumbnail action
+        elif action == regenerate_thumbnail_action:
+            try:
+                item = light_sessions[0]
+                session_id = item.data(0, Qt.UserRole)
+                if not session_id:
+                    QMessageBox.warning(self, "Error", "Session ID not found")
+                    return
+
+                parent_item = item.parent()
+                object_name = parent_item.text(0) if parent_item else "Unknown"
+                if object_name in ['Bias', 'Dark', 'Flat']:
+                    QMessageBox.information(self, "Not Applicable", "Thumbnails are only generated for light sessions.")
+                    return
+
+                try:
+                    session = FitsSessionModel.get_by_id(str(session_id))
+                except Exception:
+                    session = None
+                if not session:
+                    QMessageBox.warning(self, "Error", "Session not found in database")
+                    return
+
+                out_dir = self._get_session_stack_output_dir(session)
+                if not out_dir:
+                    QMessageBox.information(self, "No Stack", "No stack location found for this session.")
+                    return
+
+                stack_path = self._find_best_stack_for_session(session=session, object_name=object_name, out_dir=out_dir)
+                if not stack_path:
+                    QMessageBox.information(self, "No Stack", "No stacked FITS file found for this session.")
+                    return
+
+                from astrofiler.core.master_manager import get_master_manager
+                master_manager = get_master_manager()
+                out_thumb = master_manager._write_light_session_thumbnail(
+                    stacked_fits_path=stack_path,
+                    session_id=str(session_id),
+                    width_px=150,
+                )
+
+                if not out_thumb or not os.path.exists(out_thumb):
+                    QMessageBox.warning(self, "Thumbnail Failed", "Failed to regenerate thumbnail.")
+                    return
+
+                logger.info(f"Thumbnail regenerated for session {session_id}: {out_thumb}")
+                self.load_sessions_data()
+
+            except Exception as e:
+                logger.error(f"Error regenerating thumbnail: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to regenerate thumbnail:\n{str(e)}")
         
         # View master action
         elif action == view_master_action:
             session_id = selected_items[0].data(0, Qt.UserRole)
             self.view_master_frame(session_id)
+
+        # Copy Session ID(s)
+        elif action == copy_session_id_action:
+            try:
+                ids = session_ids_for_clipboard
+                if not ids:
+                    return
+                text = "\n".join(ids)
+                QApplication.clipboard().setText(text)
+                logger.info(f"Copied {len(ids)} session id(s) to clipboard")
+            except Exception as e:
+                logger.error(f"Failed to copy session id(s) to clipboard: {e}")
     
     def view_master_frame(self, session_id):
         """Open master frame in external FITS viewer"""
@@ -1064,7 +1277,7 @@ class SessionsWidget(QWidget):
             out_dir = os.path.dirname(file_paths[0])
             date_str = str(session.fitsSessionDate) if session.fitsSessionDate else "unknown_date"
             safe_object = sanitize_filesystem_name(object_name)
-            output_path = os.path.join(out_dir, f"sample_stack_{safe_object}_{date_str}.fits")
+            output_path = os.path.join(out_dir, f"stack_{safe_object}_{date_str}.fits")
 
             # Progress dialog for stacking
             progress = QProgressDialog("Stacking calibrated frames...", "Cancel", 0, 100, self)
@@ -1121,6 +1334,7 @@ class SessionsWidget(QWidget):
         """Create a photometry-safe stack of light frames and open it in the external viewer."""
         try:
             from astrofiler.core.master_manager import get_master_manager
+            from astrofiler.core.utils import sanitize_filesystem_name
             from astrofiler.models import fitsSession as FitsSessionModel
             from astrofiler.models import fitsFile as FitsFileModel
 

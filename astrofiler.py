@@ -74,8 +74,8 @@ def _read_version() -> str:
 
 def _create_splash_pixmap(logo_path: str, version: str):
     """Create a pixmap with logo + static splash text baked in."""
-    from PySide6.QtGui import QPixmap, QPainter
-    from PySide6.QtCore import Qt, QRect
+    from PySide6.QtGui import QPixmap, QPainter, QColor, QPen
+    from PySide6.QtCore import Qt, QRect, QRectF
 
     logo = QPixmap(logo_path) if os.path.exists(logo_path) else QPixmap()
 
@@ -88,10 +88,24 @@ def _create_splash_pixmap(logo_path: str, version: str):
         height = max(logo.height(), 220) + 90
 
     canvas = QPixmap(width, height)
-    canvas.fill(Qt.white)
+    # Use transparent background so rounded corners are actually visible.
+    canvas.fill(Qt.transparent)
 
     painter = QPainter(canvas)
     painter.setRenderHint(QPainter.Antialiasing, True)
+
+    # Rounded container + border
+    radius = 18.0
+    border_color = QColor(170, 170, 170)
+    fill_color = QColor(255, 255, 255)
+    border_pen = QPen(border_color)
+    border_pen.setWidth(2)
+
+    # Inset so the border doesn't get clipped
+    container = QRectF(1.0, 1.0, float(width) - 2.0, float(height) - 2.0)
+    painter.setPen(border_pen)
+    painter.setBrush(fill_color)
+    painter.drawRoundedRect(container, radius, radius)
 
     # Draw logo centered
     if not logo.isNull():
@@ -109,6 +123,7 @@ def _create_splash_pixmap(logo_path: str, version: str):
         "ALL RIGHTS RESERVED"
     )
     text_rect = QRect(10, height - 95, width - 20, 85)
+    painter.setPen(QColor(0, 0, 0))
     painter.drawText(text_rect, Qt.AlignCenter, text)
     painter.end()
 
@@ -125,7 +140,11 @@ def _show_splash(app):
     logo_path = os.path.join(project_root, 'astrofiler.png')
     pixmap = _create_splash_pixmap(logo_path, version)
     splash = QSplashScreen(pixmap)
-    splash.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+
+    # Frameless + translucent so rounded corners/border render cleanly.
+    splash.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+    splash.setAttribute(Qt.WA_TranslucentBackground, True)
+
     splash.show()
     app.processEvents()
 

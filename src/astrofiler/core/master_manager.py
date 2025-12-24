@@ -169,15 +169,41 @@ class MasterFrameManager:
             if not np.any(finite):
                 return None
 
-            lo, hi = np.nanpercentile(arr2[finite], [1.0, 99.0])
-            if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
-                lo = float(np.nanmin(arr2[finite]))
-                hi = float(np.nanmax(arr2[finite]))
-                if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
-                    return None
+            # Robust thumbnail stretch:
+            # Some stacks can look fine in FITS viewers (auto-stretched) but produce
+            # washed-out/white thumbnails if our normalization chooses a vmax that's
+            # too low. Prefer a high-percentile interval (stable across devices),
+            # then apply a mild gamma (>1) to keep the background from blowing out.
+            try:
+                from astropy.visualization import AsymmetricPercentileInterval
 
-            scaled = (arr2 - lo) / (hi - lo)
-            scaled = np.clip(scaled, 0.0, 1.0)
+                interval = AsymmetricPercentileInterval(0.5, 99.9)
+                lo, hi = interval.get_limits(arr2[finite])
+
+                if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                    raise RuntimeError("Invalid stretch limits")
+
+                scaled = (arr2 - float(lo)) / float(hi - lo)
+                scaled = np.nan_to_num(scaled, nan=0.0, posinf=1.0, neginf=0.0).astype(np.float32, copy=False)
+                scaled = np.clip(scaled, 0.0, 1.0)
+
+                # Gamma correction (display gamma convention):
+                # use scaled^(1/gamma) so gamma > 1 brightens midtones (common expectation).
+                gamma = 0.3
+                if gamma > 0:
+                    scaled = np.power(scaled, 1.0 / float(gamma), dtype=np.float32)
+            except Exception:
+                lo, hi = np.nanpercentile(arr2[finite], [1.0, 99.0])
+                if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                    lo = float(np.nanmin(arr2[finite]))
+                    hi = float(np.nanmax(arr2[finite]))
+                    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                        return None
+
+                scaled = (arr2 - lo) / (hi - lo)
+                scaled = np.clip(scaled, 0.0, 1.0)
+                scaled = np.nan_to_num(scaled, nan=0.0, posinf=1.0, neginf=0.0).astype(np.float32, copy=False)
+
             img8 = (scaled * 255.0).astype(np.uint8)
 
             im = Image.fromarray(img8, mode='L')
@@ -432,6 +458,7 @@ class MasterFrameManager:
             # Prepare reference for star registration (light stacking only)
             ref_full = None
             ref_path = None
+            ref_header = None
             if is_light_stack:
                 if aa is None:
                     raise RuntimeError(
@@ -443,6 +470,7 @@ class MasterFrameManager:
                 ref_path = candidate
                 with fits.open(candidate) as hdul:
                     ref_full = hdul[0].data.astype(np.float32)
+                    ref_header = hdul[0].header.copy()
 
             def _is_astroalign_maxiter_error(exc: Exception) -> bool:
                 max_iter_error = getattr(aa, 'MaxIterError', None) if aa is not None else None
@@ -471,6 +499,58 @@ class MasterFrameManager:
                 except Exception as e:
                     # If astroalign can't find a match, fall back to stacking the unaligned image.
                     if _is_astroalign_maxiter_error(e):
+                        def _try_wcs_reproject() -> Optional[np.ndarray]:
+                            if ref_header is None or ref_full is None:
+                                return None
+                            if data.ndim != 2 or ref_full.ndim != 2:
+                                return None
+                            try:
+                                from astropy.wcs import WCS
+                                from astropy.wcs import FITSFixedWarning
+                                import warnings
+
+                                warnings.filterwarnings('ignore', category=FITSFixedWarning)
+                            except Exception:
+                                return None
+
+                            try:
+                                from reproject import reproject_interp  # type: ignore
+                            except Exception:
+                                return None
+
+                            try:
+                                with fits.open(file_path) as hdul:
+                                    src_header = hdul[0].header
+
+                                src_wcs = WCS(src_header)
+                                dst_wcs = WCS(ref_header)
+                                if not (getattr(src_wcs, 'has_celestial', False) and getattr(dst_wcs, 'has_celestial', False)):
+                                    return None
+
+                                reproj, footprint = reproject_interp(
+                                    (data.astype(np.float32, copy=False), src_wcs),
+                                    dst_wcs,
+                                    shape_out=ref_full.shape,
+                                    order='bilinear',
+                                )
+
+                                aligned = np.asarray(reproj, dtype=np.float32)
+                                if footprint is not None:
+                                    aligned = aligned.copy()
+                                    aligned[np.asarray(footprint) <= 0] = np.nan
+                                return aligned
+                            except Exception:
+                                return None
+
+                        aligned_wcs = _try_wcs_reproject()
+                        if aligned_wcs is not None:
+                            logger.warning(
+                                "Star registration failed for %s: %s. Used WCS reprojection fallback.",
+                                os.path.basename(file_path),
+                                e,
+                            )
+                            return aligned_wcs
+
                         logger.warning(
                             "Star registration failed for %s: %s. Proceeding without alignment for this frame.",
                             os.path.basename(file_path),
@@ -711,6 +791,7 @@ class MasterFrameManager:
             ref_path = candidate
             with fits.open(candidate) as hdul:
                 ref_full = hdul[0].data.astype(np.float32)
+                ref_header = hdul[0].header.copy()
 
             def _is_astroalign_maxiter_error(exc: Exception) -> bool:
                 max_iter_error = getattr(aa, 'MaxIterError', None)
@@ -738,6 +819,58 @@ class MasterFrameManager:
                     return aligned
                 except Exception as e:
                     if _is_astroalign_maxiter_error(e):
+                        def _try_wcs_reproject() -> Optional[np.ndarray]:
+                            if ref_full is None:
+                                return None
+                            if data.ndim != 2 or ref_full.ndim != 2:
+                                return None
+                            try:
+                                from astropy.wcs import WCS
+                                from astropy.wcs import FITSFixedWarning
+                                import warnings
+
+                                warnings.filterwarnings('ignore', category=FITSFixedWarning)
+                            except Exception:
+                                return None
+
+                            try:
+                                from reproject import reproject_interp  # type: ignore
+                            except Exception:
+                                return None
+
+                            try:
+                                with fits.open(file_path) as hdul:
+                                    src_header = hdul[0].header
+
+                                src_wcs = WCS(src_header)
+                                dst_wcs = WCS(ref_header)
+                                if not (getattr(src_wcs, 'has_celestial', False) and getattr(dst_wcs, 'has_celestial', False)):
+                                    return None
+
+                                reproj, footprint = reproject_interp(
+                                    (data.astype(np.float32, copy=False), src_wcs),
+                                    dst_wcs,
+                                    shape_out=ref_full.shape,
+                                    order='bilinear',
+                                )
+
+                                aligned = np.asarray(reproj, dtype=np.float32)
+                                if footprint is not None:
+                                    aligned = aligned.copy()
+                                    aligned[np.asarray(footprint) <= 0] = np.nan
+                                return aligned
+                            except Exception:
+                                return None
+
+                        aligned_wcs = _try_wcs_reproject()
+                        if aligned_wcs is not None:
+                            logger.warning(
+                                "Star registration failed for %s: %s. Used WCS reprojection fallback.",
+                                os.path.basename(file_path),
+                                e,
+                            )
+                            return aligned_wcs
+
                         logger.warning(
                             "Star registration failed for %s: %s. Proceeding without alignment for this frame.",
                             os.path.basename(file_path),

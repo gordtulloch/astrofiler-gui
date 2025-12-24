@@ -40,6 +40,7 @@ dependencies = [
     "google-cloud-storage>=2.0",
     "scipy>=1.7",
     "lz4>=3.0.0",
+    "reproject>=0.12",
 ]
 
 [project.optional-dependencies]
