@@ -1,7 +1,7 @@
 # FITS Compression Strategy - Final Implementation
 
 ## Overview
-Implementation of intelligent FITS compression system based on data type analysis and astrophotography workflow requirements.
+Implementation of FITS tile compression for newly imported files.
 
 ## Strategy Decisions
 
@@ -10,29 +10,16 @@ Implementation of intelligent FITS compression system based on data type analysi
 - **Test Results**: Confirmed incompatibility with popular astrophotography tools
 - **Decision**: Removed from UI options to avoid user confusion
 
-### 2. **Smart Internal Compression Selection** ✅
-Based on FITS data type analysis:
+### 2. **FITS Tile Compression (GZIP-2) for New Imports** ✅
+All newly imported FITS images are written using FITS tile compression with `GZIP_2`.
 
-#### **16-bit Integer Data → RICE Compression**
-- **Use Case**: NINA raw light frames, camera sensor data
-- **Algorithm**: `fits_rice` (RICE_1)
-- **Benefits**: 
-  - Lossless compression for integer data
-  - NINA compatibility maintained
-  - Optimal for 16-bit sensor data
-
-#### **32-bit Float Data → GZIP-2 Compression** 
+#### **New Imports → GZIP-2 Compression**
 - **Use Case**: Processed astronomical images, calibrated frames
 - **Algorithm**: `fits_gzip2` (GZIP_2)
 - **Benefits**:
   - 78% compression ratio on real astronomical data
   - Lossless for floating-point data
   - Best overall compression performance
-
-#### **Large Integer Data → GZIP-2 Compression**
-- **Use Case**: 32-bit+ integer arrays
-- **Algorithm**: `fits_gzip2` (GZIP_2) 
-- **Rationale**: Avoid potential lossy behavior of RICE on large integers
 
 ### 3. **Comprehensive Read Support** ✅
 Support for all incoming compressed formats:
@@ -42,29 +29,15 @@ Support for all incoming compressed formats:
 
 ## Implementation Features
 
-### **Smart Algorithm Selection**
-```python
-def _select_optimal_compression(self, fits_path: str) -> Optional[str]:
-    # Analyzes FITS data type and selects optimal algorithm
-    # 16-bit integers → fits_rice (NINA compatible)
-    # 32-bit floats → fits_gzip2 (best compression)
-    # Fallback → fits_gzip2 (safe default)
-```
-
 ### **UI Options**
-- `auto` - Smart selection (default)
-- `fits_gzip2` - Manual GZIP-2 selection  
-- `fits_gzip1` - Manual GZIP-1 selection
-- `fits_rice` - Manual RICE selection
+- `fits_gzip2` - Default and only selection for new imports
 
 ### **Performance Results**
 Based on real astronomical data testing:
 
 | Algorithm | Data Type | Compression Ratio | Use Case |
 |-----------|-----------|-------------------|----------|
-| RICE      | 16-bit int | ~70%+ | NINA raw frames |
-| GZIP-2    | 32-bit float | 78.0% | Processed images |
-| GZIP-1    | 32-bit float | 71.7% | Faster compression |
+| GZIP-2    | 32-bit float | 78.0% | New imports |
 
 ### **Compatibility Matrix**
 | Format | Astropy | Siril | NINA | PySiril |
@@ -86,8 +59,6 @@ Based on real astronomical data testing:
 - Optimal compression ratios maintained
 
 ### **Advanced Users**
-- Manual algorithm selection available
-- Smart defaults protect against data loss
 - Comprehensive format support for mixed workflows
 
 ## Testing Validation

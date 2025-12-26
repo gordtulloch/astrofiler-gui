@@ -692,14 +692,49 @@ class FileProcessor:
                 # File was compressed, update path references
                 root = os.path.dirname(compressed_file_path)
                 file = os.path.basename(compressed_file_path)
+                current_file_path = compressed_file_path
                 logger.info(f"File compressed: {current_file_path} -> {compressed_file_path}")
         except Exception as e:
             logger.warning(f"Compression processing failed for {current_file_path}: {e}")
             # Continue with original file if compression fails
 
+        # If requested, move/rename the file into the repository structure.
+        # This is required for the Images view "Load New" workflow.
+        if moveFiles:
+            try:
+                from .repository import RepositoryManager
+
+                repo_manager = RepositoryManager()
+                # Ensure the repository root folders exist (Light/Calibrate/Masters/Incoming/etc.)
+                repo_manager.createRepositoryStructure()
+
+                new_filename = newName
+
+                moved_path = repo_manager.organizeFileByType(
+                    current_file_path,
+                    hdr,
+                    new_filename=new_filename,
+                )
+                if not moved_path:
+                    raise FileProcessingError(
+                        "Failed to move file into repository structure",
+                        file_path=current_file_path,
+                        error_code="REPO_MOVE_FAILED",
+                    )
+
+                root = os.path.dirname(moved_path)
+                file = os.path.basename(moved_path)
+                current_file_path = moved_path
+            except Exception as e:
+                raise FileProcessingError(
+                    f"Failed moving file into repository: {e}",
+                    file_path=current_file_path,
+                    error_code="REPO_MOVE_FAILED",
+                )
+
         # Submit file to database (use the potentially compressed file path)
-        fileHash = self.calculateFileHash(os.path.join(root, file))
-        newFitsFileId = self.submitFileToDB(os.path.join(root, file), hdr, fileHash)
+        fileHash = self.calculateFileHash(current_file_path)
+        newFitsFileId = self.submitFileToDB(current_file_path, hdr, fileHash)
         
         return newFitsFileId if newFitsFileId else False
 
