@@ -1,6 +1,8 @@
 import os
 import sys
 import glob
+import gzip
+import shutil
 import logging
 import datetime
 from datetime import datetime as dt
@@ -9,7 +11,8 @@ from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QTreeWidget, QTreeWidgetItem, QAbstractItemView,
                                QMenu, QProgressDialog, QApplication, QMessageBox,
-                               QFileDialog, QLabel, QProgressBar)
+                               QFileDialog, QLabel, QProgressBar, QDialog, QLineEdit,
+                               QDialogButtonBox, QCheckBox)
 from PySide6.QtGui import QFont, QDesktopServices, QIcon, QPixmap, QPainter, QColor, QBrush
 from PySide6.QtCore import QUrl
 
@@ -580,16 +583,11 @@ class SessionsWidget(QWidget):
                 return
             logger.info(f"Found {total_files} files for session {object_name} on {session_date}")
 
-            # Ask user for destination directory
-            dest_dir = QFileDialog.getExistingDirectory(
-                self, 
-                "Select Destination Directory",
-                os.path.expanduser("~"),
-                QFileDialog.ShowDirsOnly
-            )
-            
-            if not dest_dir:
-                return  # User cancelled
+            # Ask user for destination directory + options
+            opts = self._prompt_checkout_options("Check out Session")
+            if not opts:
+                return
+            dest_dir, copy_files, decompress = opts
                     
             # Create destination directory structure
             session_dir = os.path.join(dest_dir, f"{object_name}_{session_date.replace(':', '-')}")
@@ -622,7 +620,7 @@ class SessionsWidget(QWidget):
             progress = QProgressDialog("Creating symbolic links...", "Cancel", 0, 100, self)
             progress.setWindowModality(Qt.WindowModal)
 
-            # Create symbolic links for each file
+            # Create links/copies for each file
             created_links = 0
             total_items = len(all_files) + len(master_files)
             current_item = 0
@@ -653,29 +651,28 @@ class SessionsWidget(QWidget):
                     
                 # Extract filename from path
                 logger.info(f"Processing file: {file.fitsFileName} of type {file.fitsFileType}")
+                if not file.fitsFileName or not os.path.exists(file.fitsFileName):
+                    continue
                 filename = os.path.basename(file.fitsFileName)
                 
                 # Create destination path
                 dest_path = os.path.join(dest_folder, filename)
                 
-                # Create symbolic link based on platform
+                # Create symbolic link / copy / decompress based on options
                 try:
-                    if os.path.exists(dest_path):
+                    if os.path.exists(dest_path) or os.path.exists(self._get_decompressed_dest_path(dest_path)):
                         continue  # Skip if link already exists
-                        
-                    if sys.platform == "win32":
-                        # Windows - use mklink (note: argument order is reversed from os.symlink)
-                        import subprocess
-                        # mklink syntax: mklink Link Target
-                        result = subprocess.run(f'mklink "{dest_path}" "{file.fitsFileName}"', 
-                                              shell=True, capture_output=True, text=True)
-                        if result.returncode != 0:
-                            raise Exception(f"mklink failed: {result.stderr}")
-                    else:
-                        # Mac/Linux - use symbolic link
-                        os.symlink(file.fitsFileName, dest_path)
+
+                    ok = self._materialize_file(
+                        src_path=file.fitsFileName,
+                        dest_path=dest_path,
+                        copy_files=copy_files,
+                        decompress=decompress,
+                    )
+                    if not ok:
+                        raise Exception("Failed to create output")
                     created_links += 1
-                    logger.info(f"Created link for {file.fitsFileName} -> {dest_path}")
+                    logger.info(f"Created checkout file for {file.fitsFileName} -> {dest_path}")
                 except Exception as e:
                     logger.error(f"Error creating link for {file.fitsFileName}: {e}")
             
@@ -691,17 +688,16 @@ class SessionsWidget(QWidget):
                     dest_path = os.path.join(masters_dir, filename)
                     
                     try:
-                        if not os.path.exists(dest_path):
-                            if sys.platform == "win32":
-                                import subprocess
-                                result = subprocess.run(f'mklink "{dest_path}" "{master_path}"', 
-                                                      shell=True, capture_output=True, text=True)
-                                if result.returncode != 0:
-                                    raise Exception(f"mklink failed: {result.stderr}")
-                            else:
-                                os.symlink(master_path, dest_path)
-                            created_links += 1
-                            logger.info(f"Created link for {master_type} master: {filename}")
+                        if not os.path.exists(dest_path) and not os.path.exists(self._get_decompressed_dest_path(dest_path)):
+                            ok = self._materialize_file(
+                                src_path=master_path,
+                                dest_path=dest_path,
+                                copy_files=copy_files,
+                                decompress=decompress,
+                            )
+                            if ok:
+                                created_links += 1
+                                logger.info(f"Created checkout file for {master_type} master: {filename}")
                     except Exception as e:
                         logger.error(f"Error creating link for master {master_path}: {e}")
             
@@ -725,16 +721,11 @@ class SessionsWidget(QWidget):
     def checkout_multiple_sessions(self, session_items):
         """Create symbolic links for multiple sessions in a common directory structure"""
         try:
-            # Ask user for destination directory
-            dest_dir = QFileDialog.getExistingDirectory(
-                self, 
-                "Select Destination Directory for Multiple Sessions",
-                os.path.expanduser("~"),
-                QFileDialog.ShowDirsOnly
-            )
-            
-            if not dest_dir:
-                return  # User cancelled
+            # Ask user for destination directory + options
+            opts = self._prompt_checkout_options("Check out Multiple Sessions")
+            if not opts:
+                return
+            dest_dir, copy_files, decompress = opts
             
             # Create main checkout directory with shared subdirectories
             checkout_dir = os.path.join(dest_dir, f"Sessions_Checkout_{dt.now().strftime('%Y%m%d_%H%M%S')}")
@@ -841,17 +832,18 @@ class SessionsWidget(QWidget):
                         dest_path = os.path.join(dest_folder, filename)
                         
                         try:
-                            if not os.path.exists(dest_path):
-                                if sys.platform == "win32":
-                                    # Windows - use mklink (note: argument order is reversed from os.symlink)
-                                    import subprocess
-                                    # mklink syntax: mklink Link Target
-                                    result = subprocess.run(f'mklink "{dest_path}" "{file.fitsFileName}"', 
-                                                          shell=True, capture_output=True, text=True)
-                                    if result.returncode != 0:
-                                        raise Exception(f"mklink failed: {result.stderr}")
-                                else:
-                                    os.symlink(file.fitsFileName, dest_path)
+                            if not file.fitsFileName or not os.path.exists(file.fitsFileName):
+                                continue
+                            if os.path.exists(dest_path) or os.path.exists(self._get_decompressed_dest_path(dest_path)):
+                                continue
+
+                            ok = self._materialize_file(
+                                src_path=file.fitsFileName,
+                                dest_path=dest_path,
+                                copy_files=copy_files,
+                                decompress=decompress,
+                            )
+                            if ok:
                                 session_links += 1
                         except Exception as e:
                             logger.error(f"Error creating link for {file.fitsFileName}: {e}")
@@ -887,6 +879,205 @@ class SessionsWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to checkout multiple sessions: {str(e)}")
             logger.error(f"Error in checkout_multiple_sessions: {str(e)}")
+
+    def _prompt_checkout_options(self, title: str):
+        """Prompt for checkout target directory and options.
+
+        Returns (dest_dir, copy_files, decompress) or None if cancelled.
+        """
+        try:
+            dialog = QDialog(self)
+            dialog.setWindowTitle(title)
+
+            layout = QVBoxLayout(dialog)
+
+            layout.addWidget(QLabel("Target directory:"))
+            dir_row = QHBoxLayout()
+            dir_edit = QLineEdit()
+            dir_edit.setText(os.path.expanduser("~"))
+            browse_btn = QPushButton("Browse...")
+            dir_row.addWidget(dir_edit)
+            dir_row.addWidget(browse_btn)
+            layout.addLayout(dir_row)
+
+            copy_cb = QCheckBox("Copy Files, Don't Link (Slower)")
+            copy_cb.setChecked(False)
+            decompress_cb = QCheckBox("Decompress")
+            decompress_cb.setChecked(True)
+            layout.addWidget(copy_cb)
+            layout.addWidget(decompress_cb)
+
+            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            layout.addWidget(buttons)
+
+            def _browse():
+                chosen = QFileDialog.getExistingDirectory(
+                    self,
+                    "Select Target Directory",
+                    dir_edit.text() or os.path.expanduser("~"),
+                    QFileDialog.ShowDirsOnly,
+                )
+                if chosen:
+                    dir_edit.setText(chosen)
+
+            def _update_ok_state():
+                ok_btn = buttons.button(QDialogButtonBox.Ok)
+                if ok_btn is not None:
+                    ok_btn.setEnabled(bool(dir_edit.text().strip()))
+
+            browse_btn.clicked.connect(_browse)
+            dir_edit.textChanged.connect(_update_ok_state)
+            _update_ok_state()
+
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+
+            if dialog.exec() != QDialog.Accepted:
+                return None
+
+            dest_dir = dir_edit.text().strip()
+            if not dest_dir:
+                return None
+
+            return dest_dir, bool(copy_cb.isChecked()), bool(decompress_cb.isChecked())
+        except Exception as e:
+            logger.error(f"Failed to prompt checkout options: {e}")
+            return None
+
+    def _is_compressed_path(self, path: str) -> bool:
+        if not path:
+            return False
+        lower = path.lower()
+        return lower.endswith(('.fz', '.gz', '.bz2'))
+
+    def _get_decompressed_dest_path(self, dest_path: str) -> str:
+        """If dest_path indicates a compressed file, return the decompressed output path."""
+        if not dest_path:
+            return ''
+        lower = dest_path.lower()
+        if lower.endswith('.fits.fz'):
+            return dest_path[:-3]  # strip .fz
+        if lower.endswith('.fit.fz') or lower.endswith('.fts.fz'):
+            return dest_path[:-3]
+        if lower.endswith('.fits.gz'):
+            return dest_path[:-3]
+        if lower.endswith('.fit.gz') or lower.endswith('.fts.gz'):
+            return dest_path[:-3]
+        if lower.endswith('.gz'):
+            return dest_path[:-3]
+        if lower.endswith('.fz'):
+            return dest_path[:-3]
+        if lower.endswith('.bz2'):
+            return dest_path[:-4]
+        return dest_path
+
+    def _decompress_to(self, src_path: str, dest_path: str) -> bool:
+        """Decompress a compressed FITS file into dest_path.
+
+        Supports .fits.fz (via astropy) and .gz (via gzip module).
+        """
+        try:
+            if not src_path or not os.path.exists(src_path):
+                return False
+
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            lower = src_path.lower()
+
+            if lower.endswith('.fz'):
+                # .fits.fz (or .fz) - FITS tiled compression (fpack) is typically stored
+                # as an image-compression extension (CompImageHDU / BINTABLE) while the
+                # primary HDU may have no data. We must read the first HDU that yields data.
+                from astropy.io import fits
+                with fits.open(src_path) as hdul:
+                    primary_header = hdul[0].header
+
+                    data_hdu = None
+                    for hdu in hdul:
+                        try:
+                            if getattr(hdu, 'data', None) is not None:
+                                data_hdu = hdu
+                                break
+                        except Exception:
+                            continue
+
+                    if data_hdu is None:
+                        return False
+
+                    data = data_hdu.data
+
+                # Prefer preserving primary header metadata (WCS/object/etc) but allow astropy
+                # to fix structural keywords to match the decompressed data.
+                fits.writeto(dest_path, data, header=primary_header, overwrite=True, output_verify='silentfix')
+                return True
+
+            if lower.endswith('.gz'):
+                # stream-decompress
+                with gzip.open(src_path, 'rb') as f_in:
+                    with open(dest_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                return True
+
+            # Unknown compression
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to decompress {src_path} -> {dest_path}: {e}")
+            return False
+
+    def _create_symlink(self, src_path: str, dest_path: str) -> bool:
+        try:
+            if os.path.exists(dest_path):
+                return True
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+            if sys.platform == 'win32':
+                import subprocess
+                result = subprocess.run(
+                    f'mklink "{dest_path}" "{src_path}"',
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    raise Exception(f"mklink failed: {result.stderr}")
+                return True
+
+            os.symlink(src_path, dest_path)
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to create symlink {dest_path} -> {src_path}: {e}")
+            return False
+
+    def _materialize_file(self, *, src_path: str, dest_path: str, copy_files: bool, decompress: bool) -> bool:
+        """Create the requested file in dest_path based on options.
+
+        - If decompress is True and src is compressed, write decompressed output into dest folder.
+        - Else if copy_files is True, copy the file.
+        - Else create a symlink.
+        """
+        try:
+            if not src_path or not os.path.exists(src_path):
+                return False
+
+            if decompress and self._is_compressed_path(src_path):
+                out_path = self._get_decompressed_dest_path(dest_path)
+                if os.path.exists(out_path):
+                    return True
+                return self._decompress_to(src_path, out_path)
+
+            if copy_files:
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                if os.path.exists(dest_path):
+                    return True
+                shutil.copy2(src_path, dest_path)
+                return True
+
+            return self._create_symlink(src_path, dest_path)
+
+        except Exception as e:
+            logger.error(f"Failed to materialize {src_path} -> {dest_path}: {e}")
+            return False
 
     def calibrate_session(self, item, *, confirm: bool = True, show_results: bool = True):
         """Calibrate light frames in a session using available master frames"""

@@ -2,7 +2,7 @@
 FITS File Compression Module
 
 This module provides lossless compression for FITS images. 
-Compressed files replace the original with a .Z extension.
+Compressed files are written with a .fz suffix (e.g., .fits.fz).
 
 The compression system supports:
 - Lossless compression using gzip or similar algorithms
@@ -98,13 +98,15 @@ class FitsCompressor:
         Returns:
             True if file appears to be compressed, False otherwise
         """
-        # Check for external compression extensions
-        external_compressed_extensions = ['.gz', '.xz', '.bz2']
+        # Check for common compression extensions
+        # - .gz/.xz/.bz2 are external stream compression
+        # - .fz is the conventional suffix for FITS tile-compression outputs (fpack)
+        external_compressed_extensions = ['.gz', '.xz', '.bz2', '.fz']
         if any(file_path.lower().endswith(ext) for ext in external_compressed_extensions):
             return True
         
         # Check for FITS internal compression by examining the file structure
-        if file_path.lower().endswith(('.fits', '.fit', '.fts')):
+        if file_path.lower().endswith(('.fits', '.fit', '.fts', '.fits.fz', '.fit.fz', '.fts.fz', '.fz')):
             try:
                 with fits.open(file_path) as hdul:
                     # Check if there are CompImageHDU (compressed image) extensions
@@ -135,7 +137,7 @@ class FitsCompressor:
             return True
             
         # Check for externally compressed FITS files
-        external_compressed_extensions = ['.gz', '.xz', '.bz2']
+        external_compressed_extensions = ['.gz', '.xz', '.bz2', '.fz']
         for ext in external_compressed_extensions:
             if file_path.lower().endswith(ext):
                 # Check if the base file (without compression extension) is a FITS file
@@ -176,6 +178,8 @@ class FitsCompressor:
             return compressed_path[:-3]
         elif compressed_path.lower().endswith('.bz2'):
             return compressed_path[:-4]
+        elif compressed_path.lower().endswith('.fz'):
+            return compressed_path[:-3]
         else:
             return compressed_path
     
@@ -361,6 +365,15 @@ class FitsCompressor:
                 with bz2.open(compressed_path, 'rb') as f_in:
                     with open(output_path, 'wb') as f_out:
                         shutil.copyfileobj(f_in, f_out)
+
+            elif algorithm == 'fits_internal':
+                # FITS tile-compressed files (.fz) are still valid FITS files and can be read
+                # directly by astropy/cfitsio. If an uncompressed copy is required, it can be
+                # produced by opening with astropy and rewriting to a new .fits path.
+                logger.error(
+                    f"Tile-compressed FITS (.fz) does not use stream decompression: {compressed_path}"
+                )
+                return None
             
             else:
                 logger.error(f"Unsupported compression format: {compressed_path}")
@@ -415,6 +428,8 @@ class FitsCompressor:
             return 'lzma'
         elif file_lower.endswith('.bz2'):
             return 'bzip2'
+        elif file_lower.endswith('.fz'):
+            return 'fits_internal'
         else:
             return 'gzip'  # Default fallback
     
@@ -559,15 +574,13 @@ class FitsCompressor:
                 return None
             
             # Determine output path
-            if replace_original:
-                output_path = input_path
-                temp_path = input_path + '.tmp'
-            else:
-                # For FITS internal compression, we don't change the extension
-                # but add a suffix to indicate compression type
-                base, ext = os.path.splitext(input_path)
-                output_path = f"{base}_{algorithm}{ext}"
-                temp_path = output_path
+            # FITS tile-compression is still a FITS file; conventional naming uses .fz.
+            # We write <original>.fz (e.g., image.fits.fz) and optionally remove the original.
+            base_output_path = f"{input_path}.fz"
+            output_path = base_output_path
+            temp_path = base_output_path + '.tmp'
+
+            original_size = os.path.getsize(input_path)
             
             # Load and compress the FITS file
             with fits.open(input_path) as hdul:
@@ -589,14 +602,11 @@ class FitsCompressor:
                 
                 # Write compressed FITS file
                 new_hdul.writeto(temp_path, overwrite=True)
-            
-            # Handle file replacement
-            if replace_original and temp_path != output_path:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                shutil.move(temp_path, output_path)
-            
-            original_size = os.path.getsize(input_path)
+
+            # Atomically move into place
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            shutil.move(temp_path, output_path)
             compressed_size = os.path.getsize(output_path)
             compression_ratio = (1 - compressed_size / original_size) * 100
             
@@ -612,7 +622,7 @@ class FitsCompressor:
                     return None
             
             # Remove original if requested
-            if replace_original and output_path != input_path:
+            if replace_original:
                 try:
                     os.remove(input_path)
                     logger.debug(f"Removed original file: {input_path}")
