@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import Callable, Optional
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QTimer
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QMainWindow, 
                                QStackedWidget, QStatusBar, QMessageBox, QDialog)
 from PySide6.QtGui import QAction, QDesktopServices
@@ -56,6 +56,7 @@ class AstroFilerGUI(QMainWindow):
         self.current_theme = "Dark"
         self.init_ui()
         self.apply_initial_theme()
+        self._schedule_registration_ping()
 
     def _status(self, message: str) -> None:
         if callable(self._status_callback):
@@ -64,6 +65,17 @@ class AstroFilerGUI(QMainWindow):
             except Exception:
                 # Status updates must never break startup
                 pass
+
+    def _schedule_registration_ping(self) -> None:
+        """Ping the registration server on startup (non-blocking)."""
+        try:
+            from astrofiler.services.registration import start_startup_ping
+
+            # Defer until the event loop is spinning.
+            QTimer.singleShot(0, lambda: start_startup_ping(status_callback=self._status))
+        except Exception:
+            # Never break startup
+            pass
     
     def init_ui(self):
         """Initialize the user interface"""
