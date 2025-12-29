@@ -28,6 +28,7 @@ class SessionsWidget(QWidget):
         # Caches used to speed up sessions rendering
         self._session_file_counts = {}
         self._master_source_session_ids = set()
+        self._master_types_by_source_session_id = {}
 
         # Load existing data on startup
         self.load_sessions_data()
@@ -1335,18 +1336,25 @@ class SessionsWidget(QWidget):
                 if row.get("sid")
             }
 
-            # Which sessions have created masters
-            self._master_source_session_ids = set(
+            # Which sessions have created masters (and which master types)
+            self._master_types_by_source_session_id = {}
+            for sid, mtype in (
                 Masters
-                .select(Masters.source_session_id)
+                .select(Masters.source_session_id, Masters.master_type)
                 .where(
                     (Masters.soft_delete == False) &
                     (Masters.source_session_id.is_null(False))
                 )
                 .tuples()
-            )
-            # tuples() yields 1-tuples
-            self._master_source_session_ids = {sid for (sid,) in self._master_source_session_ids if sid}
+            ):
+                if not sid:
+                    continue
+                st = str(mtype or '').strip().lower()
+                if not st:
+                    continue
+                self._master_types_by_source_session_id.setdefault(str(sid), set()).add(st)
+
+            self._master_source_session_ids = set(self._master_types_by_source_session_id.keys())
             
             # Group sessions by object name
             sessions_by_object = {}
@@ -1579,9 +1587,37 @@ class SessionsWidget(QWidget):
     
     def _build_resources_status(self, session):
         """Build resources status showing frame counts or Master availability for light sessions."""
+        def _masters_for_source_session(source_session_id) -> set:
+            if not source_session_id:
+                return set()
+            return set(self._master_types_by_source_session_id.get(str(source_session_id), set()))
+
+        def _master_label(master_type: str) -> str:
+            mt = str(master_type or '').strip().lower()
+            if mt == 'bias':
+                return 'MasterBias'
+            if mt == 'dark':
+                return 'MasterDark'
+            if mt == 'flat':
+                return 'MasterFlat'
+            return f"Master{mt.title()}" if mt else 'Master'
+
         if session.fitsSessionObjectName in ['Bias', 'Dark', 'Flat']:
-            # This is a calibration session, don't show resources status
-            return {"text": "", "tooltip": "", "percentage": 0}
+            # Calibration session row: show which masters exist for this session.
+            mtypes = _masters_for_source_session(getattr(session, 'fitsSessionId', None))
+            if not mtypes:
+                return {"text": "", "tooltip": "", "percentage": 0}
+
+            labels = [_master_label(mt) for mt in sorted(mtypes)]
+            return {
+                "text": ", ".join(labels),
+                "tooltip": "Masters available: " + ", ".join(labels),
+                "percentage": 100,
+                "has_bias": 'bias' in mtypes,
+                "has_dark": 'dark' in mtypes,
+                "has_flat": 'flat' in mtypes,
+                "has_masters": True,
+            }
         
         # Check if this is a precalibrated telescope/instrument (iTelescope or SeeStar)
         if session.fitsSessionTelescope or session.fitsSessionImager:
@@ -1605,10 +1641,18 @@ class SessionsWidget(QWidget):
                     "has_masters": True
                 }
         
-        # Check for master frames first
-        has_bias_master = hasattr(session, 'fitsBiasMaster') and session.fitsBiasMaster
-        has_dark_master = hasattr(session, 'fitsDarkMaster') and session.fitsDarkMaster
-        has_flat_master = hasattr(session, 'fitsFlatMaster') and session.fitsFlatMaster
+        # Master availability can come either from explicit session fields or from the Masters table
+        dark_source_session = getattr(session, 'fitsDarkSession', None)
+        flat_source_session = getattr(session, 'fitsFlatSession', None)
+        bias_source_session = getattr(session, 'fitsBiasSession', None)
+
+        dark_masters = _masters_for_source_session(dark_source_session)
+        flat_masters = _masters_for_source_session(flat_source_session)
+        bias_masters = _masters_for_source_session(bias_source_session)
+
+        has_dark_master = bool(getattr(session, 'fitsDarkMaster', None)) or ('dark' in dark_masters)
+        has_flat_master = bool(getattr(session, 'fitsFlatMaster', None)) or ('flat' in flat_masters)
+        has_bias_master = bool(getattr(session, 'fitsBiasMaster', None)) or ('bias' in bias_masters)
         
         # Check calibration sessions availability
         has_bias_session = bool(session.fitsBiasSession)
@@ -1621,7 +1665,7 @@ class SessionsWidget(QWidget):
         
         # Dark
         if has_dark_master:
-            status_parts.append("Dark: Master")
+            status_parts.append(_master_label('dark'))
             tooltip_parts.append("✓ Dark master frame available")
         elif has_dark_session:
             dark_count = self._session_file_counts.get(session.fitsDarkSession)
@@ -1637,7 +1681,7 @@ class SessionsWidget(QWidget):
             
         # Flat
         if has_flat_master:
-            status_parts.append("Flat: Master")
+            status_parts.append(_master_label('flat'))
             tooltip_parts.append("✓ Flat master frame available")
         elif has_flat_session:
             flat_count = self._session_file_counts.get(session.fitsFlatSession)
@@ -1653,7 +1697,7 @@ class SessionsWidget(QWidget):
             
         # Bias
         if has_bias_master:
-            status_parts.append("Bias: Master")
+            status_parts.append(_master_label('bias'))
             tooltip_parts.append("✓ Bias master frame available")
         elif has_bias_session:
             bias_count = self._session_file_counts.get(session.fitsBiasSession)
@@ -1873,7 +1917,7 @@ class SessionsWidget(QWidget):
                 self._do_regenerate_sessions()
             elif clicked_button == new_only_button:
                 # Call the new-only regeneration method
-                self._do_regenerate_sessions_new_only()
+                self._do_regenerate_sessions_new_only(show_user_messages=True)
             
         except Exception as e:
             logger.error(f"Error in regenerate_sessions: {e}")
@@ -2068,8 +2112,8 @@ class SessionsWidget(QWidget):
             logger.error(f"Unexpected error during session regeneration: {e}")
             QMessageBox.critical(self, "Error", f"Unexpected error during session regeneration: {e}")
     
-    def _do_regenerate_sessions_new_only(self):
-        """Regenerate sessions only for files without sessions assigned"""
+    def _do_regenerate_sessions_new_only(self, show_user_messages: bool = True):
+        """Regenerate sessions only for files without sessions assigned."""
         try:
             logger.info("Starting new-only session regeneration (files without sessions)")
             
@@ -2089,9 +2133,13 @@ class SessionsWidget(QWidget):
             total_unassigned = unassigned_light_count + unassigned_cal_count
             
             if total_unassigned == 0:
-                QMessageBox.information(self, "No Unassigned Files", 
-                                      "All FITS files already have sessions assigned.\n\n"
-                                      "No new sessions need to be created.")
+                if show_user_messages:
+                    QMessageBox.information(
+                        self,
+                        "No Unassigned Files",
+                        "All FITS files already have sessions assigned.\n\n"
+                        "No new sessions need to be created.",
+                    )
                 return
             
             logger.info(f"Found {unassigned_light_count} unassigned light files and {unassigned_cal_count} unassigned calibration files")
@@ -2133,7 +2181,8 @@ class SessionsWidget(QWidget):
                 
                 if was_cancelled:
                     logger.info("New-only session regeneration cancelled during light sessions creation")
-                    QMessageBox.information(self, "Cancelled", "Session creation was cancelled.")
+                    if show_user_messages:
+                        QMessageBox.information(self, "Cancelled", "Session creation was cancelled.")
                     return
                     
                 logger.info(f"Created {len(light_sessions)} light sessions for unassigned files")
@@ -2142,7 +2191,8 @@ class SessionsWidget(QWidget):
                 if 'progress_dialog' in locals():
                     progress_dialog.close()
                 logger.error(f"Error creating light sessions: {e}")
-                QMessageBox.critical(self, "Error", f"Failed to create light sessions: {e}")
+                if show_user_messages:
+                    QMessageBox.critical(self, "Error", f"Failed to create light sessions: {e}")
                 return
             
             # Step 2: Create calibration sessions for unassigned files
@@ -2184,7 +2234,8 @@ class SessionsWidget(QWidget):
                 
                 if was_cancelled:
                     logger.info("New-only session regeneration cancelled during calibration sessions creation")
-                    QMessageBox.information(self, "Cancelled", "Session creation was cancelled.")
+                    if show_user_messages:
+                        QMessageBox.information(self, "Cancelled", "Session creation was cancelled.")
                     return
                     
                 logger.info(f"Created {len(cal_sessions)} calibration sessions for unassigned files")
@@ -2193,7 +2244,8 @@ class SessionsWidget(QWidget):
                 if 'progress_dialog' in locals():
                     progress_dialog.close()
                 logger.error(f"Error creating calibration sessions: {e}")
-                QMessageBox.critical(self, "Error", f"Failed to create calibration sessions: {e}")
+                if show_user_messages:
+                    QMessageBox.critical(self, "Error", f"Failed to create calibration sessions: {e}")
                 return
             
             # Step 3: Link sessions
@@ -2229,7 +2281,8 @@ class SessionsWidget(QWidget):
                 
                 if was_cancelled:
                     logger.info("New-only session regeneration cancelled during linking")
-                    QMessageBox.information(self, "Cancelled", "Session creation was cancelled.")
+                    if show_user_messages:
+                        QMessageBox.information(self, "Cancelled", "Session creation was cancelled.")
                     return
                     
                 logger.info(f"Linked {len(linked_sessions)} sessions")
@@ -2238,7 +2291,8 @@ class SessionsWidget(QWidget):
                 if 'progress_dialog' in locals():
                     progress_dialog.close()
                 logger.error(f"Error linking sessions: {e}")
-                QMessageBox.critical(self, "Error", f"Failed to link sessions: {e}")
+                if show_user_messages:
+                    QMessageBox.critical(self, "Error", f"Failed to link sessions: {e}")
                 return
             
             # Final step: Refresh the display
@@ -2255,12 +2309,14 @@ class SessionsWidget(QWidget):
                                 f"Linked {total_linked} light sessions with calibrations\n\n"
                                 f"Only files without existing sessions were processed.")
             
-            QMessageBox.information(self, "Session Creation Complete", completion_message)
+            if show_user_messages:
+                QMessageBox.information(self, "Session Creation Complete", completion_message)
             logger.info(f"New-only session creation complete: {total_light} light, {total_cal} calibration, {total_linked} linked")
             
         except Exception as e:
             logger.error(f"Unexpected error during new-only session regeneration: {e}")
-            QMessageBox.critical(self, "Error", f"Unexpected error during session creation: {e}")
+            if show_user_messages:
+                QMessageBox.critical(self, "Error", f"Unexpected error during session creation: {e}")
 
     def auto_regenerate_sessions(self):
         """Auto-regenerate sessions without user confirmation (for use after file imports)"""
@@ -2276,8 +2332,8 @@ class SessionsWidget(QWidget):
             progress_dialog.show()
             QApplication.processEvents()
             
-            # Call the internal regeneration method
-            self._do_regenerate_sessions()
+            # Only build sessions for newly imported (unassigned) files.
+            self._do_regenerate_sessions_new_only(show_user_messages=False)
             
             # Close the progress dialog
             progress_dialog.close()

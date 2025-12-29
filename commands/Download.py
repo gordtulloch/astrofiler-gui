@@ -285,6 +285,7 @@ def download_files(telescope_type, hostname, network, destination, username=None
                 try:
                     import zipfile
                     zip_dir = os.path.dirname(local_path)
+                    zip_to_delete = local_path
                     
                     with zipfile.ZipFile(local_path, 'r') as zip_ref:
                         file_list = zip_ref.namelist()
@@ -298,9 +299,12 @@ def download_files(telescope_type, hostname, network, destination, username=None
                                     logger.info(f"Extracted: {extracted_file}")
                                     local_path = extracted_path
                                     break
-                        
-                        # Remove zip file
-                        os.remove(local_path if local_path.endswith('.zip') else os.path.join(zip_dir, file_name))
+
+                    # Remove zip file after the ZipFile is closed (Windows-friendly)
+                    try:
+                        os.remove(zip_to_delete)
+                    except Exception as e:
+                        logger.warning(f"Could not remove zip file {zip_to_delete}: {e}")
                         
                 except Exception as e:
                     logger.warning(f"Error extracting {file_name}: {e}")

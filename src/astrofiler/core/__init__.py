@@ -69,6 +69,23 @@ class fitsProcessing:
     def registerFitsImage(self, root: str, file: str, moveFiles: bool) -> Union[str, bool]:
         """Register FITS image - original signature from astrofiler_file."""
         return self.file_processor.registerFitsImage(root, file, moveFiles)
+
+    def registerMasters(
+        self,
+        progress_callback=None,
+        source_folder: Optional[str] = None,
+        moveFiles: bool = False,
+        destination_folder: Optional[str] = None,
+        precount: bool = False,
+    ):
+        """Scan for existing master FITS files and register them in the Masters table."""
+        return self.file_processor.registerMasters(
+            progress_callback=progress_callback,
+            source_folder=source_folder,
+            moveFiles=moveFiles,
+            destination_folder=destination_folder,
+            precount=precount,
+        )
     
     def registerFitsImages(self, moveFiles=True, progress_callback=None, source_folder=None):
         """Register multiple FITS images from source folder."""
@@ -82,26 +99,44 @@ class fitsProcessing:
         total_files = 0
         from .compress_files import get_fits_compressor
         compressor = get_fits_compressor()
+
+        def _is_master_fits_by_imagetyp(file_path: str) -> bool:
+            """Return True if FITS header IMAGETYP indicates a master calibration frame."""
+            try:
+                from astropy.io import fits
+                hdr = fits.getheader(file_path, 0)
+                imagetyp = str(hdr.get('IMAGETYP', '')).upper()
+                if 'MASTER' not in imagetyp:
+                    return False
+                return any(token in imagetyp for token in ('DARK', 'FLAT', 'BIAS'))
+            except Exception:
+                return False
         
         for root, dirs, files in os.walk(scan_folder):
             for file in files:
                 # Use the comprehensive FITS file detection that includes compressed files
-                if compressor.is_fits_file(os.path.join(root, file)):
+                file_path = os.path.join(root, file)
+                if compressor.is_fits_file(file_path):
+                    if _is_master_fits_by_imagetyp(file_path):
+                        continue
                     total_files += 1
         
         current_file = 0
         for root, dirs, files in os.walk(scan_folder):
             for file in files:
                 # Use the comprehensive FITS file detection that includes compressed files
-                if compressor.is_fits_file(os.path.join(root, file)) or file.lower().endswith('.xisf'):
+                file_path = os.path.join(root, file)
+                if compressor.is_fits_file(file_path) or file.lower().endswith('.xisf'):
+                    if compressor.is_fits_file(file_path) and _is_master_fits_by_imagetyp(file_path):
+                        continue
                     current_file += 1
                     try:
                         result = self.registerFitsImage(root, file, moveFiles)
                         if result:  # If registration was successful
-                            processed_files.append(os.path.join(root, file))
+                            processed_files.append(file_path)
                         if progress_callback:
                             # Call with expected signature: current, total, filename
-                            if not progress_callback(current_file, total_files, os.path.join(root, file)):
+                            if not progress_callback(current_file, total_files, file_path):
                                 break  # Stop if callback returns False (user cancelled)
                     except Exception as e:
                         import logging

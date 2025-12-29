@@ -614,7 +614,30 @@ class ImagesWidget(QWidget):
         """Show the download dialog for smart telescopes."""
         try:
             dialog = SmartTelescopeDownloadDialog(self)
-            dialog.exec()
+            result = dialog.exec()
+
+            # If the download flow completed successfully, refresh Images and
+            # create sessions for newly imported (unassigned) files.
+            if result == QDialog.Accepted:
+                self.load_fits_data()
+
+                try:
+                    # Get the main window and sessions widget
+                    main_window = self.parent()
+                    while main_window and not hasattr(main_window, 'sessions_widget'):
+                        main_window = main_window.parent()
+
+                    if main_window and hasattr(main_window, 'sessions_widget'):
+                        if hasattr(main_window.sessions_widget, 'auto_regenerate_sessions'):
+                            logger.info("Auto-regenerating sessions after Download...")
+                            main_window.sessions_widget.auto_regenerate_sessions()
+                        else:
+                            logger.warning("auto_regenerate_sessions method not found on sessions widget")
+                    else:
+                        logger.warning("Could not find main window or sessions widget for auto-regeneration")
+
+                except Exception as e:
+                    logger.error(f"Error auto-regenerating sessions after Download: {e}")
         except Exception as e:
             logger.error(f"Error opening download dialog: {e}")
             QMessageBox.critical(self, "Error", f"Error opening download dialog: {e}")
@@ -697,6 +720,59 @@ class ImagesWidget(QWidget):
             
             # Create and run the FITS processing
             fits_processor = fitsProcessing()
+
+            master_ids = []
+
+            # Register any existing master calibration frames in the source folder (silent)
+            try:
+                # Keep the UI responsive during master scan/move
+                if progress_dialog:
+                    progress_dialog.setLabelText("Registering master calibration frames...")
+                    # Indeterminate range; we don't pre-count (faster, avoids UI freeze)
+                    progress_dialog.setRange(0, 0)
+                    progress_dialog.setValue(0)
+                    QApplication.processEvents()
+
+                def update_master_progress(_current, _total, filename):
+                    nonlocal was_cancelled
+                    try:
+                        if was_cancelled:
+                            return False
+                        if progress_dialog and progress_dialog.wasCanceled():
+                            was_cancelled = True
+                            return False
+                        if progress_dialog:
+                            progress_dialog.setLabelText(f"Registering master: {os.path.basename(filename)}")
+                            QApplication.processEvents()
+                            if progress_dialog.wasCanceled():
+                                was_cancelled = True
+                                return False
+                        return True
+                    except Exception:
+                        return True
+
+                master_ids = fits_processor.registerMasters(
+                    progress_callback=update_master_progress,
+                    source_folder=fits_processor.sourceFolder,
+                    moveFiles=True,
+                    precount=False,
+                )
+
+                if was_cancelled:
+                    if progress_dialog:
+                        progress_dialog.close()
+                    QMessageBox.information(self, "Cancelled", "Repository loading was cancelled by user.")
+                    logger.debug("Operation was cancelled by user during master import")
+                    return
+
+                if progress_dialog:
+                    progress_dialog.setRange(0, 100)
+                    progress_dialog.setValue(0)
+                    progress_dialog.setLabelText("Scanning for FITS and XISF files...")
+                    QApplication.processEvents()
+            except Exception as e:
+                logger.debug(f"registerMasters (Load New) failed or skipped: {e}")
+
             logger.debug("Starting registerFitsImages with progress callback")
             result = fits_processor.registerFitsImages(moveFiles=True, progress_callback=update_progress)
             
@@ -722,7 +798,14 @@ class ImagesWidget(QWidget):
                 if duplicate_count > 0:
                     QMessageBox.information(self, "No New Files", f"No new FITS files were processed. {duplicate_count} duplicate files were skipped.")
                 else:
-                    QMessageBox.information(self, "No Files", "No FITS files found to process in the source directory.")
+                    if master_ids:
+                        QMessageBox.information(
+                            self,
+                            "No FITS Images",
+                            f"No FITS images found to process in the source directory. Registered/updated {len(master_ids)} master files."
+                        )
+                    else:
+                        QMessageBox.information(self, "No Files", "No FITS files found to process in the source directory.")
                 logger.info("No FITS files found to process")
             else:
                 if duplicate_count > 0:
@@ -840,6 +923,56 @@ class ImagesWidget(QWidget):
             
             # Create and run the FITS processing
             fits_processor = fitsProcessing()
+
+            master_ids = []
+
+            # Register any existing master calibration frames in the repository folder (silent)
+            try:
+                if progress_dialog:
+                    progress_dialog.setLabelText("Registering master calibration frames...")
+                    progress_dialog.setRange(0, 0)
+                    progress_dialog.setValue(0)
+                    QApplication.processEvents()
+
+                def update_master_progress(_current, _total, filename):
+                    nonlocal was_cancelled
+                    try:
+                        if was_cancelled:
+                            return False
+                        if progress_dialog and progress_dialog.wasCanceled():
+                            was_cancelled = True
+                            return False
+                        if progress_dialog:
+                            progress_dialog.setLabelText(f"Registering master: {os.path.basename(filename)}")
+                            QApplication.processEvents()
+                            if progress_dialog.wasCanceled():
+                                was_cancelled = True
+                                return False
+                        return True
+                    except Exception:
+                        return True
+
+                master_ids = fits_processor.registerMasters(
+                    progress_callback=update_master_progress,
+                    source_folder=fits_processor.repoFolder,
+                    precount=False,
+                )
+
+                if was_cancelled:
+                    if progress_dialog:
+                        progress_dialog.close()
+                    QMessageBox.information(self, "Cancelled", "Repository synchronization was cancelled by user.")
+                    logger.info("Repository synchronization was cancelled by user during master registration")
+                    return
+
+                if progress_dialog:
+                    progress_dialog.setRange(0, 100)
+                    progress_dialog.setValue(0)
+                    progress_dialog.setLabelText("Syncing repository FITS files...")
+                    QApplication.processEvents()
+            except Exception as e:
+                logger.debug(f"registerMasters (Regenerate) failed or skipped: {e}")
+
             # For regeneration, scan the repository folder instead of the source folder
             result = fits_processor.registerFitsImages(
                 moveFiles=False, 
@@ -867,7 +1000,14 @@ class ImagesWidget(QWidget):
                 if duplicate_count > 0:
                     QMessageBox.information(self, "No New Files", f"No new FITS files were processed. {duplicate_count} duplicate files were skipped.")
                 else:
-                    QMessageBox.information(self, "No Files", "No FITS files found to process in the repository directory.")
+                    if master_ids:
+                        QMessageBox.information(
+                            self,
+                            "No FITS Images",
+                            f"No FITS images found to process in the repository directory. Registered/updated {len(master_ids)} master files."
+                        )
+                    else:
+                        QMessageBox.information(self, "No Files", "No FITS files found to process in the repository directory.")
                 logger.info("No FITS files found to process")
             else:
                 if duplicate_count > 0:

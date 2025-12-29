@@ -445,13 +445,57 @@ class MasterFrameManager:
             
             if progress_callback:
                 progress_callback(25, 100, f"Loading {len(file_paths)} {cal_type} frames...")
-            
-            # Read first file to get dimensions and header
-            with fits.open(file_paths[0]) as hdul:
-                header = hdul[0].header.copy()
-                data_shape = hdul[0].data.shape
-                dtype = hdul[0].data.dtype
-                logger.info(f"Frame dimensions: {data_shape}, dtype: {dtype}")
+
+            def _extract_image_hdu(hdul):
+                """Return the first HDU with 2D image data, or None."""
+                for hdu in hdul:
+                    data = getattr(hdu, 'data', None)
+                    if data is None:
+                        continue
+                    arr = np.asarray(data)
+                    # Some writers store a single plane as (1, H, W)
+                    if arr.ndim == 3 and arr.shape[0] == 1:
+                        arr = arr[0]
+                    if arr.ndim != 2:
+                        continue
+                    return hdu, arr
+                return None, None
+
+            def _read_fits_image(file_path: str):
+                """Read a FITS image, handling data-in-extension FITS files.
+
+                Returns (data, header). Header is taken from the image HDU when
+                available; falls back to primary header.
+                """
+                with fits.open(file_path) as hdul:
+                    primary_header = hdul[0].header.copy()
+                    hdu, data = _extract_image_hdu(hdul)
+                    if data is None:
+                        raise ValueError("No 2D image data found in any HDU")
+                    header = getattr(hdu, 'header', None)
+                    return data, (header.copy() if header is not None else primary_header)
+
+            # Find the first readable frame to get dimensions and dtype
+            header = None
+            data_shape = None
+            dtype = None
+            first_data_file = None
+            for candidate_path in file_paths:
+                try:
+                    data0, header0 = _read_fits_image(candidate_path)
+                    header = header0
+                    data_shape = data0.shape
+                    dtype = data0.dtype
+                    first_data_file = candidate_path
+                    logger.info(f"Frame dimensions: {data_shape}, dtype: {dtype}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Skipping unreadable FITS frame {candidate_path}: {e}")
+                    continue
+
+            if header is None or data_shape is None or dtype is None or first_data_file is None:
+                logger.error("No valid input frames contained 2D image data")
+                return False
 
             is_light_stack = str(cal_type).lower() == 'light'
 
@@ -466,11 +510,11 @@ class MasterFrameManager:
                         "Install it (pip install astroalign) and try again."
                     )
 
-                candidate = reference_path if (reference_path and os.path.exists(reference_path)) else file_paths[0]
+                candidate = reference_path if (reference_path and os.path.exists(reference_path)) else first_data_file
                 ref_path = candidate
-                with fits.open(candidate) as hdul:
-                    ref_full = hdul[0].data.astype(np.float32)
-                    ref_header = hdul[0].header.copy()
+                ref_data, ref_header0 = _read_fits_image(candidate)
+                ref_full = ref_data.astype(np.float32, copy=False)
+                ref_header = ref_header0
 
             def _is_astroalign_maxiter_error(exc: Exception) -> bool:
                 max_iter_error = getattr(aa, 'MaxIterError', None) if aa is not None else None
@@ -520,7 +564,11 @@ class MasterFrameManager:
 
                             try:
                                 with fits.open(file_path) as hdul:
-                                    src_header = hdul[0].header
+                                    hdu, _data = _extract_image_hdu(hdul)
+                                    if hdu is not None and getattr(hdu, 'header', None) is not None:
+                                        src_header = hdu.header
+                                    else:
+                                        src_header = hdul[0].header
 
                                 src_wcs = WCS(src_header)
                                 dst_wcs = WCS(ref_header)
@@ -574,13 +622,20 @@ class MasterFrameManager:
             logger.info("Pass 1: Validating files and computing frame medians...")
             for i, file_path in enumerate(file_paths):
                 try:
-                    with fits.open(file_path) as hdul:
-                        if hdul[0].data.shape != data_shape:
-                            logger.warning(f"Skipping file with different dimensions: {file_path}")
-                            continue
-                        valid_files.append(file_path)
-                        if cal_type == 'flat':
-                            frame_medians.append(np.median(hdul[0].data))
+                    data = None
+                    try:
+                        data, _hdr = _read_fits_image(file_path)
+                    except Exception as e:
+                        logger.warning(f"Skipping corrupted/unreadable file {file_path}: {e}")
+                        continue
+
+                    if data.shape != data_shape:
+                        logger.warning(f"Skipping file with different dimensions: {file_path}")
+                        continue
+
+                    valid_files.append(file_path)
+                    if cal_type == 'flat':
+                        frame_medians.append(float(np.median(data)))
                     
                     if (i + 1) % 10 == 0 and progress_callback:
                         progress = 30 + int((i + 1) / len(file_paths) * 10)
@@ -611,11 +666,11 @@ class MasterFrameManager:
                 # Load chunk into memory
                 chunk_data = []
                 for file_path in chunk_files:
-                    with fits.open(file_path) as hdul:
-                            data = hdul[0].data.astype(np.float32)
-                            if is_light_stack and ref_full is not None:
-                                data = _register_to_reference(data, file_path)
-                            chunk_data.append(data)
+                    data, _hdr = _read_fits_image(file_path)
+                    data = data.astype(np.float32, copy=False)
+                    if is_light_stack and ref_full is not None:
+                        data = _register_to_reference(data, file_path)
+                    chunk_data.append(data)
                 
                 chunk_array = np.array(chunk_data)
                 
@@ -658,26 +713,26 @@ class MasterFrameManager:
             
             for i, file_path in enumerate(valid_files):
                 try:
-                    with fits.open(file_path) as hdul:
-                        data = hdul[0].data.astype(np.float32)
+                    data, _hdr = _read_fits_image(file_path)
+                    data = data.astype(np.float32, copy=False)
 
-                        # For light stacks, register stars to the reference frame
-                        if is_light_stack and ref_full is not None:
-                            data = _register_to_reference(data, file_path)
-                        
-                        # Apply flat normalization if needed
-                        if cal_type == 'flat':
-                            data = data / frame_medians[i]
-                        
-                        # Apply sigma clipping mask
-                        mask = np.isfinite(data) & (data >= lower_bound) & (data <= upper_bound)
-                        
-                        # Accumulate valid pixels
-                        accumulator += np.where(mask, data, 0)
-                        count += mask.astype(np.uint16)
-                        
-                        rejected_pixels += np.sum(~mask)
-                        total_pixels += data.size
+                    # For light stacks, register stars to the reference frame
+                    if is_light_stack and ref_full is not None:
+                        data = _register_to_reference(data, file_path)
+
+                    # Apply flat normalization if needed
+                    if cal_type == 'flat':
+                        data = data / frame_medians[i]
+
+                    # Apply sigma clipping mask
+                    mask = np.isfinite(data) & (data >= lower_bound) & (data <= upper_bound)
+
+                    # Accumulate valid pixels
+                    accumulator += np.where(mask, data, 0)
+                    count += mask.astype(np.uint16)
+
+                    rejected_pixels += np.sum(~mask)
+                    total_pixels += data.size
                     
                     if (i + 1) % 5 == 0 and progress_callback:
                         progress = 60 + int((i + 1) / n_frames * 20)

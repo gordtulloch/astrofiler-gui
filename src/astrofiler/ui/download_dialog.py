@@ -70,6 +70,9 @@ class TelescopeDownloadWorker(QThread):
         try:
             # Get the directory where the zip file is located
             zip_dir = os.path.dirname(zip_path)
+
+            extracted_files = []
+            main_file = None
             
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 # List all files in the zip
@@ -83,7 +86,6 @@ class TelescopeDownloadWorker(QThread):
                 zip_ref.extractall(zip_dir)
                 
                 # Find the main file (usually the largest or first .fit/.fits file)
-                extracted_files = []
                 for file_name in file_list:
                     if file_name.lower().endswith(('.fit', '.fits')):
                         extracted_path = os.path.join(zip_dir, file_name)
@@ -94,18 +96,19 @@ class TelescopeDownloadWorker(QThread):
                     # Return the first FITS file found
                     main_file = extracted_files[0]
                     logger.info(f"Successfully extracted {len(extracted_files)} file(s) from {os.path.basename(zip_path)}")
-                    
-                    # Remove the original zip file after successful extraction
-                    try:
-                        os.remove(zip_path)
-                        logger.debug(f"Removed original zip file {zip_path}")
-                    except Exception as e:
-                        logger.warning(f"Could not remove original zip file {zip_path}: {e}")
-                    
-                    return main_file
                 else:
                     logger.warning(f"No FITS files found in zip archive {zip_path}")
                     return None
+
+            # Important on Windows: delete only after the ZipFile is closed.
+            if main_file:
+                try:
+                    os.remove(zip_path)
+                    logger.debug(f"Removed original zip file {zip_path}")
+                except Exception as e:
+                    logger.warning(f"Could not remove original zip file {zip_path}: {e}")
+
+            return main_file
                     
         except zipfile.BadZipFile:
             logger.error(f"Invalid zip file: {zip_path}")

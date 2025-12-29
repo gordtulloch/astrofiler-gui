@@ -11,13 +11,20 @@ import logging
 import uuid
 import zipfile
 import configparser
+import shutil
 from datetime import datetime
 from math import cos, sin
 from typing import Optional, Dict, Any, List, Tuple, Union
 from astropy.io import fits
 from peewee import IntegrityError
 
-from .utils import normalize_file_path, sanitize_filesystem_name, dwarfFixHeader, mapFitsHeader
+from .utils import (
+    normalize_file_path,
+    sanitize_filesystem_name,
+    dwarfFixHeader,
+    mapFitsHeader,
+    get_master_calibration_path,
+)
 from ..types import FilePath, FitsHeaderDict, ProcessingResult, QualityMetrics
 from ..exceptions import (
     FileProcessingError, FitsHeaderError, DatabaseError, 
@@ -63,6 +70,110 @@ class FileProcessor:
             FileProcessingError: If file cannot be read or hash calculation fails
         """
         return self.hash_calculator.calculate_sha256(filePath)
+
+    def registerMasters(
+        self,
+        progress_callback=None,
+        source_folder: Optional[str] = None,
+        moveFiles: bool = False,
+        destination_folder: Optional[str] = None,
+        precount: bool = False,
+    ) -> List[str]:
+        """Scan a folder for existing master calibration FITS files and register them.
+
+        Detection is based on FITS header `IMAGETYP` containing 'MASTER' and one of
+        'DARK'/'FLAT'/'BIAS' (case-insensitive).
+
+        Args:
+            progress_callback: Optional callback(current, total, filename) -> bool.
+                If it returns False, scanning stops.
+            source_folder: Folder to scan; defaults to configured sourceFolder.
+
+        Returns:
+            List of registered master IDs.
+        """
+        scan_folder = source_folder if source_folder else self.sourceFolder
+        master_ids: List[str] = []
+
+        logger.info(f"registerMasters: scanning folder: {scan_folder}")
+
+        dest_root = destination_folder
+        if moveFiles and not dest_root:
+            dest_root = get_master_calibration_path()
+        if moveFiles and dest_root:
+            try:
+                os.makedirs(dest_root, exist_ok=True)
+            except Exception as e:
+                logger.warning(f"registerMasters: could not create destination folder {dest_root}: {e}")
+                dest_root = None
+
+        total_files = 0
+        if precount:
+            # Optional pre-count for determinate progress; can be slow on large folders.
+            for root, _dirs, files in os.walk(scan_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if self.compressor.is_fits_file(file_path):
+                        total_files += 1
+
+        current_file = 0
+        for root, _dirs, files in os.walk(scan_folder):
+            for file in files:
+                file_path = os.path.join(root, file)
+                if not self.compressor.is_fits_file(file_path):
+                    continue
+
+                current_file += 1
+                if progress_callback:
+                    try:
+                        if not progress_callback(current_file, total_files, file_path):
+                            return master_ids
+                    except Exception:
+                        # Keep going on callback errors
+                        pass
+
+                try:
+                    # Read only the primary header; master detection should not require data.
+                    hdr = fits.getheader(file_path, 0)
+                    imagetyp = str(hdr.get('IMAGETYP', '')).upper()
+
+                    if 'MASTER' not in imagetyp:
+                        continue
+                    if not any(token in imagetyp for token in ('DARK', 'FLAT', 'BIAS')):
+                        continue
+
+                    final_path = file_path
+                    if moveFiles and dest_root:
+                        try:
+                            base_name = os.path.basename(file_path)
+                            # Preserve multi-suffix names like .fits.fz
+                            from pathlib import Path
+                            p = Path(base_name)
+                            suffix = ''.join(p.suffixes)
+                            stem = base_name[:-len(suffix)] if suffix else base_name
+
+                            candidate = os.path.join(dest_root, base_name)
+                            if os.path.normcase(os.path.normpath(candidate)) != os.path.normcase(os.path.normpath(file_path)):
+                                if os.path.exists(candidate):
+                                    i = 1
+                                    while True:
+                                        candidate = os.path.join(dest_root, f"{stem}_{i}{suffix}")
+                                        if not os.path.exists(candidate):
+                                            break
+                                        i += 1
+                                shutil.move(file_path, candidate)
+                                final_path = candidate
+                        except Exception as e:
+                            logger.warning(f"registerMasters: failed to move {file_path} into {dest_root}: {e}")
+
+                    master_id = self._register_master_file(final_path)
+                    if master_id:
+                        master_ids.append(master_id)
+                except Exception as e:
+                    logger.debug(f"Skipping master registration for {file_path}: {e}")
+
+        logger.info(f"registerMasters: completed. Registered/updated {len(master_ids)} masters")
+        return master_ids
 
     def _is_master_file(self, file_path: str) -> bool:
         """
