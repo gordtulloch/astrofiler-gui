@@ -13,16 +13,19 @@ REGISTRATION_ENABLED = True
 REGISTRATION_HOST = "www.gordtulloch.com"
 REGISTRATION_PORT = 5050
 REGISTRATION_TIMEOUT_SECONDS = 2.0
+REGISTRATION_HANDSHAKE = "AF1.2.0"
 
 
 def ping_once(host: str, port: int, timeout_seconds: float) -> None:
     """Open and close a TCP connection.
 
-    The registration server counts a connection as a "use"; no payload is sent.
+    The registration server counts a connection as a "use"; send the client
+    identifier/version on connect.
     Raises on failure.
     """
 
-    with socket.create_connection((host, port), timeout=timeout_seconds):
+    with socket.create_connection((host, port), timeout=timeout_seconds) as conn:
+        conn.sendall(REGISTRATION_HANDSHAKE.encode("utf-8"))
         return
 
 
