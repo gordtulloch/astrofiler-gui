@@ -120,7 +120,9 @@ class FileProcessor:
         for root, _dirs, files in os.walk(scan_folder):
             for file in files:
                 file_path = os.path.join(root, file)
-                if not self.compressor.is_fits_file(file_path):
+                # Allow externally compressed FITS (e.g. .fits.gz / .fits.zip) by
+                # passing through the format processor first.
+                if not (self.compressor.is_fits_file(file_path) or self.format_processor.can_process(file_path)):
                     continue
 
                 current_file += 1
@@ -133,8 +135,17 @@ class FileProcessor:
                         pass
 
                 try:
+                    candidate_path = file_path
+                    cleanup_source_path = None
+                    if self.format_processor.can_process(candidate_path):
+                        candidate_path = self.format_processor.process_file(candidate_path)
+                        # For externally compressed FITS (e.g. .fits.gz), remove the source
+                        # archive only after successful registration.
+                        if str(file_path).lower().endswith('.gz') and candidate_path != file_path:
+                            cleanup_source_path = file_path
+
                     # Read only the primary header; master detection should not require data.
-                    hdr = fits.getheader(file_path, 0)
+                    hdr = fits.getheader(candidate_path, 0)
                     imagetyp = str(hdr.get('IMAGETYP', '')).upper()
 
                     if 'MASTER' not in imagetyp:
@@ -142,7 +153,7 @@ class FileProcessor:
                     if not any(token in imagetyp for token in ('DARK', 'FLAT', 'BIAS')):
                         continue
 
-                    final_path = file_path
+                    final_path = candidate_path
                     if moveFiles and dest_root:
                         try:
                             base_name = os.path.basename(file_path)
@@ -161,14 +172,29 @@ class FileProcessor:
                                         if not os.path.exists(candidate):
                                             break
                                         i += 1
-                                shutil.move(file_path, candidate)
+                                shutil.move(final_path, candidate)
                                 final_path = candidate
                         except Exception as e:
-                            logger.warning(f"registerMasters: failed to move {file_path} into {dest_root}: {e}")
+                            logger.warning(f"registerMasters: failed to move {final_path} into {dest_root}: {e}")
+
+                    # Compress master frames if enabled (same policy as normal imports)
+                    try:
+                        compressed_path = self.compressor.process_file_for_compression(final_path)
+                        if compressed_path:
+                            final_path = compressed_path
+                    except Exception as e:
+                        logger.warning(f"registerMasters: compression processing failed for {final_path}: {e}")
 
                     master_id = self._register_master_file(final_path)
                     if master_id:
                         master_ids.append(master_id)
+
+                        if cleanup_source_path and os.path.exists(cleanup_source_path):
+                            try:
+                                os.remove(cleanup_source_path)
+                                logger.info(f"registerMasters: removed source gzip file after successful import: {cleanup_source_path}")
+                            except Exception as e:
+                                logger.warning(f"registerMasters: failed to remove source gzip file {cleanup_source_path}: {e}")
                 except Exception as e:
                     logger.debug(f"Skipping master registration for {file_path}: {e}")
 
@@ -563,6 +589,9 @@ class FileProcessor:
         """Internal implementation of FITS image registration with proper error handling."""
         newFitsFileId = None
         file_name, file_extension = os.path.splitext(os.path.join(root, file))
+
+        original_input_path = os.path.join(root, file)
+        cleanup_source_path = None
         
         # Read configuration
         config = configparser.ConfigParser()
@@ -573,6 +602,11 @@ class FileProcessor:
         try:
             if self.format_processor.can_process(os.path.join(root, file)):
                 processed_file_path = self.format_processor.process_file(os.path.join(root, file))
+
+                # If we expanded an external gzip archive, delete it only after
+                # the import succeeds (DB record created).
+                if str(original_input_path).lower().endswith('.gz') and processed_file_path != original_input_path:
+                    cleanup_source_path = original_input_path
                 
                 # Update root and file to point to processed file
                 root = os.path.dirname(processed_file_path)
@@ -846,6 +880,14 @@ class FileProcessor:
         # Submit file to database (use the potentially compressed file path)
         fileHash = self.calculateFileHash(current_file_path)
         newFitsFileId = self.submitFileToDB(current_file_path, hdr, fileHash)
+
+        # Cleanup source gzip only after successful DB registration
+        if newFitsFileId and cleanup_source_path and os.path.exists(cleanup_source_path):
+            try:
+                os.remove(cleanup_source_path)
+                logger.info(f"Removed source gzip file after successful import: {cleanup_source_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove source gzip file {cleanup_source_path}: {e}")
         
         return newFitsFileId if newFitsFileId else False
 

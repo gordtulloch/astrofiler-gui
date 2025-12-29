@@ -29,6 +29,7 @@ class SessionsWidget(QWidget):
         self._session_file_counts = {}
         self._master_source_session_ids = set()
         self._master_types_by_source_session_id = {}
+        self._matched_master_types_by_session_id = {}
 
         # Load existing data on startup
         self.load_sessions_data()
@@ -616,28 +617,57 @@ class SessionsWidget(QWidget):
             master_bias_data = None
             master_dark_data = None
             master_flat_data = None
+
+            def _extract_image_hdu(hdul):
+                """Return the first HDU with 2D image data, or None."""
+                for hdu in hdul:
+                    data = getattr(hdu, 'data', None)
+                    if data is None:
+                        continue
+                    arr = np.asarray(data)
+                    # Some writers store a single plane as (1, H, W)
+                    if arr.ndim == 3 and arr.shape[0] == 1:
+                        arr = arr[0]
+                    if arr.ndim != 2:
+                        continue
+                    return hdu, arr
+                return None, None
+
+            def _read_fits_image(file_path: str):
+                """Read a FITS image, handling data-in-extension FITS files.
+
+                Returns (data, header). Header is taken from the image HDU when
+                available; falls back to primary header.
+                """
+                with fits.open(file_path) as hdul:
+                    primary_header = hdul[0].header.copy()
+                    hdu, data = _extract_image_hdu(hdul)
+                    if data is None:
+                        raise ValueError("No 2D image data found in any HDU")
+                    header = getattr(hdu, 'header', None)
+                    return data, (header.copy() if header is not None else primary_header)
             
             try:
                 if has_bias:
                     progress.setLabelText("Loading bias master...")
                     QApplication.processEvents()
-                    with fits.open(master_bias.master_path) as hdul:
-                        master_bias_data = hdul[0].data.astype(np.float32)
+                    bias_data, _bias_header = _read_fits_image(master_bias.master_path)
+                    master_bias_data = bias_data.astype(np.float32, copy=False)
                     logger.info(f"Loaded bias master: {os.path.basename(master_bias.master_path)}")
                 
                 if has_dark:
                     progress.setLabelText("Loading dark master...")
                     QApplication.processEvents()
-                    with fits.open(master_dark.master_path) as hdul:
-                        master_dark_data = hdul[0].data.astype(np.float32)
+                    dark_data, _dark_header = _read_fits_image(master_dark.master_path)
+                    master_dark_data = dark_data.astype(np.float32, copy=False)
                     logger.info(f"Loaded dark master: {os.path.basename(master_dark.master_path)}")
                 
                 if has_flat:
                     progress.setLabelText("Loading flat master...")
                     QApplication.processEvents()
-                    with fits.open(master_flat.master_path) as hdul:
-                        master_flat_data = hdul[0].data.astype(np.float32)
-                        flat_mean = np.mean(master_flat_data)
+                    flat_data, _flat_header = _read_fits_image(master_flat.master_path)
+                    master_flat_data = flat_data.astype(np.float32, copy=False)
+                    flat_mean = np.mean(master_flat_data)
                         if flat_mean > 0:
                             master_flat_data = master_flat_data / flat_mean
                         else:
@@ -679,24 +709,44 @@ class SessionsWidget(QWidget):
                         continue
                     
                     # Load light frame
-                    with fits.open(light_file.fitsFileName) as hdul:
-                        light_data = hdul[0].data.astype(np.float32)
-                        light_header = hdul[0].header.copy()
+                    light_data0, light_header = _read_fits_image(light_file.fitsFileName)
+                    light_data = light_data0.astype(np.float32, copy=False)
                     
                     # Apply calibration: (Light - Bias - Dark) / Flat
                     calibrated_data = light_data.copy()
                     
-                    if master_bias_data is not None:
-                        calibrated_data -= master_bias_data
+                    bias_data = master_bias_data
+                    if bias_data is not None and bias_data.shape != calibrated_data.shape:
+                        logger.warning(
+                            f"Bias master shape {bias_data.shape} does not match light shape {calibrated_data.shape}; skipping bias"
+                        )
+                        bias_data = None
+
+                    if bias_data is not None:
+                        calibrated_data -= bias_data
                         light_header['HISTORY'] = f'Bias corrected using {os.path.basename(master_bias.master_path)}'
                     
-                    if master_dark_data is not None:
-                        calibrated_data -= master_dark_data
+                    dark_data = master_dark_data
+                    if dark_data is not None and dark_data.shape != calibrated_data.shape:
+                        logger.warning(
+                            f"Dark master shape {dark_data.shape} does not match light shape {calibrated_data.shape}; skipping dark"
+                        )
+                        dark_data = None
+
+                    if dark_data is not None:
+                        calibrated_data -= dark_data
                         light_header['HISTORY'] = f'Dark corrected using {os.path.basename(master_dark.master_path)}'
                     
-                    if master_flat_data is not None:
-                        mask = master_flat_data > 0
-                        calibrated_data[mask] /= master_flat_data[mask]
+                    flat_data = master_flat_data
+                    if flat_data is not None and flat_data.shape != calibrated_data.shape:
+                        logger.warning(
+                            f"Flat master shape {flat_data.shape} does not match light shape {calibrated_data.shape}; skipping flat"
+                        )
+                        flat_data = None
+
+                    if flat_data is not None:
+                        mask = flat_data > 0
+                        calibrated_data[mask] /= flat_data[mask]
                         light_header['HISTORY'] = f'Flat corrected using {os.path.basename(master_flat.master_path)}'
                     
                     # Update header
@@ -1315,6 +1365,9 @@ class SessionsWidget(QWidget):
         try:
             self.sessions_tree.clear()
 
+            # Reset caches for this rebuild
+            self._matched_master_types_by_session_id = {}
+
             # Precompute counts/master flags up-front to avoid N+1 queries
             from peewee import fn
 
@@ -1602,9 +1655,57 @@ class SessionsWidget(QWidget):
                 return 'MasterFlat'
             return f"Master{mt.title()}" if mt else 'Master'
 
+        def _matching_masters_for_session(s) -> set:
+            """Return matching master types for a session by querying the Masters table (cached).
+
+            Imported masters often have no source_session_id, so we must match by session metadata.
+            """
+            sid = getattr(s, 'fitsSessionId', None)
+            if not sid:
+                return set()
+            sid = str(sid)
+            cached = self._matched_master_types_by_session_id.get(sid)
+            if cached is not None:
+                return set(cached)
+
+            try:
+                from astrofiler.core.master_manager import get_master_manager
+                master_manager = get_master_manager()
+                session_data = {
+                    'telescope': getattr(s, 'fitsSessionTelescope', None),
+                    'instrument': getattr(s, 'fitsSessionImager', None),
+                    'exposure_time': getattr(s, 'fitsSessionExposure', None),
+                    'filter_name': getattr(s, 'fitsSessionFilter', None),
+                    'binning_x': getattr(s, 'fitsSessionBinningX', None),
+                    'binning_y': getattr(s, 'fitsSessionBinningY', None),
+                    'ccd_temp': getattr(s, 'fitsSessionCCDTemp', None),
+                    'gain': getattr(s, 'fitsSessionGain', None),
+                    'offset': getattr(s, 'fitsSessionOffset', None),
+                }
+
+                found = set()
+                for cal_type in ('bias', 'dark', 'flat'):
+                    m = master_manager.find_matching_master(session_data, cal_type)
+                    if m and getattr(m, 'master_path', None) and os.path.exists(m.master_path):
+                        found.add(cal_type)
+
+                self._matched_master_types_by_session_id[sid] = set(found)
+                return set(found)
+            except Exception:
+                self._matched_master_types_by_session_id[sid] = set()
+                return set()
+
         if session.fitsSessionObjectName in ['Bias', 'Dark', 'Flat']:
             # Calibration session row: show which masters exist for this session.
             mtypes = _masters_for_source_session(getattr(session, 'fitsSessionId', None))
+            if not mtypes:
+                # Fallback for imported masters (no source_session_id): match by session metadata.
+                # For calibration sessions, only show the master type relevant to that session.
+                cal_obj = (session.fitsSessionObjectName or '').strip().lower()
+                if cal_obj in ('bias', 'dark', 'flat'):
+                    matched = _matching_masters_for_session(session)
+                    if cal_obj in matched:
+                        mtypes = {cal_obj}
             if not mtypes:
                 return {"text": "", "tooltip": "", "percentage": 0}
 
@@ -1650,9 +1751,24 @@ class SessionsWidget(QWidget):
         flat_masters = _masters_for_source_session(flat_source_session)
         bias_masters = _masters_for_source_session(bias_source_session)
 
-        has_dark_master = bool(getattr(session, 'fitsDarkMaster', None)) or ('dark' in dark_masters)
-        has_flat_master = bool(getattr(session, 'fitsFlatMaster', None)) or ('flat' in flat_masters)
-        has_bias_master = bool(getattr(session, 'fitsBiasMaster', None)) or ('bias' in bias_masters)
+        # Imported masters may not be tied to a session id; match by session metadata.
+        matched_masters = _matching_masters_for_session(session)
+
+        has_dark_master = (
+            bool(getattr(session, 'fitsDarkMaster', None)) or
+            ('dark' in dark_masters) or
+            ('dark' in matched_masters)
+        )
+        has_flat_master = (
+            bool(getattr(session, 'fitsFlatMaster', None)) or
+            ('flat' in flat_masters) or
+            ('flat' in matched_masters)
+        )
+        has_bias_master = (
+            bool(getattr(session, 'fitsBiasMaster', None)) or
+            ('bias' in bias_masters) or
+            ('bias' in matched_masters)
+        )
         
         # Check calibration sessions availability
         has_bias_session = bool(session.fitsBiasSession)

@@ -138,10 +138,12 @@ class FileFormatProcessor:
         """Register default file format handlers."""
         # Import handlers here to avoid circular imports
         from .handlers.fits_handler import FitsFileHandler
+        from .handlers.gzip_handler import GzipFileHandler
         from .handlers.zip_handler import ZipFileHandler
         from .handlers.xisf_handler import XisfFileHandler
         
         self.register_handler(FitsFileHandler())
+        self.register_handler(GzipFileHandler())
         self.register_handler(ZipFileHandler())
         self.register_handler(XisfFileHandler())
     

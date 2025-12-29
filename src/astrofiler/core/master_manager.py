@@ -748,8 +748,16 @@ class MasterFrameManager:
             if progress_callback:
                 progress_callback(80, 100, "Computing final master frame...")
             
-            # Compute final master (avoid division by zero)
-            master_data = np.where(count > 0, accumulator / count, median)
+            # Compute final master without triggering divide-by-zero warnings.
+            # Note: np.where would still evaluate (accumulator / count) for all pixels.
+            master_data = np.empty_like(accumulator, dtype=np.float32)
+            np.divide(accumulator, count, out=master_data, where=(count > 0))
+            if median is not None:
+                master_data[count == 0] = median[count == 0] if hasattr(median, 'shape') else median
+
+            # Replace any remaining NaN/Inf (e.g. from pathological inputs) with median.
+            if median is not None:
+                master_data = np.where(np.isfinite(master_data), master_data, median)
             
             if cal_type == 'flat':
                 logger.info("Applied multiplicative normalization for flat frames")
