@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import logging
 import socket
 import threading
@@ -13,7 +14,23 @@ REGISTRATION_ENABLED = True
 REGISTRATION_HOST = "www.gordtulloch.com"
 REGISTRATION_PORT = 5050
 REGISTRATION_TIMEOUT_SECONDS = 2.0
-REGISTRATION_HANDSHAKE = "AF1.2.0"
+REGISTRATION_HANDSHAKE = "AF1.2.0b"
+
+
+def _ini_allows_registration() -> bool:
+    """Return True unless astrofiler.ini explicitly disables registration.
+
+    Users can add `Registration=False` to astrofiler.ini to disable the
+    registration ping.
+    """
+
+    try:
+        config = configparser.ConfigParser()
+        config.read("astrofiler.ini")
+        return config.getboolean("DEFAULT", "Registration", fallback=True)
+    except Exception:
+        # Fail open: registration must never break startup.
+        return True
 
 
 def ping_once(host: str, port: int, timeout_seconds: float) -> None:
@@ -48,6 +65,10 @@ def start_startup_ping(
         try:
             if not REGISTRATION_ENABLED:
                 logger.debug("Registration ping disabled (hardcoded)")
+                return
+
+            if not _ini_allows_registration():
+                logger.debug("Registration ping disabled (astrofiler.ini Registration=False)")
                 return
 
             status("Pinging registration server...")
