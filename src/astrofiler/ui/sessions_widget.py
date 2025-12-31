@@ -42,13 +42,8 @@ class SessionsWidget(QWidget):
         self.regenerate_button = QPushButton("Regenerate")
         self.regenerate_button.setStyleSheet("QPushButton { font-size: 11px; }")
         self.regenerate_button.setToolTip("Clear all sessions and regenerate: Update Lights → Update Calibrations → Link Sessions")
-        
-        self.auto_calibration_button = QPushButton("Auto-Calibration")
-        self.auto_calibration_button.setStyleSheet("QPushButton { font-size: 11px; }")
-        self.auto_calibration_button.setToolTip("Analyze sessions and automatically create master calibration frames")
-        
+
         controls_layout.addWidget(self.regenerate_button)
-        controls_layout.addWidget(self.auto_calibration_button)
         controls_layout.addStretch()
         
         # Sessions list
@@ -81,7 +76,6 @@ class SessionsWidget(QWidget):
         
         # Connect signals
         self.regenerate_button.clicked.connect(self.regenerate_sessions)
-        self.auto_calibration_button.clicked.connect(self.run_auto_calibration)
 
     def on_item_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         """Handle double-clicks in the sessions tree.
@@ -668,11 +662,11 @@ class SessionsWidget(QWidget):
                     flat_data, _flat_header = _read_fits_image(master_flat.master_path)
                     master_flat_data = flat_data.astype(np.float32, copy=False)
                     flat_mean = np.mean(master_flat_data)
-                        if flat_mean > 0:
-                            master_flat_data = master_flat_data / flat_mean
-                        else:
-                            logger.warning("Flat frame has zero mean, skipping flat correction")
-                            master_flat_data = None
+                    if flat_mean > 0:
+                        master_flat_data = master_flat_data / flat_mean
+                    else:
+                        logger.warning("Flat frame has zero mean, skipping flat correction")
+                        master_flat_data = None
                     if master_flat_data is not None:
                         logger.info(f"Loaded and normalized flat master: {os.path.basename(master_flat.master_path)}")
                 
