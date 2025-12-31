@@ -508,9 +508,23 @@ class CloudSyncDialog(QDialog):
         
         if reply == QMessageBox.Yes:
             try:
-                # First validate bucket access
+                # First validate bucket access (can take time; show immediate feedback)
+                from PySide6.QtWidgets import QProgressDialog
+                from PySide6.QtCore import Qt
+
+                validate_progress = QProgressDialog("Validating bucket access...", None, 0, 0, self)
+                validate_progress.setWindowModality(Qt.WindowModal)
+                validate_progress.setAutoClose(True)
+                validate_progress.setAutoReset(True)
+                validate_progress.setCancelButton(None)
+                validate_progress.show()
+                QApplication.processEvents()
+
                 if not self.validate_bucket_access():
+                    validate_progress.close()
                     return
+
+                validate_progress.close()
                     
                 self.perform_cloud_analysis()
             except Exception as e:

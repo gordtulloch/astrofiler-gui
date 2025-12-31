@@ -44,6 +44,9 @@ import os
 import argparse
 import logging
 import configparser
+import threading
+import time
+import itertools
 from datetime import datetime
 
 # Add the parent directory to the path to import astrofiler modules
@@ -138,9 +141,40 @@ def perform_analysis(cloud_config):
     else:
         bucket_name = bucket_url.rstrip('/')
     
-    # Get cloud file list
+    # Get cloud file list (this can take a long time; show user activity)
     auth_info = {'auth_string': cloud_config['auth_file_path']}
-    cloud_files = list_gcs_bucket_files(bucket_name, auth_info)
+
+    cloud_files = None
+    listing_error = None
+
+    def _list_worker():
+        nonlocal cloud_files, listing_error
+        try:
+            cloud_files = list_gcs_bucket_files(bucket_name, auth_info)
+        except Exception as e:
+            listing_error = e
+
+    worker = threading.Thread(target=_list_worker, daemon=True)
+    worker.start()
+
+    if sys.stdout.isatty():
+        spinner = itertools.cycle(["|", "/", "-", "\\"])
+        start = time.time()
+        while worker.is_alive():
+            elapsed = int(time.time() - start)
+            sys.stdout.write(f"\r{next(spinner)} Downloading file listing from cloud... ({elapsed}s)")
+            sys.stdout.flush()
+            time.sleep(0.1)
+        sys.stdout.write("\r" + " " * 80 + "\r")
+        sys.stdout.flush()
+    else:
+        logging.info("Downloading file listing from cloud (this may take a while)...")
+        worker.join()
+
+    if listing_error is not None:
+        raise listing_error
+    if cloud_files is None:
+        cloud_files = []
     
     logging.info(f"Found {len(cloud_files)} files in cloud storage")
     
