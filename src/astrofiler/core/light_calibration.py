@@ -8,13 +8,20 @@ suitable for stacking and further processing.
 
 Key Features:
 - Fast, reliable numpy-based calibration
-- Comprehensive calibration pipeline (bias, dark, flat)
+- Comprehensive calibration pipeline (bias-corrected dark, flat)
+- Proper bias handling: subtracts bias from dark masters before applying
 - Force recalibrate option for already-calibrated frames
 - Robust error handling and validation
 - Detailed FITS header metadata
 - Progress callbacks for GUI integration
 - Professional astronomy-standard processing
 - Consistent cal_ prefix naming convention
+
+Calibration Formula:
+    Calibrated = (Light - (Dark - Bias)) / NormalizedFlat
+
+Note: Dark masters contain uncorrected bias signal, so bias is subtracted
+from the dark master before applying it to light frames.
 """
 
 import os
@@ -26,7 +33,7 @@ from typing import Optional, Callable, Dict, List, Any
 from astropy.io import fits
 from ..models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 from ..models.masters import Masters
-from .utils import normalize_file_path
+from .utils import normalize_file_path 
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +44,21 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
     Calibrate a single light frame using master calibration frames.
     
     This function applies the standard astronomical calibration pipeline:
-    1. Dark subtraction (dark frames include bias from stacking)
-    2. Flat field correction with full-frame median normalization
+    1. Bias correction of dark master (Dark - Bias) to remove bias signal from dark
+    2. Dark subtraction (Light - BiasCorrectDark) to remove thermal noise
+    3. Flat field correction with full-frame median normalization
     
-    The calibration formula is: (Light - Dark) / (Flat / median(Flat))
+    The calibration formula is: (Light - (Dark - Bias)) / (Flat / median(Flat))
+    
+    IMPORTANT: Dark masters created by AstroFiler contain uncorrected bias signal
+    because bias is not subtracted during dark master creation. This function
+    corrects for that by subtracting bias from the dark master before applying it.
     
     Args:
         light_path (str): Path to the light frame FITS file
         dark_master (str, optional): Path to master dark frame
         flat_master (str, optional): Path to master flat frame  
-        bias_master (str, optional): Path to master bias frame (used if no dark available)
+        bias_master (str, optional): Path to master bias frame (REQUIRED for proper dark correction)
         output_path (str, optional): Path for calibrated output file (auto-generated if not provided)
         progress_callback (callable, optional): Callback for progress updates
         
@@ -57,7 +69,8 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         >>> result = calibrate_light_frame(
         ...     light_path='light_001.fits',
         ...     dark_master='master_dark_300s.fits',
-        ...     flat_master='master_flat_V.fits'
+        ...     flat_master='master_flat_V.fits',
+        ...     bias_master='master_bias.fits'  # Required for proper calibration!
         ... )
         >>> if result.get('success'):
         ...     print(f"Calibrated frame saved: {result['output_path']}")
@@ -93,7 +106,12 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         # =================================================================
         # STEP 1: DARK SUBTRACTION (or BIAS if no dark available)
         # =================================================================
-        # Note: Dark frames from stacking already include bias, so we subtract dark directly
+        # CRITICAL FIX: Dark masters contain uncorrected bias signal because bias is not
+        # subtracted during dark master creation. We must subtract bias from the dark master
+        # before applying it to the light frame.
+        # 
+        # Correct formula: Light - (Dark - Bias) / Flat
+        # Which equals:    (Light - Dark + Bias) / Flat
         
         if dark_master and os.path.exists(dark_master):
             if progress_callback:
@@ -123,10 +141,32 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                     
                     # Use dark directly without scaling - ensure dark exposure matches light
                     dark_scaled = dark_data
-                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s)")
+                    
+                    # CRITICAL FIX: Subtract bias from dark master before applying
+                    # Dark masters contain bias signal that must be removed
+                    if bias_master and os.path.exists(bias_master):
+                        try:
+                            with fits.open(bias_master) as bias_hdul:
+                                bias_data = bias_hdul[0].data.astype(np.float64)
+                                
+                                # Validate bias dimensions match
+                                if bias_data.shape != dark_scaled.shape:
+                                    logger.warning(f"Bias shape {bias_data.shape} doesn't match dark {dark_scaled.shape}, skipping bias correction")
+                                else:
+                                    # Remove bias from dark to get true thermal noise
+                                    dark_scaled = dark_scaled - bias_data
+                                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s) - BIAS corrected")
+                                    logger.info(f"Bias-corrected dark frame: bias mean={np.mean(bias_data):.2f} ADU removed")
+                        except Exception as e:
+                            logger.warning(f"Failed to load bias for dark correction: {e}, using uncorrected dark")
+                            calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s) - NO BIAS CORRECTION")
+                    else:
+                        logger.warning("No bias master available - dark correction will leave residual bias signal")
+                        calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s) - NO BIAS CORRECTION")
+                    
                     logger.info(f"Using dark frame: {dark_exptime}s (light exposure: {light_exptime}s)")
                     
-                    # Apply: Light - Dark
+                    # Apply: Light - (Dark - Bias) 
                     calibrated_data = calibrated_data - dark_scaled
                     logger.debug(f"Applied dark correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
                     
