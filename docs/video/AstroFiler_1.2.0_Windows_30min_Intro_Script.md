@@ -99,8 +99,6 @@ Behind the scenes, the installer prepares a dedicated Python environment for Ast
 - It creates a virtual environment—think of it as a clean sandbox for AstroFiler.
 - It installs required packages.
 
-AstroFiler 1.2.0 also installs **pysiril**, which is required for advanced calibration workflows. In the SETUP flow, there’s a special step to ensure `pysiril` gets installed correctly—even attempting to install from a wheel file, and if needed downloading build artifacts or falling back to installing from source.
-
 When this finishes, you should have a launcher or shortcut you can use to start AstroFiler.
 
 **On-screen text:**

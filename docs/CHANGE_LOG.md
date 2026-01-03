@@ -42,7 +42,7 @@
   - **Enhanced UI**: Updated compression dropdown with clear algorithm descriptions and compatibility notes
   - **Auto-Selection Default**: Smart 'auto' mode as default choice for optimal user experience
   - **Data Protection**: Automatic prevention of lossy compression on floating-point data
-  - **Universal Compatibility**: Full support across astropy, Siril, NINA, and PySiril workflows
+  - **Universal Compatibility**: Full support across astropy, Siril, NINA workflows
   - **Extensive Testing**: Comprehensive test suite with real astronomical data validation
 
 - **Photometry-Safe Light Stacking**: Added an optional photometry-safe stacking mode for light frames

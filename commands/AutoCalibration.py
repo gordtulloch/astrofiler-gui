@@ -32,7 +32,6 @@ Options:
 Operations:
     analyze             Analyze sessions for calibration opportunities
     masters             Create master calibration frames only
-    calibrate-lights    Calibrate light frames using existing masters (PySiril/numpy)
     quality             Assess frame and master quality only
     clear-masters       Clear all existing master frames from database and files
     all                 Complete auto-calibration workflow (default)
@@ -53,8 +52,7 @@ Examples:
     
     # Create masters for specific session
     python AutoCalibration.py -o masters -s 123 -v
-    
-    # Calibrate light frames (uses PySiril if available, numpy fallback)
+
     python AutoCalibration.py -o calibrate-lights -v
     
     # Force recalibrate already-calibrated frames
@@ -645,9 +643,7 @@ def perform_quality_assessment(config, session_id=None, generate_report=False):
 def calibrate_light_frames(config, session_id=None, force=False, dry_run=False):
     """
     Calibrate light frames using available master frames - wrapper for core library function.
-    
-    Uses PySiril for professional-grade calibration when available, falls back to numpy.
-    
+       
     Light frames are calibrated by:
     1. Subtracting master bias
     2. Subtracting master dark

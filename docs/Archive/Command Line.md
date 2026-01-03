@@ -327,9 +327,9 @@ python AutoCalibration.py -c /path/to/config.ini
 **Output**: Creates `autocalibration.log` with processing details
 
 ### calibrateLights.py
-**Purpose**: Professional light frame calibration using PySiril integration
+**Purpose**: Professional light frame calibration 
 
-**Description**: This script provides production-quality light frame calibration using Siril's proven calibration engine. It supports flexible input options, complete pipeline processing, and quality assessment.
+**Description**: This script provides production-quality light frame calibration. It supports flexible input options, complete pipeline processing, and quality assessment.
 
 **Usage**:
 ```bash

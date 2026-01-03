@@ -59,7 +59,6 @@
 ## 🔧 **Installation & Dependencies**
 
 ### Enhanced Installation System
-- **Automatic pysiril Installation**: All install scripts now automatically download and install pysiril
 - **Multi-Platform Support**: Enhanced Windows, Linux, and macOS installation that allows users to specify automatic download of updates or manual process
 - **PyWinInstall Integration**: Special automation for SETUP.EXE users
 - **Fallback Methods**: Git source installation when downloads fail

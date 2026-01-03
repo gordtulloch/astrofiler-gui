@@ -160,7 +160,6 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Pillow**: Image processing for thumbnails and previews
 - **Siril**: Command-line integration for master frame creation and calibration workflows
 - **SEP**: Source Extractor Python library for advanced star detection and quality analysis
-- **pysiril**: Python interface to Siril (automatically installed by install scripts)
 
 ### Optional Dependencies
 - **Git**: Required for auto-update functionality
