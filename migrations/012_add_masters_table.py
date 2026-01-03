@@ -19,6 +19,13 @@ with suppress(ImportError):
 def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
     """Create the Masters table (if missing)."""
 
+    def _existing_indexes(table_name: str) -> set[str]:
+        try:
+            cursor = database.execute_sql(f"PRAGMA index_list('{table_name}')")
+            return {row[1] for row in cursor.fetchall()}
+        except Exception:
+            return set()
+
     try:
         existing_tables = set(database.get_tables())
     except Exception:
@@ -60,20 +67,29 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
     migrator.create_model(Masters)
 
     # Add indexes to match the expected query patterns.
-    migrator.add_index(
-        'Masters',
-        'telescope',
-        'instrument',
-        'master_type',
-        'soft_delete',
-        'binning_x',
-        'binning_y',
-        'exposure_time',
-        'filter_name',
-        unique=False,
-    )
-    migrator.add_index('Masters', 'master_type', 'soft_delete', unique=False)
-    migrator.add_index('Masters', 'source_session_id', 'soft_delete', unique=False)
+    existing = _existing_indexes('Masters')
+    with suppress(Exception):
+        if 'idx_masters_match_criteria' not in existing:
+            migrator.add_index(
+                'Masters',
+                'telescope',
+                'instrument',
+                'master_type',
+                'soft_delete',
+                'binning_x',
+                'binning_y',
+                'exposure_time',
+                'filter_name',
+                unique=False,
+            )
+    with suppress(Exception):
+        # peewee-migrate typically names this: Masters_master_type_soft_delete
+        if 'Masters_master_type_soft_delete' not in existing:
+            migrator.add_index('Masters', 'master_type', 'soft_delete', unique=False)
+    with suppress(Exception):
+        # peewee-migrate typically names this: Masters_source_session_id_soft_delete
+        if 'Masters_source_session_id_soft_delete' not in existing:
+            migrator.add_index('Masters', 'source_session_id', 'soft_delete', unique=False)
 
 
 def rollback(migrator: Migrator, database: pw.Database, *, fake=False):
