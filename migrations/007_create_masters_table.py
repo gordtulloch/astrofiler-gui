@@ -1,41 +1,89 @@
-"""Create Masters table for master calibration frame management.
+"""Peewee migrations -- 007_create_masters_table.py.
 
-This migration creates a new Masters table to store master calibration frames
-separately from the fitsFile and fitsSession models for better separation of concerns.
+Legacy migration name expected by some existing databases.
+
+This file intentionally exists to keep peewee-migrate compatible with databases
+whose `migratehistory` includes `007_create_masters_table`.
+
+If the Masters table is missing, it will be created.
+
 """
 
-def upgrade(migrator, database, fake=False, **kwargs):
-    """Create the Masters table."""
-    
-    # Create Masters table
-    migrator.create_table('masters', [
-        ('id', migrator.auto_field()),
-        ('master_id', migrator.text_field(primary_key=True)),
-        ('master_type', migrator.text_field()),  # 'bias', 'dark', 'flat'
-        ('master_path', migrator.text_field()),  # Full path to master file
-        ('creation_date', migrator.datetime_field()),
-        ('telescope', migrator.text_field(null=True)),
-        ('instrument', migrator.text_field(null=True)),
-        ('exposure_time', migrator.text_field(null=True)),  # For darks
-        ('binning_x', migrator.text_field(null=True)),
-        ('binning_y', migrator.text_field(null=True)),
-        ('ccd_temp', migrator.text_field(null=True)),
-        ('gain', migrator.text_field(null=True)),
-        ('offset', migrator.text_field(null=True)),
-        ('filter_name', migrator.text_field(null=True)),  # For flats
-        ('source_session_id', migrator.text_field(null=True)),  # Original session that created this master
-        ('file_count', migrator.integer_field(default=0)),  # Number of files stacked
-        ('quality_score', migrator.real_field(null=True)),  # Quality assessment score
-        ('file_size', migrator.integer_field(null=True)),  # File size in bytes
-        ('hash_value', migrator.text_field(null=True)),  # File hash for integrity
-        ('cloud_url', migrator.text_field(null=True)),  # Cloud storage URL
-        ('is_validated', migrator.boolean_field(default=False)),  # Validation status
-        ('validation_date', migrator.datetime_field(null=True)),
-        ('notes', migrator.text_field(null=True)),  # Additional notes
-        ('soft_delete', migrator.boolean_field(default=False)),  # Soft delete flag
-    ])
+from contextlib import suppress
+
+import peewee as pw
+from peewee_migrate import Migrator
 
 
-def downgrade(migrator, database, fake=False, **kwargs):
+with suppress(ImportError):
+    import playhouse.postgres_ext as pw_pext
+
+
+def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
+    """Create the Masters table (if missing)."""
+
+    try:
+        existing_tables = set(database.get_tables())
+    except Exception:
+        existing_tables = set()
+
+    if any(t.lower() == 'masters' for t in existing_tables):
+        return
+
+    class Masters(pw.Model):
+        id = pw.AutoField()
+        master_id = pw.TextField(unique=True)
+        master_type = pw.TextField()
+        master_path = pw.TextField()
+        creation_date = pw.DateTimeField()
+        telescope = pw.TextField(null=True)
+        instrument = pw.TextField(null=True)
+        exposure_time = pw.TextField(null=True)
+        binning_x = pw.TextField(null=True)
+        binning_y = pw.TextField(null=True)
+        ccd_temp = pw.TextField(null=True)
+        gain = pw.TextField(null=True)
+        offset = pw.TextField(null=True)
+        filter_name = pw.TextField(null=True)
+        source_session_id = pw.TextField(null=True)
+        file_count = pw.IntegerField()
+        quality_score = pw.FloatField(null=True)
+        file_size = pw.IntegerField(null=True)
+        hash_value = pw.TextField(null=True)
+        cloud_url = pw.TextField(null=True)
+        is_validated = pw.IntegerField(default=0)
+        validation_date = pw.DateTimeField(null=True)
+        notes = pw.TextField(null=True)
+        soft_delete = pw.IntegerField(default=0)
+
+        class Meta:
+            table_name = 'Masters'
+
+    migrator.create_model(Masters)
+
+    # Indexes (best-effort). If the backend doesn't support a specific index
+    # form, peewee-migrate will raise; these are non-critical.
+    with suppress(Exception):
+        migrator.add_index(
+            'Masters',
+            'telescope',
+            'instrument',
+            'master_type',
+            'soft_delete',
+            'binning_x',
+            'binning_y',
+            'exposure_time',
+            'filter_name',
+            unique=False,
+        )
+    with suppress(Exception):
+        migrator.add_index('Masters', 'master_type', 'soft_delete', unique=False)
+    with suppress(Exception):
+        migrator.add_index('Masters', 'source_session_id', 'soft_delete', unique=False)
+
+
+def rollback(migrator: Migrator, database: pw.Database, *, fake=False):
     """Drop the Masters table."""
-    migrator.drop_table('masters')
+
+    with suppress(Exception):
+        migrator.remove_model('Masters', cascade=True)

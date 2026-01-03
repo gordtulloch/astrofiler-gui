@@ -1,61 +1,34 @@
-"""Migration 011: Add performance indexes
+"""Peewee migrations -- 011_add_performance_indexes.py.
 
-Adds SQLite indexes on frequently queried columns to speed up UI views and
-session processing. Targets:
-- fitsfile counts/grouping by session and filtering out soft-deleted rows
-- fitssession lookups by (objectName, date)
-- masters lookups by source_session_id and find_matching_master criteria
+Legacy migration name expected by some existing databases.
 
-Notes:
-- Uses raw SQL with IF NOT EXISTS for robustness across historical migrations
-  and table-name casing.
+Adds a small set of helpful indexes. All operations are best-effort and safe
+to re-run.
+
 """
 
-def migrate(migrator, database, fake=False, **kwargs):
-    # fitsfile
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_fitsfile_session ON fitsfile (fitsFileSession);"
-    )
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_fitsfile_session_softdelete ON fitsfile (fitsFileSession, fitsFileSoftDelete);"
-    )
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_fitsfile_hash ON fitsfile (fitsFileHash);"
-    )
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_fitsfile_object ON fitsfile (fitsFileObject);"
-    )
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_fitsfile_originalfile ON fitsfile (fitsFileOriginalFile);"
-    )
+from contextlib import suppress
 
-    # fitssession
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_fitssession_object_date ON fitssession (fitsSessionObjectName, fitsSessionDate);"
-    )
-
-    # masters
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_masters_source_session_softdelete ON masters (source_session_id, soft_delete);"
-    )
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_masters_type_softdelete ON masters (master_type, soft_delete);"
-    )
-    migrator.sql(
-        "CREATE INDEX IF NOT EXISTS idx_masters_match_criteria ON masters (telescope, instrument, master_type, soft_delete, binning_x, binning_y, exposure_time, filter_name);"
-    )
+import peewee as pw
+from peewee_migrate import Migrator
 
 
-def rollback(migrator, database, fake=False, **kwargs):
-    # Drop in reverse-ish order
-    migrator.sql("DROP INDEX IF EXISTS idx_masters_match_criteria;")
-    migrator.sql("DROP INDEX IF EXISTS idx_masters_type_softdelete;")
-    migrator.sql("DROP INDEX IF EXISTS idx_masters_source_session_softdelete;")
+def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
+    # fitsfile indexes
+    with suppress(Exception):
+        migrator.add_index('fitsfile', 'fitsFileHash', unique=False)
+    with suppress(Exception):
+        migrator.add_index('fitsfile', 'fitsFileSession', unique=False)
+    with suppress(Exception):
+        migrator.add_index('fitsfile', 'fitsFileType', unique=False)
 
-    migrator.sql("DROP INDEX IF EXISTS idx_fitssession_object_date;")
+    # fitssession indexes
+    with suppress(Exception):
+        migrator.add_index('fitssession', 'fitsSessionDate', unique=False)
+    with suppress(Exception):
+        migrator.add_index('fitssession', 'fitsSessionObjectName', unique=False)
 
-    migrator.sql("DROP INDEX IF EXISTS idx_fitsfile_originalfile;")
-    migrator.sql("DROP INDEX IF EXISTS idx_fitsfile_object;")
-    migrator.sql("DROP INDEX IF EXISTS idx_fitsfile_hash;")
-    migrator.sql("DROP INDEX IF EXISTS idx_fitsfile_session_softdelete;")
-    migrator.sql("DROP INDEX IF EXISTS idx_fitsfile_session;")
+
+def rollback(migrator: Migrator, database: pw.Database, *, fake=False):
+    # Index rollback is intentionally omitted (best-effort forward-only).
+    return

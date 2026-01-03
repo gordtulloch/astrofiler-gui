@@ -1,72 +1,23 @@
-"""Remove master calibration fields from fitsFile and fitsSession models.
+"""Peewee migrations -- 008_remove_master_fields.py.
 
-This migration removes master-related fields from the existing models since
-they are now managed by the separate Masters table.
+Legacy migration name expected by some existing databases.
+
+Historically, some branches experimented with removing master reference fields.
+The current schema keeps master references on `fitssession`/`fitsfile`, so this
+migration is intentionally a no-op.
+
+It exists purely to satisfy `migratehistory` entries and allow peewee-migrate
+to proceed.
+
 """
 
-def upgrade(migrator, database, fake=False, **kwargs):
-    """Remove master calibration fields from existing tables."""
-    
-    # Remove master fields from fitsFile table
-    try:
-        migrator.drop_column('fitsfile', 'fitsFileMasterBias')
-    except Exception:
-        pass  # Field may not exist
-        
-    try:
-        migrator.drop_column('fitsfile', 'fitsFileMasterDark')
-    except Exception:
-        pass  # Field may not exist
-        
-    try:
-        migrator.drop_column('fitsfile', 'fitsFileMasterFlat')
-    except Exception:
-        pass  # Field may not exist
-    
-    # Remove master fields from fitsSession table
-    try:
-        migrator.drop_column('fitssession', 'fitsBiasMaster')
-    except Exception:
-        pass  # Field may not exist
-        
-    try:
-        migrator.drop_column('fitssession', 'fitsDarkMaster')
-    except Exception:
-        pass  # Field may not exist
-        
-    try:
-        migrator.drop_column('fitssession', 'fitsFlatMaster')
-    except Exception:
-        pass  # Field may not exist
-        
-    try:
-        migrator.drop_column('fitssession', 'master_dark_created')
-    except Exception:
-        pass  # Field may not exist
-        
-    try:
-        migrator.drop_column('fitssession', 'master_flat_created')
-    except Exception:
-        pass  # Field may not exist
-        
-    try:
-        migrator.drop_column('fitssession', 'master_bias_created')
-    except Exception:
-        pass  # Field may not exist
+import peewee as pw
+from peewee_migrate import Migrator
 
 
-def downgrade(migrator, database, fake=False, **kwargs):
-    """Restore master calibration fields to existing tables."""
-    
-    # Restore master fields to fitsFile table
-    migrator.add_column('fitsfile', 'fitsFileMasterBias', migrator.text_field(null=True))
-    migrator.add_column('fitsfile', 'fitsFileMasterDark', migrator.text_field(null=True))
-    migrator.add_column('fitsfile', 'fitsFileMasterFlat', migrator.text_field(null=True))
-    
-    # Restore master fields to fitsSession table
-    migrator.add_column('fitssession', 'fitsBiasMaster', migrator.text_field(null=True))
-    migrator.add_column('fitssession', 'fitsDarkMaster', migrator.text_field(null=True))
-    migrator.add_column('fitssession', 'fitsFlatMaster', migrator.text_field(null=True))
-    migrator.add_column('fitssession', 'master_dark_created', migrator.boolean_field(null=True, default=False))
-    migrator.add_column('fitssession', 'master_flat_created', migrator.boolean_field(null=True, default=False))
-    migrator.add_column('fitssession', 'master_bias_created', migrator.boolean_field(null=True, default=False))
+def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
+    return
+
+
+def rollback(migrator: Migrator, database: pw.Database, *, fake=False):
+    return
