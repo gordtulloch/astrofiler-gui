@@ -163,9 +163,12 @@ def _show_splash(app):
 if __name__ == "__main__":
     try:
         from PySide6.QtWidgets import QApplication, QMessageBox
+        from PySide6.QtCore import QCoreApplication
         from astrofiler.exceptions import DatabaseError
 
         app = QApplication(sys.argv)
+        QCoreApplication.setOrganizationName("AstroFiler")
+        QCoreApplication.setApplicationName("AstroFiler")
         splash, splash_update = _show_splash(app)
 
         splash_update("Importing database layer...")

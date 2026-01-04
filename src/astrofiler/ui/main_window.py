@@ -57,6 +57,7 @@ class AstroFilerGUI(QMainWindow):
         self.init_ui()
         self.apply_initial_theme()
         self._schedule_registration_ping()
+        self._schedule_update_check()
 
     def _status(self, message: str) -> None:
         if callable(self._status_callback):
@@ -73,6 +74,16 @@ class AstroFilerGUI(QMainWindow):
 
             # Defer until the event loop is spinning.
             QTimer.singleShot(0, lambda: start_startup_ping(status_callback=self._status))
+        except Exception:
+            # Never break startup
+            pass
+
+    def _schedule_update_check(self) -> None:
+        """Check GitHub Releases for a newer version (non-blocking)."""
+        try:
+            from astrofiler.services.update_checker import schedule_update_prompt
+
+            QTimer.singleShot(0, lambda: schedule_update_prompt(self, current_version=VERSION))
         except Exception:
             # Never break startup
             pass
