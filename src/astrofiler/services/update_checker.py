@@ -95,7 +95,7 @@ def _fetch_latest_release(timeout_s: float = 3.5) -> Optional[ReleaseInfo]:
 
 
 class _UpdateSignal(QObject):
-    ready = Signal(object)  # ReleaseInfo
+    ready = Signal(object)  # Optional[ReleaseInfo]
 
 
 def _find_upgrade_script() -> Optional[Path]:
@@ -181,6 +181,7 @@ def schedule_update_prompt(
     current_version: str,
     force: bool = False,
     show_if_up_to_date: bool = False,
+    show_if_check_failed: bool = False,
 ) -> None:
     """Check GitHub in the background and prompt if a newer release exists.
 
@@ -195,8 +196,13 @@ def schedule_update_prompt(
 
     signal = _UpdateSignal(parent)
 
-    def on_ready(release: ReleaseInfo) -> None:
+    def on_ready(release: Optional[ReleaseInfo]) -> None:
         try:
+            if release is None:
+                if show_if_check_failed:
+                    QMessageBox.warning(parent, "AstroFiler", "Could not check for updates")
+                return
+
             if not _is_newer(release.tag_name, current_version):
                 if show_if_up_to_date:
                     QMessageBox.information(parent, "AstroFiler", "You are at the current version")
@@ -238,6 +244,8 @@ def schedule_update_prompt(
     def worker() -> None:
         release = _fetch_latest_release()
         if release is None:
+            if show_if_check_failed:
+                signal.ready.emit(None)
             return
         signal.ready.emit(release)
 
