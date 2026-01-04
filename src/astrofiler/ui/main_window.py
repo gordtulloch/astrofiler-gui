@@ -261,7 +261,13 @@ class AstroFilerGUI(QMainWindow):
         try:
             from astrofiler.services.update_checker import schedule_update_prompt
 
-            schedule_update_prompt(self, current_version=VERSION, force=True)
+            schedule_update_prompt(
+                self,
+                current_version=VERSION,
+                force=True,
+                show_if_up_to_date=True,
+                show_if_check_failed=True,
+            )
         except Exception:
             pass
 

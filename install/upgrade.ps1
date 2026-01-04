@@ -31,6 +31,10 @@ function Show-ErrorDialog([string]$message, [string]$title = 'AstroFiler Upgrade
     }
 }
 
+$exitCode = 0
+
+try {
+
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "AstroFiler Upgrade" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
@@ -86,11 +90,13 @@ Write-Host ""
 Write-Host "Upgrade complete." -ForegroundColor Green
 
 Show-DoneDialog "Astrofiler has been upgraded please run again"
-exit 0
+$exitCode = 0
 
 } catch {
     Write-Host "" 
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     Show-ErrorDialog "Upgrade failed:`n`n$($_.Exception.Message)"
-    exit 1
+    $exitCode = 1
 }
+
+exit $exitCode
