@@ -297,9 +297,10 @@ QMenuBar {
 
 /* Menus - ensure shortcut text doesn't overlap labels */
 QMenu {
-    min-width: 220px;
+    min-width: 180px;
+    padding: 4px 0px;
 }
 
 QMenu::item {
-    padding-right: 48px;
+    padding: 6px 24px 6px 18px; /* top right bottom left */
 }
