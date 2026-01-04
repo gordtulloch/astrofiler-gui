@@ -22,15 +22,19 @@ with suppress(ImportError):
 def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
     """Create the Masters table (if missing)."""
 
-    def _index_exists(index_name: str) -> bool:
-        try:
-            cursor = database.execute_sql(
-                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=? LIMIT 1",
-                (index_name,),
+    def _is_sqlite() -> bool:
+        return database.__class__.__name__.lower().startswith('sqlite')
+
+    def _create_index_if_not_exists(index_name: str, table_name: str, columns: list[str]) -> None:
+        if _is_sqlite():
+            cols_sql = ", ".join([f"\"{c}\"" for c in columns])
+            database.execute_sql(
+                f"CREATE INDEX IF NOT EXISTS \"{index_name}\" ON \"{table_name}\" ({cols_sql})"
             )
-            return cursor.fetchone() is not None
-        except Exception:
-            return False
+            return
+
+        # Non-SQLite fallback (best-effort).
+        migrator.add_index(table_name, *columns, unique=False)
 
     try:
         existing_tables = set(database.get_tables())
@@ -71,29 +75,35 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
 
     migrator.create_model(Masters)
 
-    # Indexes (best-effort). If the backend doesn't support a specific index
-    # form, peewee-migrate will raise; these are non-critical.
+    # Indexes (idempotent). On SQLite we use CREATE INDEX IF NOT EXISTS because
+    # peewee-migrate executes index operations after migrate() returns.
     with suppress(Exception):
-        migrator.add_index(
+        _create_index_if_not_exists(
+            'idx_masters_match_criteria',
             'Masters',
-            'telescope',
-            'instrument',
-            'master_type',
-            'soft_delete',
-            'binning_x',
-            'binning_y',
-            'exposure_time',
-            'filter_name',
-            unique=False,
+            [
+                'telescope',
+                'instrument',
+                'master_type',
+                'soft_delete',
+                'binning_x',
+                'binning_y',
+                'exposure_time',
+                'filter_name',
+            ],
         )
     with suppress(Exception):
-        # peewee-migrate typically names this: Masters_master_type_soft_delete
-        if not (_index_exists('Masters_master_type_soft_delete') or _index_exists('masters_master_type_soft_delete')):
-            migrator.add_index('Masters', 'master_type', 'soft_delete', unique=False)
+        _create_index_if_not_exists(
+            'Masters_master_type_soft_delete',
+            'Masters',
+            ['master_type', 'soft_delete'],
+        )
     with suppress(Exception):
-        # peewee-migrate typically names this: Masters_source_session_id_soft_delete
-        if not (_index_exists('Masters_source_session_id_soft_delete') or _index_exists('masters_source_session_id_soft_delete')):
-            migrator.add_index('Masters', 'source_session_id', 'soft_delete', unique=False)
+        _create_index_if_not_exists(
+            'Masters_source_session_id_soft_delete',
+            'Masters',
+            ['source_session_id', 'soft_delete'],
+        )
 
 
 def rollback(migrator: Migrator, database: pw.Database, *, fake=False):

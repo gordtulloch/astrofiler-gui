@@ -19,22 +19,18 @@ from peewee_migrate import Migrator
 
 
 def migrate(migrator: Migrator, database: pw.Database, *, fake: bool = False, **kwargs):
-    def _index_exists(index_name: str) -> bool:
-        try:
-            cursor = database.execute_sql(
-                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=? LIMIT 1",
-                (index_name,),
-            )
-            return cursor.fetchone() is not None
-        except Exception:
-            return False
+    def _is_sqlite() -> bool:
+        return database.__class__.__name__.lower().startswith('sqlite')
 
-    def _existing_indexes(table_name: str) -> set[str]:
-        try:
-            cursor = database.execute_sql(f"PRAGMA index_list('{table_name}')")
-            return {row[1] for row in cursor.fetchall()}
-        except Exception:
-            return set()
+    def _create_index_if_not_exists(index_name: str, table_name: str, columns: list[str]) -> None:
+        if _is_sqlite():
+            cols_sql = ", ".join([f"\"{c}\"" for c in columns])
+            database.execute_sql(
+                f"CREATE INDEX IF NOT EXISTS \"{index_name}\" ON \"{table_name}\" ({cols_sql})"
+            )
+            return
+
+        migrator.add_index(table_name, *columns, unique=False)
 
     try:
         existing_tables = set(database.get_tables())
@@ -75,12 +71,11 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake: bool = False, **
 
     migrator.create_model(Masters)
 
-    existing = _existing_indexes('Masters')
-
     with suppress(Exception):
-        if 'idx_masters_match_criteria' not in existing:
-            migrator.add_index(
-                'Masters',
+        _create_index_if_not_exists(
+            'idx_masters_match_criteria',
+            'Masters',
+            [
                 'telescope',
                 'instrument',
                 'master_type',
@@ -89,25 +84,22 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake: bool = False, **
                 'binning_y',
                 'exposure_time',
                 'filter_name',
-                unique=False,
-            )
+            ],
+        )
 
     with suppress(Exception):
-        if (
-            'Masters_master_type_soft_delete' not in existing
-            and not (_index_exists('Masters_master_type_soft_delete') or _index_exists('masters_master_type_soft_delete'))
-        ):
-            migrator.add_index('Masters', 'master_type', 'soft_delete', unique=False)
+        _create_index_if_not_exists(
+            'Masters_master_type_soft_delete',
+            'Masters',
+            ['master_type', 'soft_delete'],
+        )
 
     with suppress(Exception):
-        if (
-            'Masters_source_session_id_soft_delete' not in existing
-            and not (
-                _index_exists('Masters_source_session_id_soft_delete')
-                or _index_exists('masters_source_session_id_soft_delete')
-            )
-        ):
-            migrator.add_index('Masters', 'source_session_id', 'soft_delete', unique=False)
+        _create_index_if_not_exists(
+            'Masters_source_session_id_soft_delete',
+            'Masters',
+            ['source_session_id', 'soft_delete'],
+        )
 
 
 def rollback(migrator: Migrator, database: pw.Database, *, fake: bool = False, **kwargs):
