@@ -92,6 +92,14 @@ class DatabaseManager:
                     self.db.close()
                 self.db.connect()
 
+                # Helpful diagnostics: show exactly which DB and migrations folder are in use.
+                try:
+                    db_file = getattr(self.db, 'database', None)
+                except Exception:
+                    db_file = None
+                self.logger.info(f"Database file: {db_file}")
+                self.logger.info(f"Migrations dir: {self.migrations_dir}")
+
                 # Ensure migrations directory exists and is discoverable.
                 # Creating an empty relative 'migrations' directory can hide path issues
                 # and cause confusing FileNotFoundError for expected migration files.
