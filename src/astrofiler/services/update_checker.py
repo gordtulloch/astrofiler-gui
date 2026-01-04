@@ -175,7 +175,13 @@ def _launch_upgrade_script_new_console() -> bool:
         return False
 
 
-def schedule_update_prompt(parent: QWidget, *, current_version: str, force: bool = False) -> None:
+def schedule_update_prompt(
+    parent: QWidget,
+    *,
+    current_version: str,
+    force: bool = False,
+    show_if_up_to_date: bool = False,
+) -> None:
     """Check GitHub in the background and prompt if a newer release exists.
 
     Args:
@@ -192,6 +198,8 @@ def schedule_update_prompt(parent: QWidget, *, current_version: str, force: bool
     def on_ready(release: ReleaseInfo) -> None:
         try:
             if not _is_newer(release.tag_name, current_version):
+                if show_if_up_to_date:
+                    QMessageBox.information(parent, "AstroFiler", "You are at the current version")
                 return
 
             if (not force) and ignored and _normalize_version_str(ignored) == _normalize_version_str(release.tag_name):
