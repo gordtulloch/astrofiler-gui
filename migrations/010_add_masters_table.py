@@ -19,6 +19,16 @@ from peewee_migrate import Migrator
 
 
 def migrate(migrator: Migrator, database: pw.Database, *, fake: bool = False, **kwargs):
+    def _index_exists(index_name: str) -> bool:
+        try:
+            cursor = database.execute_sql(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=? LIMIT 1",
+                (index_name,),
+            )
+            return cursor.fetchone() is not None
+        except Exception:
+            return False
+
     def _existing_indexes(table_name: str) -> set[str]:
         try:
             cursor = database.execute_sql(f"PRAGMA index_list('{table_name}')")
@@ -83,11 +93,20 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake: bool = False, **
             )
 
     with suppress(Exception):
-        if 'Masters_master_type_soft_delete' not in existing:
+        if (
+            'Masters_master_type_soft_delete' not in existing
+            and not (_index_exists('Masters_master_type_soft_delete') or _index_exists('masters_master_type_soft_delete'))
+        ):
             migrator.add_index('Masters', 'master_type', 'soft_delete', unique=False)
 
     with suppress(Exception):
-        if 'Masters_source_session_id_soft_delete' not in existing:
+        if (
+            'Masters_source_session_id_soft_delete' not in existing
+            and not (
+                _index_exists('Masters_source_session_id_soft_delete')
+                or _index_exists('masters_source_session_id_soft_delete')
+            )
+        ):
             migrator.add_index('Masters', 'source_session_id', 'soft_delete', unique=False)
 
 
