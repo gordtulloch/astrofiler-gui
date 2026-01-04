@@ -32,7 +32,14 @@ sys.path.insert(0, src_path)
 
 # Now import astrofiler modules
 try:
-    from astrofiler.database import setup_database, create_migration, run_migrations, get_migration_status
+    from astrofiler.database import (
+        setup_database,
+        create_migration,
+        run_migrations,
+        get_migration_status,
+        reset_migration_history,
+        reset_database_file,
+    )
     from astrofiler.exceptions import DatabaseError
 except ImportError as e:
     print(f"Error importing astrofiler modules: {e}")
@@ -72,6 +79,24 @@ def main():
     
     # Setup command
     setup_parser = subparsers.add_parser('setup', help='Initial database setup')
+
+    # Reset command
+    reset_parser = subparsers.add_parser('reset', help='Reset migration state and/or database')
+    reset_parser.add_argument(
+        '--hard',
+        action='store_true',
+        help='Delete the SQLite database file (fresh start). Default is history-only.'
+    )
+    reset_parser.add_argument(
+        '--no-backup',
+        action='store_true',
+        help='Do not create a DB backup before resetting.'
+    )
+    reset_parser.add_argument(
+        '--backup-dir',
+        default=None,
+        help='Optional directory to write backups into.'
+    )
     
     args = parser.parse_args()
     
@@ -115,6 +140,19 @@ def main():
                 print("Database setup completed successfully")
             else:
                 print("Error during database setup")
+
+        elif args.command == 'reset':
+            backup = not args.no_backup
+            if args.hard:
+                if reset_database_file(backup=backup, backup_dir=args.backup_dir):
+                    print("Database file removed. Next run will recreate schema.")
+                else:
+                    print("Error resetting database file")
+            else:
+                if reset_migration_history(backup=backup, backup_dir=args.backup_dir):
+                    print("Migration history reset (migratehistory dropped).")
+                else:
+                    print("Error resetting migration history")
                 
     except DatabaseError as e:
         # Handle database errors gracefully without traceback

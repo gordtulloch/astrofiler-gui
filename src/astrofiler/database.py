@@ -8,6 +8,7 @@ integrated with the modern package structure.
 import peewee as pw
 import logging
 import os
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 from peewee_migrate import Router
 
@@ -21,8 +22,38 @@ from .models import BaseModel, db, fitsFile, fitsSession, Mapping, Masters
 # Add a logger
 logger = logging.getLogger(__name__)
 
-# Initialize migration router
-router = Router(db, migrate_dir='migrations')
+def _resolve_migrations_dir() -> Path:
+    """Resolve the migrations directory independent of current working directory.
+
+    Tries (in order):
+    - ASTROFILER_MIGRATIONS_DIR env var
+    - A 'migrations' folder found by walking up from this file
+    - A 'migrations' folder under the current working directory
+    """
+    env_dir = os.environ.get("ASTROFILER_MIGRATIONS_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+
+    module_path = Path(__file__).resolve()
+    for parent in [module_path.parent, *module_path.parents]:
+        candidate = parent / "migrations"
+        if candidate.is_dir():
+            return candidate
+
+    cwd_candidate = Path.cwd() / "migrations"
+    if cwd_candidate.is_dir():
+        return cwd_candidate
+
+    # Fall back to the expected repo layout when running from source:
+    # <repo>/src/astrofiler/database.py -> <repo>/migrations
+    repo_root_candidate = module_path.parents[2] / "migrations"
+    return repo_root_candidate
+
+
+MIGRATIONS_DIR = _resolve_migrations_dir()
+
+# Initialize migration router (module-level convenience)
+router = Router(db, migrate_dir=str(MIGRATIONS_DIR))
 
 class DatabaseManager:
     """
@@ -34,7 +65,8 @@ class DatabaseManager:
     
     def __init__(self, db_instance: pw.Database = db):
         self.db = db_instance
-        self.router = Router(self.db, migrate_dir='migrations')
+        self.migrations_dir = MIGRATIONS_DIR
+        self.router = Router(self.db, migrate_dir=str(self.migrations_dir))
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     def setup_database(self) -> bool:
@@ -59,9 +91,16 @@ class DatabaseManager:
                 if not self.db.is_closed():
                     self.db.close()
                 self.db.connect()
-                
-                # Ensure migrations directory exists
-                os.makedirs('migrations', exist_ok=True)
+
+                # Ensure migrations directory exists and is discoverable.
+                # Creating an empty relative 'migrations' directory can hide path issues
+                # and cause confusing FileNotFoundError for expected migration files.
+                if not self.migrations_dir.is_dir():
+                    raise DatabaseError(
+                        "Migrations directory not found. Expected one of:\n"
+                        f"  - {self.migrations_dir}\n"
+                        "Set ASTROFILER_MIGRATIONS_DIR to the folder containing migration files."
+                    )
                 
                 # Run any pending migrations
                 self.router.run()
@@ -210,6 +249,102 @@ class DatabaseManager:
             except:
                 pass
             raise DatabaseError(f"Failed to run migrations: {e}") from e
+
+    def _resolve_db_file_path(self) -> Optional[Path]:
+        """Return the on-disk SQLite file path if applicable."""
+        db_name = getattr(self.db, "database", None)
+        if not db_name or db_name == ":memory:":
+            return None
+        db_path = Path(db_name).expanduser()
+        try:
+            return db_path.resolve()
+        except Exception:
+            # If resolve fails (e.g. odd drive mapping), fall back to absolute
+            return db_path.absolute()
+
+    def backup_database(self, backup_dir: Optional[str] = None) -> Optional[Path]:
+        """Create a timestamped copy of the SQLite DB file (and WAL/SHM if present)."""
+        import shutil
+        import datetime
+
+        db_path = self._resolve_db_file_path()
+        if db_path is None:
+            return None
+        if not db_path.exists():
+            return None
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        target_dir = Path(backup_dir).expanduser().resolve() if backup_dir else (db_path.parent / "backups")
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        base_name = f"{db_path.stem}_backup_{timestamp}{db_path.suffix}"
+        backup_path = target_dir / base_name
+
+        shutil.copy2(db_path, backup_path)
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(str(db_path) + suffix)
+            if sidecar.exists():
+                shutil.copy2(sidecar, target_dir / (base_name + suffix))
+
+        return backup_path
+
+    def reset_migration_history(self, *, backup: bool = True, backup_dir: Optional[str] = None) -> bool:
+        """Drop peewee-migrate's history table so migrations can be re-evaluated.
+
+        Note: If your schema already contains tables/columns that migrations create,
+        rerunning migrations may fail unless migrations are idempotent.
+        """
+        try:
+            if not self.db.is_closed():
+                self.db.close()
+
+            if backup:
+                self.backup_database(backup_dir=backup_dir)
+
+            self.db.connect()
+            tables = set(self.db.get_tables())
+            if "migratehistory" in tables:
+                self.db.execute_sql("DROP TABLE migratehistory")
+                self.logger.info("Dropped migratehistory table.")
+            else:
+                self.logger.info("No migratehistory table found; nothing to reset.")
+
+            self.db.close()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error resetting migration history: {e}")
+            try:
+                if self.db.is_connection_usable():
+                    self.db.close()
+            except Exception:
+                pass
+            raise DatabaseError(f"Failed to reset migration history: {e}") from e
+
+    def reset_database_file(self, *, backup: bool = True, backup_dir: Optional[str] = None) -> bool:
+        """Delete the SQLite DB file (and WAL/SHM) so the app starts fresh."""
+        try:
+            if not self.db.is_closed():
+                self.db.close()
+
+            if backup:
+                self.backup_database(backup_dir=backup_dir)
+
+            db_path = self._resolve_db_file_path()
+            if db_path is None:
+                raise DatabaseError("Database is not a file-based SQLite database.")
+
+            for path in [db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")]:
+                try:
+                    if path.exists():
+                        path.unlink()
+                except Exception as e:
+                    raise DatabaseError(f"Failed to remove database file '{path}': {e}") from e
+
+            self.logger.info("Database file removed.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error resetting database file: {e}")
+            raise DatabaseError(f"Failed to reset database file: {e}") from e
     
     def get_migration_status(self) -> Optional[Dict[str, Any]]:
         """
@@ -239,8 +374,8 @@ class DatabaseManager:
                 
                 # Get available migration files
                 import glob
-                if os.path.exists('migrations'):
-                    migration_files = glob.glob('migrations/[0-9]*.py')
+                if self.migrations_dir.is_dir():
+                    migration_files = glob.glob(str(self.migrations_dir / '[0-9]*.py'))
                     migration_names = []
                     for f in migration_files:
                         # Extract migration name from filename
@@ -329,6 +464,14 @@ def get_migration_status() -> Optional[Dict[str, Any]]:
     """Get the current migration status."""
     return get_db_manager().get_migration_status()
 
+def reset_migration_history(*, backup: bool = True, backup_dir: Optional[str] = None) -> bool:
+    """Drop the migratehistory table so migrations can be re-evaluated."""
+    return get_db_manager().reset_migration_history(backup=backup, backup_dir=backup_dir)
+
+def reset_database_file(*, backup: bool = True, backup_dir: Optional[str] = None) -> bool:
+    """Delete the SQLite database file (and WAL/SHM) for a clean start."""
+    return get_db_manager().reset_database_file(backup=backup, backup_dir=backup_dir)
+
 # Export commonly used items
 __all__ = [
     'DatabaseManager',
@@ -337,6 +480,8 @@ __all__ = [
     'create_migration',
     'run_migrations', 
     'get_migration_status',
+    'reset_migration_history',
+    'reset_database_file',
     'db',
     'BaseModel',
     'fitsFile',

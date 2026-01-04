@@ -1,8 +1,14 @@
 """Peewee migrations -- 010_add_masters_table.py.
 
-Adds the Masters table used to track created master calibration frames.
+Compatibility migration.
 
-This migration is defensive: if the table already exists, it does nothing.
+Some databases (e.g. from 1.1.x) have `010_add_masters_table` recorded in
+`migratehistory`. V1.2.0 must ship a file with this exact name so
+peewee-migrate can continue.
+
+This migration is defensive/idempotent:
+- If the Masters table already exists (case-insensitive), it does nothing.
+- Index creation is skipped if indexes already exist.
 
 """
 
@@ -12,13 +18,7 @@ import peewee as pw
 from peewee_migrate import Migrator
 
 
-with suppress(ImportError):
-    import playhouse.postgres_ext as pw_pext
-
-
-def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
-    """Create the Masters table (if missing)."""
-
+def migrate(migrator: Migrator, database: pw.Database, *, fake: bool = False, **kwargs):
     def _existing_indexes(table_name: str) -> set[str]:
         try:
             cursor = database.execute_sql(f"PRAGMA index_list('{table_name}')")
@@ -31,7 +31,6 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
     except Exception:
         existing_tables = set()
 
-    # Older databases may already have this table (possibly created outside migrations).
     if any(t.lower() == 'masters' for t in existing_tables):
         return
 
@@ -66,8 +65,8 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
 
     migrator.create_model(Masters)
 
-    # Add indexes to match the expected query patterns.
     existing = _existing_indexes('Masters')
+
     with suppress(Exception):
         if 'idx_masters_match_criteria' not in existing:
             migrator.add_index(
@@ -82,18 +81,16 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
                 'filter_name',
                 unique=False,
             )
+
     with suppress(Exception):
-        # peewee-migrate typically names this: Masters_master_type_soft_delete
         if 'Masters_master_type_soft_delete' not in existing:
             migrator.add_index('Masters', 'master_type', 'soft_delete', unique=False)
+
     with suppress(Exception):
-        # peewee-migrate typically names this: Masters_source_session_id_soft_delete
         if 'Masters_source_session_id_soft_delete' not in existing:
             migrator.add_index('Masters', 'source_session_id', 'soft_delete', unique=False)
 
 
-def rollback(migrator: Migrator, database: pw.Database, *, fake=False):
-    """Drop the Masters table."""
-
+def rollback(migrator: Migrator, database: pw.Database, *, fake: bool = False, **kwargs):
     with suppress(Exception):
         migrator.remove_model('Masters', cascade=True)
