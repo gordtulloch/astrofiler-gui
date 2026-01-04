@@ -43,3 +43,12 @@ QPushButton:hover {
 QPushButton:pressed {
     background-color: #005a9e;
 }
+
+/* Menus - ensure shortcut text doesn't overlap labels */
+QMenu {
+    min-width: 220px;
+}
+
+QMenu::item {
+    padding-right: 48px;
+}
