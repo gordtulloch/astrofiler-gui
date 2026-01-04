@@ -241,6 +241,11 @@ class AstroFilerGUI(QMainWindow):
         
         # Help Menu
         help_menu = menubar.addMenu('&Help')
+
+        # Check for updates
+        check_updates_action = help_menu.addAction('Check for &Updates...')
+        check_updates_action.triggered.connect(self.check_for_updates)
+        help_menu.addSeparator()
         
         # Wiki action
         wiki_action = help_menu.addAction('&Wiki (Online Help)')
@@ -250,6 +255,15 @@ class AstroFilerGUI(QMainWindow):
         
         about_action = help_menu.addAction('&About AstroFiler')
         about_action.triggered.connect(lambda: self.switch_view(7))
+
+    def check_for_updates(self):
+        """Manually trigger a GitHub update check."""
+        try:
+            from astrofiler.services.update_checker import schedule_update_prompt
+
+            schedule_update_prompt(self, current_version=VERSION, force=True)
+        except Exception:
+            pass
 
     def switch_view(self, index):
         """Switch to the specified view"""

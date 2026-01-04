@@ -175,8 +175,14 @@ def _launch_upgrade_script_new_console() -> bool:
         return False
 
 
-def schedule_update_prompt(parent: QWidget, *, current_version: str) -> None:
-    """Check GitHub in the background and prompt if a newer release exists."""
+def schedule_update_prompt(parent: QWidget, *, current_version: str, force: bool = False) -> None:
+    """Check GitHub in the background and prompt if a newer release exists.
+
+    Args:
+        parent: Parent widget for the prompt.
+        current_version: Current app version.
+        force: If True, bypass the ignored-release setting.
+    """
 
     settings = QSettings()
     ignored = settings.value("updates/ignored_release", "", type=str) or ""
@@ -188,7 +194,7 @@ def schedule_update_prompt(parent: QWidget, *, current_version: str) -> None:
             if not _is_newer(release.tag_name, current_version):
                 return
 
-            if ignored and _normalize_version_str(ignored) == _normalize_version_str(release.tag_name):
+            if (not force) and ignored and _normalize_version_str(ignored) == _normalize_version_str(release.tag_name):
                 return
 
             box = QMessageBox(parent)
