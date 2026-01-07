@@ -1,5 +1,5 @@
 astropy
-photutils
+sep
 peewee
 peewee-migrate
 numpy

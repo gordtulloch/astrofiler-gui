@@ -17,7 +17,7 @@ from .types import DatabaseConfig
 from .exceptions import DatabaseError
 
 # Import models from the models package within astrofiler
-from .models import BaseModel, db, fitsFile, fitsSession, Mapping, Masters
+from .models import BaseModel, db, fitsFile, fitsSession, Mapping, Masters, VariableStars
 
 # Add a logger
 logger = logging.getLogger(__name__)
@@ -114,7 +114,7 @@ class DatabaseManager:
                 self.router.run()
                 
                 # Create tables if they don't exist (initial setup)
-                self.db.create_tables([fitsFile, fitsSession, Mapping, Masters], safe=True)
+                self.db.create_tables([fitsFile, fitsSession, Mapping, Masters, VariableStars], safe=True)
                 
                 self.db.close()
                 self.logger.info("Database setup complete with peewee-migrate. Tables created/updated.")

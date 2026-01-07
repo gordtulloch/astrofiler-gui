@@ -38,16 +38,6 @@ except ImportError:
     logger.warning("SEP not available. Star detection will be limited.")
 
 try:
-    from photutils.detection import DAOStarFinder
-    from photutils.aperture import CircularAperture, aperture_photometry
-    from photutils.centroids import centroid_2dg
-    from photutils.morphology import data_properties
-    PHOTUTILS_AVAILABLE = True
-except ImportError:
-    PHOTUTILS_AVAILABLE = False
-    logger.warning("photutils not available. Star detection and photometry will be limited.")
-
-try:
     from scipy.optimize import curve_fit
     from scipy import ndimage
     SCIPY_AVAILABLE = True
@@ -69,14 +59,6 @@ class EnhancedQualityAnalyzer:
         # SEP detection parameters - optimized from notebook development
         self.detection_threshold = 5.0  # Sigma threshold for star detection
         self.min_area = 5  # Minimum area in pixels
-        
-        # Fallback to photutils if SEP not available
-        self.use_sep = SEP_AVAILABLE
-        self.sharpness_lo = 0.2  # Lower bound for sharpness (photutils fallback)
-        self.sharpness_hi = 1.0  # Upper bound for sharpness (photutils fallback)
-        self.roundness_lo = -1.0  # Lower bound for roundness (photutils fallback)
-        self.roundness_hi = 1.0   # Upper bound for roundness (photutils fallback)
-        self.fwhm_estimate = 4.0  # Initial FWHM estimate in pixels (photutils fallback)
         
     def analyze_image_quality(self, fits_file_path: str, 
                             progress_callback: Optional[callable] = None) -> Dict:
@@ -430,7 +412,7 @@ class EnhancedQualityAnalyzer:
     
     def _detect_stars(self, data: np.ndarray) -> Optional[np.ndarray]:
         """
-        Detect stars in the image using SEP (preferred) or DAOStarFinder (fallback).
+        Detect stars in the image using SEP.
         
         Args:
             data: Image data array
@@ -438,13 +420,10 @@ class EnhancedQualityAnalyzer:
         Returns:
             numpy.ndarray: Array of detected sources or None if detection fails
         """
-        if self.use_sep and SEP_AVAILABLE:
-            return self._detect_stars_sep(data)
-        elif PHOTUTILS_AVAILABLE:
-            return self._detect_stars_photutils(data)
-        else:
-            logger.warning("No star detection method available (SEP or photutils)")
+        if not SEP_AVAILABLE:
+            logger.warning("SEP not available for star detection")
             return None
+        return self._detect_stars_sep(data)
     
     def _detect_stars_sep(self, data: np.ndarray) -> Optional[np.ndarray]:
         """
@@ -556,73 +535,6 @@ class EnhancedQualityAnalyzer:
             logger.warning(f"Error in SEP star detection: {e}")
             return None
     
-    def _detect_stars_photutils(self, data: np.ndarray) -> Optional[np.ndarray]:
-        """
-        Detect stars using photutils DAOStarFinder (fallback method).
-        
-        Args:
-            data: Image data array
-            
-        Returns:
-            numpy.ndarray: Array of detected sources or None if detection fails
-        """
-        if not PHOTUTILS_AVAILABLE:
-            logger.warning("photutils not available for star detection")
-            return None
-        
-        try:
-            # Calculate background statistics
-            mean, median, std = sigma_clipped_stats(data, sigma=3.0, maxiters=5)
-            
-            # Set up DAOStarFinder
-            threshold = median + (self.detection_threshold * std)
-            
-            daofind = DAOStarFinder(
-                fwhm=self.fwhm_estimate,
-                threshold=threshold,
-                sharplo=self.sharpness_lo,
-                sharphi=self.sharpness_hi,
-                roundlo=self.roundness_lo,
-                roundhi=self.roundness_hi,
-                exclude_border=True
-            )
-            
-            # Find sources
-            sources = daofind(data - median)
-            
-            # If no sources found, try more permissive settings
-            if sources is None or len(sources) == 0:
-                logger.info("No sources with default criteria, trying more permissive settings...")
-                
-                daofind_permissive = DAOStarFinder(
-                    fwhm=self.fwhm_estimate,
-                    threshold=median + (2.0 * std),  # Lower threshold
-                    sharplo=0.05,   # Very permissive sharpness
-                    sharphi=2.0,    # Very permissive sharpness
-                    roundlo=-2.0,   # Very permissive roundness  
-                    roundhi=2.0,    # Very permissive roundness
-                    exclude_border=True
-                )
-                
-                sources = daofind_permissive(data - median)
-            
-            if sources is None or len(sources) == 0:
-                logger.warning("No stars detected even with permissive settings")
-                return None
-            
-            # Limit number of sources for performance
-            if len(sources) > self.max_star_count:
-                # Sort by flux and take brightest stars
-                sources.sort('flux')
-                sources = sources[-self.max_star_count:]
-            
-            logger.info(f"Photutils detected {len(sources)} stars")
-            return sources
-            
-        except Exception as e:
-            logger.warning(f"Error in photutils star detection: {e}")
-            return None
-    
     def _analyze_star_properties(self, data: np.ndarray, sources, 
                                image_scale: Optional[float]) -> Dict:
         """
@@ -637,15 +549,11 @@ class EnhancedQualityAnalyzer:
             dict: Star analysis results
         """
         try:
-            # Check if sources have SEP-derived measurements
+            # With SEP-only detection, sources should always have SEP-derived measurements.
             has_sep_measurements = hasattr(sources, 'dtype') and 'fwhm' in sources.dtype.names
-            
-            if has_sep_measurements:
-                # Use SEP measurements directly
-                return self._analyze_sep_measurements(sources, image_scale)
-            else:
-                # Fall back to photutils analysis
-                return self._analyze_photutils_measurements(data, sources, image_scale)
+            if not has_sep_measurements:
+                return {}
+            return self._analyze_sep_measurements(sources, image_scale)
                 
         except Exception as e:
             logger.warning(f"Error analyzing star properties: {e}")
@@ -707,97 +615,6 @@ class EnhancedQualityAnalyzer:
             logger.warning(f"Error analyzing SEP measurements: {e}")
             return {}
     
-    def _analyze_photutils_measurements(self, data: np.ndarray, sources, 
-                                      image_scale: Optional[float]) -> Dict:
-        """
-        Analyze star properties from photutils sources (fallback method).
-        
-        Args:
-            data: Image data array
-            sources: Detected sources from DAOStarFinder
-            image_scale: Image scale in arcsec/pixel
-            
-        Returns:
-            dict: Star analysis results
-        """
-        if not PHOTUTILS_AVAILABLE:
-            return {}
-        
-        try:
-            fwhm_values = []
-            eccentricity_values = []
-            hfr_values = []
-            
-            # Analyze each source
-            for source in sources:
-                x, y = source['xcentroid'], source['ycentroid']
-                
-                # Skip sources too close to edges
-                margin = 15
-                if (x < margin or y < margin or 
-                    x > data.shape[1] - margin or y > data.shape[0] - margin):
-                    continue
-                
-                # Extract cutout around star
-                cutout_size = 25
-                x_min = max(0, int(x - cutout_size//2))
-                x_max = min(data.shape[1], int(x + cutout_size//2))
-                y_min = max(0, int(y - cutout_size//2))
-                y_max = min(data.shape[0], int(y + cutout_size//2))
-                
-                cutout = data[y_min:y_max, x_min:x_max]
-                
-                if cutout.size == 0:
-                    continue
-                
-                # Calculate star properties
-                star_props = self._measure_star_properties(cutout)
-                
-                if star_props['fwhm'] is not None:
-                    fwhm_values.append(star_props['fwhm'])
-                if star_props['eccentricity'] is not None:
-                    eccentricity_values.append(star_props['eccentricity'])
-                if star_props['hfr'] is not None:
-                    hfr_values.append(star_props['hfr'])
-            
-            # Calculate averages
-            results = {}
-            
-            if fwhm_values:
-                avg_fwhm_pixels = np.median(fwhm_values)
-                results['avg_fwhm_pixels'] = float(avg_fwhm_pixels)
-                
-                # Convert to arcseconds if we have image scale
-                if image_scale is not None:
-                    results['avg_fwhm_arcsec'] = float(avg_fwhm_pixels * image_scale)
-                else:
-                    results['avg_fwhm_arcsec'] = None
-            else:
-                results['avg_fwhm_arcsec'] = None
-                
-            if eccentricity_values:
-                results['avg_eccentricity'] = float(np.median(eccentricity_values))
-            else:
-                results['avg_eccentricity'] = None
-                
-            if hfr_values:
-                avg_hfr_pixels = np.median(hfr_values)
-                results['avg_hfr_pixels'] = float(avg_hfr_pixels)
-                
-                # Convert to arcseconds if we have image scale
-                if image_scale is not None:
-                    results['avg_hfr_arcsec'] = float(avg_hfr_pixels * image_scale)
-                else:
-                    results['avg_hfr_arcsec'] = None
-            else:
-                results['avg_hfr_arcsec'] = None
-            
-            logger.info(f"Photutils analysis: {len(fwhm_values)} valid measurements")
-            return results
-            
-        except Exception as e:
-            logger.warning(f"Error analyzing photutils measurements: {e}")
-            return {}
     
     def _measure_star_properties(self, cutout: np.ndarray) -> Dict:
         """

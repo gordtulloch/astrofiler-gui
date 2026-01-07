@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astrofiler"
-version = "1.2.0"
+version = "1.3.0"
 description = "Professional Astronomical Image Management and Processing Suite"
 authors = [
     {name = "Gord Tulloch", email = "gord.tulloch@gmail.com"}
@@ -39,6 +39,7 @@ dependencies = [
     "pysmb>=1.2",
     "google-cloud-storage>=2.0",
     "scipy>=1.7",
+    "sep>=1.2.1",
     "lz4>=3.0.0",
     "reproject>=0.12",
 ]

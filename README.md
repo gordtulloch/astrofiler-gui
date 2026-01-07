@@ -72,6 +72,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Command Line Utilities**: Comprehensive command-line interface for automation and scripting
   - **CloudSync.py**: Complete cloud synchronization with all GUI features available from command line
   - **LoadRepo.py**: Batch file processing and repository loading
+  - **Photometry.py** (v1.3.0 WIP): Instrumental aperture photometry to CSV for FITS/XISF inputs
   - **Automation Scripts**: Ready-to-use cron and Task Scheduler scripts for Windows/Linux/macOS
   - **Unattended Operation**: Auto-confirm flags for scheduled and automated operations
 

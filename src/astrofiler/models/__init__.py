@@ -9,5 +9,6 @@ from .fits_file import fitsFile
 from .fits_session import fitsSession
 from .mapping import Mapping
 from .masters import Masters
+from .variable_stars import VariableStars
 
-__all__ = ['BaseModel', 'db', 'fitsFile', 'fitsSession', 'Mapping', 'Masters']
+__all__ = ['BaseModel', 'db', 'fitsFile', 'fitsSession', 'Mapping', 'Masters', 'VariableStars']

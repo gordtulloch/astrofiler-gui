@@ -428,31 +428,87 @@ class ImagesWidget(QWidget):
         item = self.file_tree.itemAt(position)
         if not item:
             return
-        
-        # Only show context menu for child items (actual files), not parent items
-        if item.parent() is None:
-            return
-        
-        # Get the filename from column 10
-        filename = item.text(10)  # Filename is in column 10
-        if not filename:
-            return
+
+        sort_mode = (self.sort_combo.currentText() or "").strip()
+
+        # Determine object name (target) for this context.
+        # - Object sort: parent items represent targets
+        # - Date/Filter sorts: child items carry the object name in column 0
+        object_name = ""
+        if sort_mode == "Object":
+            if item.parent() is None:
+                object_name = (item.text(0) or "").strip()
+            else:
+                object_name = (item.parent().text(0) or "").strip()
+        else:
+            if item.parent() is not None:
+                object_name = (item.text(0) or "").strip()
+
+        # Determine filename if this is a file item
+        filename = ""
+        if item.parent() is not None:
+            filename = item.text(10)  # Filename is in column 10
         
         # Create context menu
         context_menu = QMenu(self)
+
+        # Add Variable Star action when we have a real target name.
+        add_var_action = None
+        if object_name and object_name.lower() not in ["unknown", "bias", "dark", "flat"]:
+            add_var_action = context_menu.addAction("Add Variable Star")
+            add_var_action.setToolTip(f"Mark '{object_name}' as a variable-star photometry target")
+
+        # File-specific actions (only for child items)
+        view_action = None
+        delete_action = None
+        if filename:
+            # Add View action
+            view_action = context_menu.addAction("View")
+            view_action.setToolTip("Open file with external viewer")
+
+            # Add Delete action
+            delete_action = context_menu.addAction("Delete")
+            delete_action.setToolTip("Delete file from disk")
         
-        # Add View action
-        view_action = context_menu.addAction("View")
-        view_action.setToolTip("Open file with external viewer")
-        view_action.triggered.connect(lambda: self._view_file(filename))
-        
-        # Add Delete action
-        delete_action = context_menu.addAction("Delete")
-        delete_action.setToolTip("Delete file from disk")
-        delete_action.triggered.connect(lambda: self._delete_file(filename))
-        
+        if context_menu.isEmpty():
+            return
+
         # Show the context menu
-        context_menu.exec(self.file_tree.mapToGlobal(position))
+        action = context_menu.exec(self.file_tree.mapToGlobal(position))
+        if not action:
+            return
+
+        if add_var_action and action == add_var_action:
+            self._add_variable_star(object_name)
+            return
+
+        if view_action and action == view_action:
+            self._view_file(filename)
+            return
+
+        if delete_action and action == delete_action:
+            self._delete_file(filename)
+            return
+
+    def _add_variable_star(self, object_name: str) -> None:
+        """Add a target name to the VariableStars table."""
+        try:
+            from astrofiler.models import VariableStars
+
+            target = (object_name or "").strip()
+            if not target or target.lower() in ["unknown", "bias", "dark", "flat"]:
+                QMessageBox.information(self, "Variable Star", "Select a valid target name.")
+                return
+
+            record, created = VariableStars.get_or_create(target_name=target)
+            if created:
+                QMessageBox.information(self, "Variable Star", f"Added variable star target: {target}")
+            else:
+                QMessageBox.information(self, "Variable Star", f"Already marked as variable star: {target}")
+
+        except Exception as e:
+            logger.error(f"Error adding variable star target '{object_name}': {e}")
+            QMessageBox.critical(self, "Error", f"Failed to add variable star target:\n{str(e)}")
 
     def _view_file(self, filename):
         """View file with configured external viewer"""
