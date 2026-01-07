@@ -160,13 +160,6 @@ AstroFiler includes automated installation scripts for all major platforms:
 ### Windows - Easy Setup
 Download SETUP.ZIP, unzip it, and run it. It will download everything needed and install it, putting an icon on your desktop.
 
-You will need to install and run Git for updates however. Download git, and from the astrofiler-gui folder run
-
-```bash
-git fetch origin
-git reset --hard origin/main
-```
-
 ### Windows - Install Script
 Install Git - There are also a few ways to install Git on Windows. The most official build is available for download on the Git website. Just go to https://git-scm.com/download/win and the download will start automatically. Note that this is a project called Git for Windows, which is separate from Git itself; for more information on it, go to https://gitforwindows.org.
 
@@ -211,7 +204,7 @@ chmod +x install/install_macos.sh && ./install/install_macos.sh
 - Sets up automatic update checking from GitHub
 
 **Auto-Update Feature:**
-Desktop launchers automatically check for and install updates from GitHub when starting AstroFiler (if installed via git clone).
+Desktop launchers automatically check for and install updates from GitHub when starting AstroFiler
 
 📖 **See the Wiki for detailed installation instructions and troubleshooting.**
 
