@@ -89,13 +89,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
   - Optional remote file deletion after successful processing
   - Automatic header standardization and metadata extraction
 - **External Viewer Support**: Launch your favorite FITS viewer directly from AstroFiler
-- **Comprehensive Siril CLI Integration**: Full integration with Siril for professional-grade image processing
-  - Master calibration frame creation (bias, dark, flat)
-  - Automated light frame calibration workflows
-  - Progress monitoring with real-time status updates
-  - Quality validation and error handling
-  - Batch processing capabilities for large datasets
-- **Professional Calibration System**: Complete auto-calibration workflow from raw frames to calibrated images
+- **Auto-Calibration System**: Complete auto-calibration workflow from raw frames to calibrated images
   - Intelligent session detection and grouping
   - Automatic master frame creation with optimal parameters
   - Smart calibration file matching based on camera settings
@@ -108,7 +102,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Smart Session Linking**: Automatically link calibration sessions to light sessions based on camera, binning, and temperature matching
 - **Professional Session Export**: Export sessions with organized folder structures ready for external processing
 - **Master Frame Management**: Complete master calibration frame lifecycle management
-  - Create master frames with optimal Siril parameters
+  - Create master frames 
   - Validate master frame quality and integrity
   - Track master frame usage and relationships
   - Browse and manage master frame files
@@ -118,7 +112,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Progress Tracking**: Real-time status updates for all session operations with detailed progress monitoring
 
 ### 🚀 **Auto-Calibration System**
-- **Intelligent Master Frame Creation**: Automatically creates master bias, dark, and flat frames using Siril CLI
+- **Intelligent Master Frame Creation**: Automatically creates master bias, dark, and flat frames
 - **Smart Session Linking**: Automatically links calibration sessions to light frame sessions based on camera, binning, and temperature
 - **Calibration Workflow**: One-click calibration of light frames using appropriate master calibration files
 - **Advanced Quality Assessment**: SEP-based image analysis with FWHM, HFR, eccentricity, and SNR calculations
@@ -134,7 +128,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 
 ### **Future Versions**
 - **XISF import**: Load XISF files, extract headers and data, save to FITS format (optional)
-- **Thumbnails/Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
+- **Thumbnails/Stacks**: Stacked images, stretch, and create thumbnail
 
 ## 🔧 Technical Requirements
 
@@ -158,12 +152,10 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **google-cloud-storage**: Google Cloud Storage integration for cloud sync features
 - **google-auth**: Authentication library for Google Cloud services
 - **Pillow**: Image processing for thumbnails and previews
-- **Siril**: Command-line integration for master frame creation and calibration workflows
 - **SEP**: Source Extractor Python library for advanced star detection and quality analysis
 
 ### Optional Dependencies
 - **Git**: Required for auto-update functionality
-- **Siril**: Required for auto-calibration features (must be in system PATH)
 
 ## 🚀 Quick Installation
 
@@ -219,7 +211,6 @@ chmod +x install/install_macos.sh && ./install/install_macos.sh
 - Checks for Python 3.8+ (installs if needed)
 - Creates virtual environment
 - Installs all dependencies
-- **Automatically downloads and installs pysiril** from GitLab CI/CD artifacts
 - Creates desktop shortcuts and application menu entries
 - Sets up automatic update checking from GitHub
 
