@@ -47,7 +47,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
   - **Detailed Duplicate Reports**: Shows duplicate groups, wasted space, and optimization opportunities
 - **Smart Upload Logic**: Three-tier decision system (skip identical files, upload new files, overwrite changed content)
 - **Enhanced File Matching**: Multi-tier local file matching using exact filename, partial filename, and hash-based verification
-- **Database Integration**: Tracks cloud URLs for all files with `fitsFileCloudURL` field enabling future remote access features
+- **Database Integration**: Tracks cloud URLs for all files with `fitsFileCloudURL` field enabling cloud integration
 - **Images View Integration**: Local/Cloud status icons show file storage locations at a glance
 - **Real-time Progress**: Live progress tracking with efficiency statistics and detailed completion summaries
 - **Command-Line Automation**: Complete command-line interface (`CloudSync.py`) with automation scripts for cron/Task Scheduler
@@ -125,10 +125,6 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Advanced UI Indicators**: Visual status indicators showing calibration status, master frame availability, and processing state
 - **Database Integration**: Quality metrics stored in database for analysis and filtering (Migration 009)
 - **Modular Architecture**: Comprehensive refactoring with dedicated `enhanced_quality.py` module for professional-grade quality analysis
-
-### **Future Versions**
-- **XISF import**: Load XISF files, extract headers and data, save to FITS format (optional)
-- **Thumbnails/Stacks**: Stacked images, stretch, and create thumbnail
 
 ## 🔧 Technical Requirements
 
