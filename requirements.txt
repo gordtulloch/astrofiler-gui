@@ -13,3 +13,4 @@ scipy
 lz4>=3.0.0
 reproject>=0.12
 astroalign
+sep
