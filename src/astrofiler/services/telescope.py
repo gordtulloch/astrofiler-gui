@@ -70,8 +70,8 @@ class SmartTelescopeManager:
             },
             'Celestron Origin': {
                 'default_hostname': '',  # To be configured by user (telescope IP)
-                'default_username': 'celestron',
-                'default_password': 'celestron',
+                'default_username': 'celestron',  # Default FTP credentials per Celestron documentation
+                'default_password': 'celestron',  # Note: These are standard defaults, telescope may not support changing them
                 'protocol': 'ftp',  # Plain FTP (not FTPS)
                 'fits_path': 'RawData',  # Celestron Origin stores raw FITS in /RawData
                 'port': 21
@@ -798,13 +798,10 @@ class SmartTelescopeManager:
                     
                 elif filename.lower().endswith(('.fits', '.fit', '.fts')):
                     # It's a FITS file
+                    # Extract file size from LIST output (more efficient than using SIZE command)
                     try:
-                        # Get file size
-                        ftp.cwd('/')
-                        if folder_path:
-                            ftp.cwd(folder_path)
-                        size = ftp.size(filename)
-                    except:
+                        size = int(parts[4])
+                    except (ValueError, IndexError):
                         size = 0
                     
                     # Extract date from LIST output if possible
@@ -936,8 +933,13 @@ class SmartTelescopeManager:
             logger.error(f"Error scanning iTelescope directory {current_path}: {e}")
     
     def _extract_object_from_filename(self, filename):
-        """Extract object name from iTelescope filename if possible."""
-        # iTelescope filenames might contain object information
+        """Extract object name from telescope filename if possible.
+        
+        Handles various filename patterns:
+        - iTelescope: removes 'calibrated' prefix and extracts first part
+        - Celestron Origin: extracts first part of filename before underscore
+        - Generic: returns first part of filename as object name
+        """
         # This is a basic implementation - may need refinement based on actual filename patterns
         try:
             # Remove 'calibrated' prefix and file extension
@@ -953,6 +955,8 @@ class SmartTelescopeManager:
             elif base_name.endswith('.fits'):
                 base_name = base_name[:-5]
             elif base_name.endswith('.fit'):
+                base_name = base_name[:-4]
+            elif base_name.endswith('.fts'):
                 base_name = base_name[:-4]
             
             # Extract first part which might be object name
