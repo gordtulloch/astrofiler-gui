@@ -400,7 +400,7 @@ class ConfigWidget(QWidget):
         self.tab_widget.addTab(calibration_tab, "Calibration")
 
     def create_smart_telescopes_tab(self):
-        """Create the Smart Telescopes tab with iTelescope Configuration."""
+        """Create the Smart Telescopes tab with iTelescope and Celestron Origin Configuration."""
         smart_telescopes_tab = QWidget()
         layout = QVBoxLayout(smart_telescopes_tab)
 
@@ -431,6 +431,24 @@ class ConfigWidget(QWidget):
         itelescope_layout.addRow("Password:", self.itelescope_password)
 
         layout.addWidget(itelescope_group)
+        
+        # Celestron Origin settings group
+        celestron_group = QGroupBox("Celestron Origin Configuration")
+        celestron_layout = QFormLayout(celestron_group)
+
+        # Celestron Origin Hostname/IP
+        self.celestron_hostname = QLineEdit()
+        self.celestron_hostname.setPlaceholderText("Telescope IP address (e.g., 192.168.1.100)")
+        self.celestron_hostname.setToolTip(
+            "IP address or hostname of your Celestron Origin telescope.\n\n"
+            "This is required to connect to your telescope via FTP\n"
+            "and download raw FITS files from imaging sessions.\n"
+            "Default credentials (celestron/celestron) are used for authentication."
+        )
+
+        celestron_layout.addRow("Hostname/IP:", self.celestron_hostname)
+
+        layout.addWidget(celestron_group)
         layout.addStretch()
 
         self.tab_widget.addTab(smart_telescopes_tab, "Smart Telescopes")
@@ -487,6 +505,9 @@ class ConfigWidget(QWidget):
             # iTelescope settings
             config.set('DEFAULT', 'itelescope_username', self.itelescope_username.text().strip())
             config.set('DEFAULT', 'itelescope_password', self.itelescope_password.text().strip())
+            
+            # Celestron Origin settings
+            config.set('DEFAULT', 'celestron_hostname', self.celestron_hostname.text().strip())
             
             # FITS compression settings
             config.set('DEFAULT', 'compress_fits', str(self.compress_fits.isChecked()))
@@ -642,6 +663,11 @@ class ConfigWidget(QWidget):
             if config.has_option('DEFAULT', 'itelescope_password'):
                 itelescope_password = config.get('DEFAULT', 'itelescope_password')
                 self.itelescope_password.setText(itelescope_password)
+            
+            # Load Celestron Origin settings
+            if config.has_option('DEFAULT', 'celestron_hostname'):
+                celestron_hostname = config.get('DEFAULT', 'celestron_hostname')
+                self.celestron_hostname.setText(celestron_hostname)
             
             # Load FITS compression settings
             if config.has_option('DEFAULT', 'compress_fits'):
