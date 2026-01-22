@@ -9,7 +9,7 @@ from PySide6.QtGui import QAction, QDesktopServices
 logger = logging.getLogger(__name__)
 
 # Global version variable
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
