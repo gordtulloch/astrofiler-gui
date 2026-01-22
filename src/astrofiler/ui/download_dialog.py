@@ -343,6 +343,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         self.telescope_list.addItem("StellarMate")
         self.telescope_list.addItem("DWARF 3")
         self.telescope_list.addItem("iTelescope")
+        self.telescope_list.addItem("Celestron Origin")
         self.telescope_list.setCurrentRow(0)
         self.telescope_list.setMaximumHeight(100)
         
@@ -454,6 +455,13 @@ class SmartTelescopeDownloadDialog(QDialog):
                 self.hostname_edit.setText("dwarf.local")
             elif telescope_type == "iTelescope":
                 self.hostname_edit.setText("data.itelescope.net")
+            elif telescope_type == "Celestron Origin":
+                # Load hostname from config if available
+                hostname = smart_telescope_manager.get_celestron_hostname()
+                if hostname:
+                    self.hostname_edit.setText(hostname)
+                else:
+                    self.hostname_edit.setText("")  # User needs to configure
     
     def start_download(self):
         """Start the download process."""

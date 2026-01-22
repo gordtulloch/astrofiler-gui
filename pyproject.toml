@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astrofiler"
-version = "1.2.0"
+version = "1.2.1"
 description = "Professional Astronomical Image Management and Processing Suite"
 authors = [
     {name = "Gord Tulloch", email = "gord.tulloch@gmail.com"}
