@@ -8,8 +8,8 @@ from PySide6.QtGui import QAction, QDesktopServices
 
 logger = logging.getLogger(__name__)
 
-# Global version variable
-VERSION = "1.2.1"
+# Import version from package
+from astrofiler import __version__ as VERSION
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""

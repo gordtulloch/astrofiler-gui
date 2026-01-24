@@ -651,6 +651,37 @@ class FileProcessor:
         # Special handling for vendors with incomplete headers
         header_modified = False
         telescop_value = hdr.get("TELESCOP", "")
+
+        # Celestron Origin FITS files often omit TELESCOP/INSTRUME.
+        # If CREATOR indicates Origin, populate missing fields.
+        creator_value = hdr.get("CREATOR", "")
+        try:
+            creator_str = "" if creator_value is None else str(creator_value)
+        except Exception:
+            creator_str = ""
+
+        if "origin" in creator_str.lower():
+            origin_changes_made = False
+
+            telescop_current = hdr.get("TELESCOP")
+            if not (telescop_current and str(telescop_current).strip()):
+                hdr["TELESCOP"] = "Celestron Origin"
+                origin_changes_made = True
+
+            instrume_current = hdr.get("INSTRUME")
+            if not (instrume_current and str(instrume_current).strip()):
+                camera_value = hdr.get("CAMERA")
+                if camera_value and str(camera_value).strip():
+                    hdr["INSTRUME"] = str(camera_value).strip()
+                    origin_changes_made = True
+
+            if origin_changes_made:
+                header_modified = True
+                logger.info(
+                    f"Populated missing Origin header fields for {os.path.join(root, file)}: "
+                    f"TELESCOP={hdr.get('TELESCOP')}, INSTRUME={hdr.get('INSTRUME')}"
+                )
+
         if telescop_value and telescop_value.upper() == "DWARF":
             modified_hdr = dwarfFixHeader(hdr, root, file)
             if not modified_hdr:
