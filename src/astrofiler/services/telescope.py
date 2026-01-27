@@ -384,17 +384,29 @@ class SmartTelescopeManager:
         
         config = self.supported_telescopes.get(telescope_type)
         
+        # Use provided credentials, or fall back to defaults from config
+        username = username or config.get('default_username')
+        password = password or config.get('default_password')
+        
+        logger.debug(f"FTP credentials: username={'<set>' if username else '<none>'}, password={'<set>' if password else '<none>'}")
+        
         try:
             # Create FTP connection
             ftp = ftplib.FTP()
             logger.debug(f"Attempting FTP connection to {ip}:21...")
             ftp.connect(ip, 21, timeout=10)
             
-            # Login with credentials (or anonymous for DWARF)
+            # Set passive mode (required by many FTP servers behind firewalls/NAT)
+            ftp.set_pasv(True)
+            logger.debug("Enabled passive FTP mode")
+            
+            # Login with credentials (or anonymous if no credentials available)
             if username and password:
+                logger.debug(f"Logging in as user '{username}'")
                 ftp.login(username, password)
-                logger.info(f"Successfully connected to FTP service at {ip} (authenticated)")
+                logger.info(f"Successfully connected to FTP service at {ip} (authenticated as {username})")
             else:
+                logger.debug(f"Using anonymous login")
                 ftp.login()  # Anonymous login
                 logger.info(f"Successfully connected to FTP service at {ip} (anonymous)")
             
@@ -747,9 +759,26 @@ class SmartTelescopeManager:
         fits_files = []
         
         try:
-            # Scan the RawData directory for FITS files
-            logger.debug(f"Scanning Celestron Origin {fits_path} folder")
-            self._scan_celestron_folder(ftp, fits_path, fits_files)
+            # Try to access the specified fits_path directory
+            logger.debug(f"Scanning Celestron Origin '{fits_path}' folder")
+            
+            # Test if the directory exists
+            try:
+                ftp.cwd('/')
+                if fits_path:
+                    ftp.cwd(fits_path)
+                    logger.debug(f"Successfully accessed /{fits_path} directory")
+                    ftp.cwd('/')  # Go back to root
+                    self._scan_celestron_folder(ftp, fits_path, fits_files)
+                else:
+                    # Scan from root
+                    logger.debug("Scanning from root directory")
+                    self._scan_celestron_folder(ftp, '', fits_files)
+                    
+            except ftplib.error_perm as e:
+                # Directory doesn't exist, scan from root instead
+                logger.warning(f"Directory '{fits_path}' not found ({e}), scanning from root directory")
+                self._scan_celestron_folder(ftp, '', fits_files)
             
         except Exception as e:
             logger.error(f"Error scanning Celestron Origin FTP structure: {e}")
@@ -1076,17 +1105,25 @@ class SmartTelescopeManager:
         username = config.get('default_username')
         password = config.get('default_password')
         
+        logger.debug(f"FTP download credentials: username={'<set>' if username else '<none>'}, password={'<set>' if password else '<none>'}")
+        
         try:
             # Create FTP connection
             ftp = ftplib.FTP()
             logger.debug(f"Connecting to {ip} for FTP file download...")
             ftp.connect(ip, 21, timeout=10)
             
+            # Set passive mode (required by many FTP servers behind firewalls/NAT)
+            ftp.set_pasv(True)
+            logger.debug("Enabled passive FTP mode for download")
+            
             # Login with credentials (or anonymous)
             if username and password:
+                logger.debug(f"Logging in as user '{username}' for download")
                 ftp.login(username, password)
-                logger.debug(f"FTP login successful (authenticated)")
+                logger.debug(f"FTP login successful (authenticated as {username})")
             else:
+                logger.debug(f"Using anonymous login for download")
                 ftp.login()  # Anonymous login
                 logger.debug(f"FTP login successful (anonymous)")
             
