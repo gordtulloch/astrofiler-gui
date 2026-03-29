@@ -105,7 +105,10 @@ class EnhancedQualityAnalyzer:
             # Load FITS file
             with fits.open(fits_file_path) as hdul:
                 header = hdul[0].header
-                data = hdul[0].data.astype(np.float64)
+                raw_data = hdul[0].data
+                if raw_data is None:
+                    return {"status": "error", "message": "No image data found in FITS file"}
+                data = raw_data.astype(np.float64)
                 
                 results = {
                     "file_path": fits_file_path,

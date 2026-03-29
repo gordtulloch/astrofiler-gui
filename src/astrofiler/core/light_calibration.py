@@ -91,10 +91,13 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
             original_data = hdul[0].data
             light_header = hdul[0].header.copy()
             
+            if original_data is None:
+                return {"error": "No image data found in light frame"}
+            
             # Convert to float64 for precision during calibration
             light_data = original_data.astype(np.float64)
         
-        if light_data is None or light_data.size == 0:
+        if light_data.size == 0:
             return {"error": "No image data found in light frame"}
         
         # Get light frame exposure time for dark scaling
