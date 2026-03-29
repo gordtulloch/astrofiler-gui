@@ -512,14 +512,15 @@ def perform_quality_assessment(config: configparser.ConfigParser, session_id: Op
         for i, fits_file in enumerate(files_to_analyze):
             try:
                 # Create progress callback for individual file
-                def file_progress(percentage, message):
-                    # Calculate overall progress
+                def file_progress(current, total, message):
+                    # Calculate overall progress using current/total ratio
                     file_progress_weight = 80.0 / len(files_to_analyze)  # 80% for file analysis
-                    overall_progress = 10 + (i * file_progress_weight) + (percentage * file_progress_weight / 100)
+                    overall_progress = 10 + (i * file_progress_weight) + (current * file_progress_weight / max(total, 1))
                     
                     if progress_callback:
                         progress_callback(int(overall_progress), 
                                         f"Analyzing {fits_file.fitsFileObject} ({i+1}/{len(files_to_analyze)}): {message}")
+                    return True
                 
                 # Perform quality analysis
                 quality_results = analyzer.analyze_and_update_file(
