@@ -402,6 +402,8 @@ class MasterFrameManager:
             logger.info(f"Created master {cal_type} frame: {output_filename}")
             return master_record
             
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"Error creating master {cal_type} frame: {e}")
             if progress_callback:
@@ -640,6 +642,8 @@ class MasterFrameManager:
                     if (i + 1) % 10 == 0 and progress_callback:
                         progress = 30 + int((i + 1) / len(file_paths) * 10)
                         progress_callback(progress, 100, f"Validating: {i+1}/{len(file_paths)} files...")
+                except RuntimeError:
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping corrupted file {file_path}: {e}")
                     continue
@@ -738,6 +742,8 @@ class MasterFrameManager:
                         progress = 60 + int((i + 1) / n_frames * 20)
                         progress_callback(progress, 100, f"Pass 2: {i+1}/{n_frames} frames...")
                         
+                except RuntimeError:
+                    raise
                 except Exception as e:
                     logger.warning(f"Error processing {file_path}: {e}")
                     continue
@@ -800,6 +806,8 @@ class MasterFrameManager:
             
             return True
                 
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"Error in sigma-clipped master creation: {e}", exc_info=True)
             return False
@@ -1002,6 +1010,8 @@ class MasterFrameManager:
                 self._write_light_session_thumbnail(output_path, str(thumbnail_session_id), width_px=150)
             return True
 
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error("Error creating photometric light stack: %s", e, exc_info=True)
             return False
