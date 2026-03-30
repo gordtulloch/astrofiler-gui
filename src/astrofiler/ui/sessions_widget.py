@@ -849,6 +849,7 @@ class SessionsWidget(QWidget):
 
     def sample_stack_session(self, item):
         """Create a quick stack of calibrated frames for review and open it in external viewer."""
+        progress = None
         try:
             from ..core.master_manager import get_master_manager
             from ..core.utils import sanitize_filesystem_name
@@ -975,6 +976,8 @@ class SessionsWidget(QWidget):
 
         except RuntimeError as e:
             # Cancellation
+            if progress is not None:
+                progress.close()
             logger.info(f"Stack cancelled: {e}")
         except Exception as e:
             logger.error(f"Error creating stack: {e}")
@@ -982,6 +985,7 @@ class SessionsWidget(QWidget):
 
     def photometric_stack_session(self, item):
         """Create a photometry-safe stack of light frames and open it in the external viewer."""
+        progress = None
         try:
             from astrofiler.core.master_manager import get_master_manager
             from astrofiler.core.utils import sanitize_filesystem_name
@@ -1119,6 +1123,8 @@ class SessionsWidget(QWidget):
             self.load_sessions_data()
 
         except RuntimeError as e:
+            if progress is not None:
+                progress.close()
             logger.info(f"Photometric stack cancelled: {e}")
         except Exception as e:
             logger.error(f"Error creating photometric stack: {e}")
