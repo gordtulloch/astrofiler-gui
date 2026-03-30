@@ -437,49 +437,5 @@ class AstroFilerGUI(QMainWindow):
             self.config_widget.theme.setCurrentText("Dark")
 
     def showEvent(self, event):
-        """Handle show events to reload data when window regains focus"""
+        """Handle show events"""
         super().showEvent(event)
-        # Load images data by default since that's the default view
-        if hasattr(self.images_widget, 'load_fits_data'):
-            self.images_widget.load_fits_data()
-        super().showEvent(event)
-        # Load images data by default since that's the default view
-        if hasattr(self.images_widget, 'load_fits_data'):
-            self.images_widget.load_fits_data()
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        if hasattr(self.images_widget, 'load_fits_data'):
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
