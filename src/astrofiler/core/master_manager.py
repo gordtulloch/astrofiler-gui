@@ -31,6 +31,48 @@ from ..config import get_temp_folder
 
 logger = logging.getLogger(__name__)
 
+# Configure SEP to handle crowded star fields better
+try:
+    import sep
+    # Increase the default sub-object limit to handle dense star fields.
+    # The default is 1024; we set it higher to avoid deblending overflow on
+    # crowded fields (the error manifests as a TypeError in astroalign).
+    sep.set_sub_object_limit(65536)
+    logger.info(f"SEP sub-object limit set to {sep.get_sub_object_limit()}")
+except ImportError:
+    pass  # SEP not available; astroalign will still work but may fail on crowded fields
+except Exception as e:
+    logger.warning(f"Could not configure SEP settings: {e}")
+
+
+def configure_sep_for_crowded_fields() -> bool:
+    """Raise the SEP sub-object limit to handle very crowded star fields."""
+    try:
+        import sep
+        sep.set_sub_object_limit(131072)
+        logger.info(f"SEP configured for crowded fields with sub-object limit: {sep.get_sub_object_limit()}")
+        return True
+    except ImportError:
+        logger.warning("SEP not available - cannot configure for crowded fields")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to configure SEP for crowded fields: {e}")
+        return False
+
+
+def reset_sep_defaults() -> bool:
+    """Reset SEP sub-object limit back to the module-level default (65536)."""
+    try:
+        import sep
+        sep.set_sub_object_limit(65536)
+        logger.info(f"SEP reset to defaults with sub-object limit: {sep.get_sub_object_limit()}")
+        return True
+    except ImportError:
+        return False
+    except Exception as e:
+        logger.error(f"Failed to reset SEP settings: {e}")
+        return False
+
 
 def check_symlink_support():
     """Check if symbolic links are supported on this system."""
@@ -541,8 +583,46 @@ class MasterFrameManager:
                         aligned[footprint] = np.nan
                     return aligned
                 except Exception as e:
-                    # If astroalign can't find a match, fall back to stacking the unaligned image.
-                    if _is_astroalign_maxiter_error(e):
+                    # SEP deblending overflow causes astroalign to raise TypeError
+                    # ("Input type for target not supported"). Retry once with a
+                    # higher sub-object limit before falling back to unaligned stacking.
+                    if ("deblending overflow" in str(e) or "sub-objects reached" in str(e) or
+                            "object deblending overflow" in str(e)):
+                        try:
+                            import sep as _sep
+                            _orig_limit = _sep.get_sub_object_limit()
+                            _sep.set_sub_object_limit(_orig_limit * 4)
+                            logger.info(
+                                "Increased SEP sub-object limit to %d for %s",
+                                _sep.get_sub_object_limit(),
+                                os.path.basename(file_path),
+                            )
+                            try:
+                                aligned, footprint = aa.register(
+                                    data.astype(np.float32, copy=False), ref_full, fill_value=np.nan
+                                )
+                                aligned = aligned.astype(np.float32, copy=False)
+                                if footprint is not None:
+                                    aligned = aligned.copy()
+                                    aligned[footprint] = np.nan
+                                return aligned
+                            finally:
+                                _sep.set_sub_object_limit(_orig_limit)
+                        except ImportError:
+                            pass
+                        except Exception as retry_e:
+                            e = retry_e  # Fall through with the retry error
+
+                    # Fall back for any registration failure we can recover from.
+                    should_fallback = (
+                        _is_astroalign_maxiter_error(e) or
+                        isinstance(e, TypeError) or
+                        "Input type for target not supported" in str(e) or
+                        "deblending overflow" in str(e) or
+                        "sub-objects reached" in str(e) or
+                        "object deblending overflow" in str(e)
+                    )
+                    if should_fallback:
                         def _try_wcs_reproject() -> Optional[np.ndarray]:
                             if ref_header is None or ref_full is None:
                                 return None
@@ -881,7 +961,48 @@ class MasterFrameManager:
                         aligned[footprint] = np.nan
                     return aligned
                 except Exception as e:
-                    if _is_astroalign_maxiter_error(e):
+                    # SEP deblending overflow causes astroalign to raise TypeError
+                    # ("Input type for target not supported"). Retry once with a
+                    # higher sub-object limit before falling back to unaligned stacking.
+                    if ("deblending overflow" in str(e) or "sub-objects reached" in str(e) or
+                            "object deblending overflow" in str(e)):
+                        try:
+                            import sep as _sep
+                            _orig_limit = _sep.get_sub_object_limit()
+                            _sep.set_sub_object_limit(_orig_limit * 4)
+                            logger.info(
+                                "Increased SEP sub-object limit to %d for %s",
+                                _sep.get_sub_object_limit(),
+                                os.path.basename(file_path),
+                            )
+                            try:
+                                aligned, footprint = aa.register(
+                                    data.astype(np.float32, copy=False),
+                                    ref_full,
+                                    fill_value=np.nan,
+                                )
+                                aligned = aligned.astype(np.float32, copy=False)
+                                if footprint is not None:
+                                    aligned = aligned.copy()
+                                    aligned[footprint] = np.nan
+                                return aligned
+                            finally:
+                                _sep.set_sub_object_limit(_orig_limit)
+                        except ImportError:
+                            pass
+                        except Exception as retry_e:
+                            e = retry_e  # Fall through with the retry error
+
+                    # Fall back for any registration failure we can recover from.
+                    should_fallback = (
+                        _is_astroalign_maxiter_error(e) or
+                        isinstance(e, TypeError) or
+                        "Input type for target not supported" in str(e) or
+                        "deblending overflow" in str(e) or
+                        "sub-objects reached" in str(e) or
+                        "object deblending overflow" in str(e)
+                    )
+                    if should_fallback:
                         def _try_wcs_reproject() -> Optional[np.ndarray]:
                             if ref_full is None:
                                 return None
