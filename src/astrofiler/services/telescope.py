@@ -18,6 +18,7 @@ from datetime import datetime
 from astropy.io import fits
 from ..models import fitsSession, fitsFile
 from ..core import get_master_calibration_path
+from ..core.utils import fits_image_data
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -1493,8 +1494,9 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
             
         # Load light frame
         with fits.open(light_path) as hdul:
-            light_data = hdul[0].data.astype(np.float32)
-            light_header = hdul[0].header.copy()
+            _ld, light_header = fits_image_data(hdul)
+            light_data = _ld.astype(np.float32)
+            light_header = light_header.copy()
             
         if light_data is None or light_data.size == 0:
             return {"error": "No image data found in light frame"}
@@ -1508,7 +1510,8 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
                 progress_callback("Applying bias correction...")
             try:
                 with fits.open(bias_master) as hdul:
-                    bias_data = hdul[0].data.astype(np.float32)
+                    _bd, _ = fits_image_data(hdul)
+                    bias_data = _bd.astype(np.float32)
                 calibrated_data -= bias_data
                 calibration_steps.append(f"BIAS: {os.path.basename(bias_master)}")
             except Exception as e:
@@ -1521,20 +1524,11 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
                 progress_callback("Applying dark correction...")
             try:
                 with fits.open(dark_master) as hdul:
-                    dark_data = hdul[0].data.astype(np.float32)
-                    dark_header = hdul[0].header
+                    _dd, _dh = fits_image_data(hdul)
+                    dark_data = _dd.astype(np.float32)
+                    dark_header = _dh
                     
-                # Scale dark frame by exposure time ratio if needed
-                light_exptime = light_header.get('EXPTIME', 1.0)
-                dark_exptime = dark_header.get('EXPTIME', 1.0)
-                
-                if dark_exptime > 0 and light_exptime != dark_exptime:
-                    scale_factor = light_exptime / dark_exptime
-                    dark_data *= scale_factor
-                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} (scaled {scale_factor:.3f})")
-                else:
-                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
-                
+                calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
                 calibrated_data -= dark_data
             except Exception as e:
                 if progress_callback:
@@ -1546,7 +1540,8 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
                 progress_callback("Applying flat correction...")
             try:
                 with fits.open(flat_master) as hdul:
-                    flat_data = hdul[0].data.astype(np.float32)
+                    _fd, _ = fits_image_data(hdul)
+                    flat_data = _fd.astype(np.float32)
                     
                 # Normalize flat field (avoid division by zero)
                 flat_mean = np.mean(flat_data[flat_data > 0])

@@ -204,6 +204,7 @@ class AstroFilerGUI(QMainWindow):
         # Refresh action
         refresh_action = view_menu.addAction('&Refresh Current View')
         refresh_action.setShortcut('F5')
+        refresh_action.setShortcutContext(Qt.ApplicationShortcut)
         refresh_action.triggered.connect(self.refresh_current_view)
         
         # Tools Menu

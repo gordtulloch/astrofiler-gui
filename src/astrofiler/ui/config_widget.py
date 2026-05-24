@@ -531,7 +531,26 @@ class ConfigWidget(QWidget):
         """Load configuration settings from astrofiler.ini file"""
         try:
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config_path = 'astrofiler.ini'
+            file_exists = os.path.exists(config_path)
+            config.read(config_path)
+
+            # First-run defaults: ensure source/repo are present and persisted.
+            defaults_updated = False
+            if 'DEFAULT' not in config:
+                config['DEFAULT'] = {}
+
+            if not config.has_option('DEFAULT', 'source'):
+                config.set('DEFAULT', 'source', 'REPOSITORY.incoming/')
+                defaults_updated = True
+
+            if not config.has_option('DEFAULT', 'repo'):
+                config.set('DEFAULT', 'repo', 'REPOSITORY/')
+                defaults_updated = True
+
+            if defaults_updated or not file_exists:
+                with open(config_path, 'w') as configfile:
+                    config.write(configfile)
             
             # Load path settings
             if config.has_option('DEFAULT', 'source'):
@@ -705,8 +724,8 @@ class ConfigWidget(QWidget):
     
     def reset_settings(self):
         # Reset to default values
-        self.source_path.setText("")
-        self.repo_path.setText("")
+        self.source_path.setText("REPOSITORY.incoming/")
+        self.repo_path.setText("REPOSITORY/")
         self.refresh_on_startup.setChecked(True)
         self.save_modified_headers.setChecked(False)
         self.theme.setCurrentIndex(0)

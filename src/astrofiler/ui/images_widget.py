@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
 from PySide6.QtGui import QFont, QDesktopServices, QTextCursor, QIcon
 
 from astrofiler.core import fitsProcessing
-from astrofiler.models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
+from astrofiler.models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Masters as MastersModel
 from .download_dialog import SmartTelescopeDownloadDialog
 from .mappings_dialog import MappingsDialog
 
@@ -76,6 +76,13 @@ class ImagesWidget(QWidget):
         self.download_button.setStyleSheet("QPushButton { font-size: 10px; }")
         self.download_button.setToolTip("Download files from telescope")
         self.download_button.clicked.connect(self.show_download_dialog)
+
+        # Show Repo button
+        self.show_repo_button = QPushButton("Show Repo")
+        self.show_repo_button.setMaximumSize(100, 28)
+        self.show_repo_button.setStyleSheet("QPushButton { font-size: 10px; }")
+        self.show_repo_button.setToolTip("Open the repository folder in the file browser")
+        self.show_repo_button.clicked.connect(self.show_repo_folder)
         
         # Search controls
         search_label = QLabel("Search:")
@@ -113,6 +120,7 @@ class ImagesWidget(QWidget):
         controls_layout.addWidget(self.regenerate_button)
         controls_layout.addWidget(self.load_new_button)
         controls_layout.addWidget(self.download_button)
+        controls_layout.addWidget(self.show_repo_button)
         controls_layout.addWidget(search_label)
         controls_layout.addWidget(self.search_input)
         controls_layout.addWidget(self.search_button)
@@ -126,7 +134,7 @@ class ImagesWidget(QWidget):
         
         # File list
         self.file_tree = QTreeWidget()
-        self.file_tree.setHeaderLabels(["Object", "Type", "Date", "Exposure", "Filter", "Telescope", "Instrument", "Temperature", "Local", "Cloud", "Filename"])
+        self.file_tree.setHeaderLabels(["Object", "Type", "Date", "Exposure", "Filter", "Binning", "Telescope", "Instrument", "Temperature", "Local", "Cloud", "Filename"])
         
         # Set column widths for better display
         self.file_tree.setColumnWidth(0, 120)  # Object
@@ -134,12 +142,13 @@ class ImagesWidget(QWidget):
         self.file_tree.setColumnWidth(2, 150)  # Date
         self.file_tree.setColumnWidth(3, 80)   # Exposure
         self.file_tree.setColumnWidth(4, 80)   # Filter
-        self.file_tree.setColumnWidth(5, 120)  # Telescope
-        self.file_tree.setColumnWidth(6, 120)  # Instrument
-        self.file_tree.setColumnWidth(7, 100)  # Temperature
-        self.file_tree.setColumnWidth(8, 40)   # Local icon
-        self.file_tree.setColumnWidth(9, 40)   # Cloud icon
-        self.file_tree.setColumnWidth(10, 200) # Filename
+        self.file_tree.setColumnWidth(5, 60)   # Binning
+        self.file_tree.setColumnWidth(6, 120)  # Telescope
+        self.file_tree.setColumnWidth(7, 120)  # Instrument
+        self.file_tree.setColumnWidth(8, 100)  # Temperature
+        self.file_tree.setColumnWidth(9, 40)   # Local icon
+        self.file_tree.setColumnWidth(10, 40)  # Cloud icon
+        self.file_tree.setColumnWidth(11, 200) # Filename
 
         # Enable context menu
         self.file_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -248,12 +257,13 @@ class ImagesWidget(QWidget):
             parent_item.setText(2, "")  # Date  
             parent_item.setText(3, "")  # Exposure
             parent_item.setText(4, "")  # Filter
-            parent_item.setText(5, "")  # Telescope
-            parent_item.setText(6, "")  # Instrument
-            parent_item.setText(7, "")  # Temperature
-            parent_item.setText(8, "")  # Local icon column - empty for parent
-            parent_item.setText(9, "")  # Cloud icon column - empty for parent
-            parent_item.setText(10, f"({len(object_files)} files)")  # Filename shows count
+            parent_item.setText(5, "")  # Binning
+            parent_item.setText(6, "")  # Telescope
+            parent_item.setText(7, "")  # Instrument
+            parent_item.setText(8, "")  # Temperature
+            parent_item.setText(9, "")  # Local icon column - empty for parent
+            parent_item.setText(10, "")  # Cloud icon column - empty for parent
+            parent_item.setText(11, f"({len(object_files)} files)")  # Filename shows count
             
             # Style parent item
             font = parent_item.font(0)
@@ -268,19 +278,21 @@ class ImagesWidget(QWidget):
                 child_item.setText(2, str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "")
                 child_item.setText(3, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "")
                 child_item.setText(4, fits_file.fitsFileFilter or "")
-                child_item.setText(5, fits_file.fitsFileTelescop or "")
-                child_item.setText(6, fits_file.fitsFileInstrument or "")
-                child_item.setText(7, str(fits_file.fitsFileCCDTemp) if fits_file.fitsFileCCDTemp else "")
+                binning = f"{fits_file.fitsFileXBinning}x{fits_file.fitsFileYBinning}" if fits_file.fitsFileXBinning and fits_file.fitsFileYBinning else ""
+                child_item.setText(5, binning)
+                child_item.setText(6, fits_file.fitsFileTelescop or "")
+                child_item.setText(7, fits_file.fitsFileInstrument or "")
+                child_item.setText(8, str(fits_file.fitsFileCCDTemp) if fits_file.fitsFileCCDTemp else "")
                 
                 # Set icons for local and cloud status
                 if fits_file.fitsFileName:
-                    child_item.setIcon(8, self.local_icon)
-                    child_item.setToolTip(8, f"Local file: {os.path.basename(fits_file.fitsFileName)}")
-                    child_item.setText(10, fits_file.fitsFileName or "")  # Filename in column 10
+                    child_item.setIcon(9, self.local_icon)
+                    child_item.setToolTip(9, f"Local file: {os.path.basename(fits_file.fitsFileName)}")
+                    child_item.setText(11, fits_file.fitsFileName or "")  # Filename in column 11
                 
                 if fits_file.fitsFileCloudURL:
-                    child_item.setIcon(9, self.cloud_icon)
-                    child_item.setToolTip(9, f"Cloud file: {fits_file.fitsFileCloudURL}")
+                    child_item.setIcon(10, self.cloud_icon)
+                    child_item.setToolTip(10, f"Cloud file: {fits_file.fitsFileCloudURL}")
                 
                 parent_item.addChild(child_item)
             
@@ -315,12 +327,13 @@ class ImagesWidget(QWidget):
             parent_item.setText(2, "")  # Empty for child date column
             parent_item.setText(3, "")  # Exposure
             parent_item.setText(4, "")  # Filter
-            parent_item.setText(5, "")  # Telescope
-            parent_item.setText(6, "")  # Instrument
-            parent_item.setText(7, "")  # Temperature
-            parent_item.setText(8, "")  # Local icon column - empty for parent
-            parent_item.setText(9, "")  # Cloud icon column - empty for parent
-            parent_item.setText(10, "")  # Filename
+            parent_item.setText(5, "")  # Binning
+            parent_item.setText(6, "")  # Telescope
+            parent_item.setText(7, "")  # Instrument
+            parent_item.setText(8, "")  # Temperature
+            parent_item.setText(9, "")  # Local icon column - empty for parent
+            parent_item.setText(10, "")  # Cloud icon column - empty for parent
+            parent_item.setText(11, "")  # Filename
             
             # Style parent item - make date bold in first column
             font = parent_item.font(0)  # First column (Object/Date)
@@ -335,19 +348,21 @@ class ImagesWidget(QWidget):
                 child_item.setText(2, "")  # Empty date for child (parent shows the date)
                 child_item.setText(3, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "")
                 child_item.setText(4, fits_file.fitsFileFilter or "")
-                child_item.setText(5, fits_file.fitsFileTelescop or "")
-                child_item.setText(6, fits_file.fitsFileInstrument or "")
-                child_item.setText(7, str(fits_file.fitsFileCCDTemp) if fits_file.fitsFileCCDTemp else "")
+                binning = f"{fits_file.fitsFileXBinning}x{fits_file.fitsFileYBinning}" if fits_file.fitsFileXBinning and fits_file.fitsFileYBinning else ""
+                child_item.setText(5, binning)
+                child_item.setText(6, fits_file.fitsFileTelescop or "")
+                child_item.setText(7, fits_file.fitsFileInstrument or "")
+                child_item.setText(8, str(fits_file.fitsFileCCDTemp) if fits_file.fitsFileCCDTemp else "")
                 
                 # Set icons for local and cloud status
                 if fits_file.fitsFileName:
-                    child_item.setIcon(8, self.local_icon)
-                    child_item.setToolTip(8, f"Local file: {os.path.basename(fits_file.fitsFileName)}")
-                    child_item.setText(10, fits_file.fitsFileName or "")  # Filename in column 10
+                    child_item.setIcon(9, self.local_icon)
+                    child_item.setToolTip(9, f"Local file: {os.path.basename(fits_file.fitsFileName)}")
+                    child_item.setText(11, fits_file.fitsFileName or "")  # Filename in column 11
                 
                 if fits_file.fitsFileCloudURL:
-                    child_item.setIcon(9, self.cloud_icon)
-                    child_item.setToolTip(9, f"Cloud file: {fits_file.fitsFileCloudURL}")
+                    child_item.setIcon(10, self.cloud_icon)
+                    child_item.setToolTip(10, f"Cloud file: {fits_file.fitsFileCloudURL}")
                 
                 parent_item.addChild(child_item)
             
@@ -394,12 +409,13 @@ class ImagesWidget(QWidget):
             object_parent_item.setText(2, "")  # Date
             object_parent_item.setText(3, "")  # Exposure
             object_parent_item.setText(4, "")  # Filter
-            object_parent_item.setText(5, "")  # Telescope
-            object_parent_item.setText(6, "")  # Instrument
-            object_parent_item.setText(7, "")  # Temperature
-            object_parent_item.setText(8, "")  # Local icon column - empty for parent
-            object_parent_item.setText(9, "")  # Cloud icon column - empty for parent
-            object_parent_item.setText(10, "")  # Filename
+            object_parent_item.setText(5, "")  # Binning
+            object_parent_item.setText(6, "")  # Telescope
+            object_parent_item.setText(7, "")  # Instrument
+            object_parent_item.setText(8, "")  # Temperature
+            object_parent_item.setText(9, "")  # Local icon column - empty for parent
+            object_parent_item.setText(10, "")  # Cloud icon column - empty for parent
+            object_parent_item.setText(11, "")  # Filename
             
             # Style object parent item - make object bold in first column
             font = object_parent_item.font(0)
@@ -423,12 +439,13 @@ class ImagesWidget(QWidget):
                 filter_parent_item.setText(2, "")  # Date
                 filter_parent_item.setText(3, "")  # Exposure
                 filter_parent_item.setText(4, "")  # Filter (shown in column 0)
-                filter_parent_item.setText(5, "")  # Telescope
-                filter_parent_item.setText(6, "")  # Instrument
-                filter_parent_item.setText(7, "")  # Temperature
-                filter_parent_item.setText(8, "")  # Local icon column - empty for parent
-                filter_parent_item.setText(9, "")  # Cloud icon column - empty for parent
-                filter_parent_item.setText(10, "")  # Filename
+                filter_parent_item.setText(5, "")  # Binning
+                filter_parent_item.setText(6, "")  # Telescope
+                filter_parent_item.setText(7, "")  # Instrument
+                filter_parent_item.setText(8, "")  # Temperature
+                filter_parent_item.setText(9, "")  # Local icon column - empty for parent
+                filter_parent_item.setText(10, "")  # Cloud icon column - empty for parent
+                filter_parent_item.setText(11, "")  # Filename
                 
                 # Style filter parent item
                 filt_font = filter_parent_item.font(0)
@@ -443,19 +460,21 @@ class ImagesWidget(QWidget):
                     child_item.setText(2, str(fits_file.fitsFileDate) if fits_file.fitsFileDate else "")
                     child_item.setText(3, str(fits_file.fitsFileExpTime) if fits_file.fitsFileExpTime else "")
                     child_item.setText(4, "")  # Empty filter for child (parent shows the filter)
-                    child_item.setText(5, fits_file.fitsFileTelescop or "")
-                    child_item.setText(6, fits_file.fitsFileInstrument or "")
-                    child_item.setText(7, str(fits_file.fitsFileCCDTemp) if fits_file.fitsFileCCDTemp else "")
+                    binning = f"{fits_file.fitsFileXBinning}x{fits_file.fitsFileYBinning}" if fits_file.fitsFileXBinning and fits_file.fitsFileYBinning else ""
+                    child_item.setText(5, binning)
+                    child_item.setText(6, fits_file.fitsFileTelescop or "")
+                    child_item.setText(7, fits_file.fitsFileInstrument or "")
+                    child_item.setText(8, str(fits_file.fitsFileCCDTemp) if fits_file.fitsFileCCDTemp else "")
                     
                     # Set icons for local and cloud status
                     if fits_file.fitsFileName:
-                        child_item.setIcon(8, self.local_icon)
-                        child_item.setToolTip(8, f"Local file: {os.path.basename(fits_file.fitsFileName)}")
-                        child_item.setText(10, fits_file.fitsFileName or "")  # Filename in column 10
+                        child_item.setIcon(9, self.local_icon)
+                        child_item.setToolTip(9, f"Local file: {os.path.basename(fits_file.fitsFileName)}")
+                        child_item.setText(11, fits_file.fitsFileName or "")  # Filename in column 11
                     
                     if fits_file.fitsFileCloudURL:
-                        child_item.setIcon(9, self.cloud_icon)
-                        child_item.setToolTip(9, f"Cloud file: {fits_file.fitsFileCloudURL}")
+                        child_item.setIcon(10, self.cloud_icon)
+                        child_item.setToolTip(10, f"Cloud file: {fits_file.fitsFileCloudURL}")
                     
                     filter_parent_item.addChild(child_item)
                 
@@ -472,8 +491,8 @@ class ImagesWidget(QWidget):
         if not item:
             return
         
-        # Get the filename from column 10
-        filename = item.text(10)  # Filename is in column 10
+        # Get the filename from column 11
+        filename = item.text(11)  # Filename is in column 11
         
         # Only show context menu for leaf items with a valid filename
         # This handles both 2-level (Object→File, Date→File) and 3-level (Filter→Object→File) hierarchies
@@ -632,8 +651,8 @@ class ImagesWidget(QWidget):
     
     def on_item_double_clicked(self, item, column):
         """Handle double-click on tree widget items"""
-        # Get the filename from column 10
-        filename = item.text(10)  # Filename is in column 10
+        # Get the filename from column 11
+        filename = item.text(11)  # Filename is in column 11
         
         # Only open files that have a filename (leaf items)
         # This handles both 2-level (Object→File, Date→File) and 3-level (Filter→Object→File) hierarchies
@@ -682,7 +701,22 @@ class ImagesWidget(QWidget):
         except Exception as e:
             logger.error(f"Error opening download dialog: {e}")
             QMessageBox.critical(self, "Error", f"Error opening download dialog: {e}")
-    
+
+    def show_repo_folder(self):
+        """Open the repository folder in the OS file browser."""
+        try:
+            config = configparser.ConfigParser()
+            config.read('astrofiler.ini')
+            repo_path = config.get('DEFAULT', 'repo', fallback='.')
+            repo_path = os.path.abspath(repo_path)
+            if not os.path.isdir(repo_path):
+                QMessageBox.warning(self, "Show Repo", f"Repository folder not found:\n{repo_path}")
+                return
+            QDesktopServices.openUrl(QUrl.fromLocalFile(repo_path))
+        except Exception as e:
+            logger.error(f"Error opening repo folder: {e}")
+            QMessageBox.critical(self, "Error", f"Could not open repository folder:\n{e}")
+
     def load_repo(self):
         """Load the repository by running registerFitsImages with progress dialog."""
         try:
@@ -920,6 +954,9 @@ class ImagesWidget(QWidget):
                 
                 # Delete all fitsFile records from the database
                 deleted_files = FitsFileModel.delete().execute()
+
+                # Delete all masters records from the database
+                MastersModel.delete().execute()
                 
                 logger.info(f"Cleared repository before sync: {deleted_sessions} sessions, {deleted_files} files")
             except Exception as e:
@@ -1081,6 +1118,9 @@ class ImagesWidget(QWidget):
                 
                 # Delete all fitsFile records from the database
                 deleted_files = FitsFileModel.delete().execute()
+
+                # Delete all masters records from the database
+                MastersModel.delete().execute()
                 
                 QMessageBox.information(self, "Repository Cleared", 
                                       f"Repository has been cleared.\n\nDeleted {deleted_sessions} sessions and {deleted_files} files from database.")

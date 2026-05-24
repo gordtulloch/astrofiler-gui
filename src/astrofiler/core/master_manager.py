@@ -28,6 +28,7 @@ from typing import Optional, Dict, Any, List, Callable
 
 from ..models import Masters, fitsSession, fitsFile, db
 from ..config import get_temp_folder
+from .utils import fits_image_data
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ class MasterFrameManager:
             from PIL import Image
 
             with fits.open(stacked_fits_path) as hdul:
-                data = hdul[0].data
+                data, _ = fits_image_data(hdul)
             if data is None:
                 return None
 
@@ -926,15 +927,17 @@ class MasterFrameManager:
                 progress_callback(0, 100, f"Loading {len(file_paths)} light frames...")
 
             with fits.open(file_paths[0]) as hdul:
-                header = hdul[0].header.copy()
-                data_shape = hdul[0].data.shape
+                _d0, header = fits_image_data(hdul)
+                header = header.copy()
+                data_shape = _d0.shape
 
             # Prepare reference
             candidate = reference_path if (reference_path and os.path.exists(reference_path)) else file_paths[0]
             ref_path = candidate
             with fits.open(candidate) as hdul:
-                ref_full = hdul[0].data.astype(np.float32)
-                ref_header = hdul[0].header.copy()
+                _ref_d, _ref_h = fits_image_data(hdul)
+                ref_full = _ref_d.astype(np.float32)
+                ref_header = _ref_h.copy()
 
             def _is_astroalign_maxiter_error(exc: Exception) -> bool:
                 max_iter_error = getattr(aa, 'MaxIterError', None)
@@ -1024,8 +1027,7 @@ class MasterFrameManager:
 
                             try:
                                 with fits.open(file_path) as hdul:
-                                    src_header = hdul[0].header
-
+                                    _, src_header = fits_image_data(hdul)
                                 src_wcs = WCS(src_header)
                                 dst_wcs = WCS(ref_header)
                                 if not (getattr(src_wcs, 'has_celestial', False) and getattr(dst_wcs, 'has_celestial', False)):
@@ -1068,7 +1070,8 @@ class MasterFrameManager:
             for i, file_path in enumerate(file_paths):
                 try:
                     with fits.open(file_path) as hdul:
-                        if hdul[0].data.shape != data_shape:
+                        _fd, _ = fits_image_data(hdul)
+                        if _fd is None or _fd.shape != data_shape:
                             logger.warning("Skipping file with different dimensions: %s", file_path)
                             continue
                     valid_files.append(file_path)
@@ -1087,7 +1090,8 @@ class MasterFrameManager:
 
             for i, file_path in enumerate(valid_files):
                 with fits.open(file_path) as hdul:
-                    data = hdul[0].data.astype(np.float32)
+                    _fd, _ = fits_image_data(hdul)
+                    data = _fd.astype(np.float32)
                 data = _register_to_reference(data, file_path)
                 mask = np.isfinite(data)
                 accumulator += np.where(mask, data, 0.0).astype(np.float64, copy=False)
@@ -1147,16 +1151,18 @@ class MasterFrameManager:
             
             # Read first file to get dimensions and header
             with fits.open(file_paths[0]) as hdul:
-                header = hdul[0].header.copy()
-                data_shape = hdul[0].data.shape
+                _d0, _h0 = fits_image_data(hdul)
+                header = _h0.copy()
+                data_shape = _d0.shape
                 data_stack = np.zeros((len(file_paths), *data_shape), dtype=np.float32)
-                data_stack[0] = hdul[0].data.astype(np.float32)
+                data_stack[0] = _d0.astype(np.float32)
             
             # Read remaining files
             for i, file_path in enumerate(file_paths[1:], 1):
                 try:
                     with fits.open(file_path) as hdul:
-                        data_stack[i] = hdul[0].data.astype(np.float32)
+                        _fd, _ = fits_image_data(hdul)
+                        data_stack[i] = _fd.astype(np.float32)
                 except Exception as e:
                     logger.warning(f"Skipping corrupted file {file_path}: {e}")
                     continue
@@ -1290,7 +1296,8 @@ class MasterFrameManager:
                         from astropy.io import fits
                         with fits.open(master.file_path) as hdul:
                             # Basic validation - check if we can read the data
-                            _ = hdul[0].data.shape
+                            _vd, _ = fits_image_data(hdul)
+                            _ = _vd.shape
                     except Exception as e:
                         results['corrupted_files'] += 1
                         results['invalid_masters'] += 1
