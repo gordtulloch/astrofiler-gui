@@ -91,10 +91,17 @@ class RepositoryManager:
                     self.repoFolder, 'Light', object_safe, 
                     telescope_safe, instrument_safe, date_str
                 )
-            elif imagetyp in ['BIAS', 'DARK', 'FLAT']:
+            elif 'DARK' in imagetyp or 'FLAT' in imagetyp or 'BIAS' in imagetyp:
                 # Calibration frames: Calibrate/{TYPE}/{TELESCOPE}/{INSTRUMENT}/
+                # Normalize the type name to the canonical short form
+                if 'DARK' in imagetyp:
+                    cal_type = 'DARK'
+                elif 'FLAT' in imagetyp:
+                    cal_type = 'FLAT'
+                else:
+                    cal_type = 'BIAS'
                 dest_dir = os.path.join(
-                    self.repoFolder, 'Calibrate', imagetyp,
+                    self.repoFolder, 'Calibrate', cal_type,
                     telescope_safe, instrument_safe
                 )
             else:

@@ -1,5 +1,5 @@
 [Desktop Entry]
-Version=1.0
+Version=1.2.3
 Name=AstroFiler
 Comment=Astronomy File Management Tool
 Exec=ASTROFILER_PATH/install/launch_astrofiler.sh

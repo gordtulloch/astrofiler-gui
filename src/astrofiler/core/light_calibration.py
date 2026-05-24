@@ -18,10 +18,12 @@ Key Features:
 - Consistent cal_ prefix naming convention
 
 Calibration Formula:
-    Calibrated = (Light - (Dark - Bias)) / NormalizedFlat
+    Calibrated = (Light - (Dark - Bias)) / ((Flat - (Dark - Bias)) / mean(Flat - (Dark - Bias)))
 
 Note: Dark masters contain uncorrected bias signal, so bias is subtracted
-from the dark master before applying it to light frames.
+from the dark master before applying it to both the light frame and the
+flat frame. No dark scaling is performed — all darks are taken at the
+same exposure time as the light frames.
 """
 
 import os
@@ -33,7 +35,7 @@ from typing import Optional, Callable, Dict, List, Any
 from astropy.io import fits
 from ..models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 from ..models.masters import Masters
-from .utils import normalize_file_path 
+from .utils import normalize_file_path, fits_image_data as _fits_image_data
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +47,11 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
     
     This function applies the standard astronomical calibration pipeline:
     1. Bias correction of dark master (Dark - Bias) to remove bias signal from dark
-    2. Dark subtraction (Light - BiasCorrectDark) to remove thermal noise
-    3. Flat field correction with full-frame median normalization
+    2. Dark subtraction from light: Light - (Dark - Bias)
+    3. Flat field correction: subtract the bias-corrected dark (Dark - Bias) from the
+       flat master, normalize by mean, then divide the calibrated light by the result.
     
-    The calibration formula is: (Light - (Dark - Bias)) / (Flat / median(Flat))
+    The calibration formula is: (Light - (Dark - Bias)) / ((Flat - (Dark - Bias)) / mean(Flat - (Dark - Bias)))
     
     IMPORTANT: Dark masters created by AstroFiler contain uncorrected bias signal
     because bias is not subtracted during dark master creation. This function
@@ -88,9 +91,17 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
             progress_callback("Loading light frame...")
             
         with fits.open(light_path) as hdul:
-            original_data = hdul[0].data
-            light_header = hdul[0].header.copy()
-            
+            # Primary HDU may be empty on multi-extension FITS; search all HDUs for image data
+            original_data = None
+            light_header = None
+            for hdu in hdul:
+                if hdu.data is not None and hdu.data.ndim >= 2:
+                    original_data = hdu.data
+                    light_header = hdu.header.copy()
+                    break
+            if light_header is None:
+                light_header = hdul[0].header.copy()
+
             if original_data is None:
                 return {"error": "No image data found in light frame"}
             
@@ -100,11 +111,9 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         if light_data.size == 0:
             return {"error": "No image data found in light frame"}
         
-        # Get light frame exposure time for dark scaling
-        light_exptime = float(light_header.get('EXPTIME', light_header.get('EXPOSURE', 1.0)))
-        
         calibrated_data = light_data.copy()
         calibration_steps = []
+        corrected_dark = None  # bias-corrected dark, reused for flat correction
         
         # =================================================================
         # STEP 1: DARK SUBTRACTION (or BIAS if no dark available)
@@ -121,36 +130,24 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                 progress_callback("Applying dark correction...")
             try:
                 with fits.open(dark_master) as hdul:
-                    dark_data = hdul[0].data.astype(np.float64)
-                    dark_header = hdul[0].header
+                    _dark_raw, dark_header = _fits_image_data(hdul)
+                    if _dark_raw is None:
+                        raise ValueError("No image data found in dark master")
+                    dark_data = _dark_raw.astype(np.float64)
                     
                     # Validate dimensions match
                     if dark_data.shape != calibrated_data.shape:
                         raise ValueError(f"Dark frame shape {dark_data.shape} doesn't match light frame {calibrated_data.shape}")
                     
-                    # Get dark exposure time for scaling
-                    dark_exptime = float(dark_header.get('EXPTIME', dark_header.get('EXPOSURE', light_exptime)))
-                    
-                    # DISABLED: Dark frame scaling - use closest matching dark instead
-                    # # Scale dark frame if exposure times differ
-                    # if abs(dark_exptime - light_exptime) > 0.01:  # Allow small floating point differences
-                    #     scale_factor = light_exptime / dark_exptime
-                    #     dark_scaled = dark_data * scale_factor
-                    #     logger.info(f"Scaling dark frame: {dark_exptime}s -> {light_exptime}s (factor: {scale_factor:.3f})")
-                    #     calibration_steps.append(f"DARK: {os.path.basename(dark_master)} (scaled {scale_factor:.3f}x)")
-                    # else:
-                    #     dark_scaled = dark_data
-                    #     calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
-                    
-                    # Use dark directly without scaling - ensure dark exposure matches light
-                    dark_scaled = dark_data
-                    
-                    # CRITICAL FIX: Subtract bias from dark master before applying
+                    # CRITICAL FIX: Subtract bias master from dark master before applying
                     # Dark masters contain bias signal that must be removed
                     if bias_master and os.path.exists(bias_master):
                         try:
                             with fits.open(bias_master) as bias_hdul:
-                                bias_data = bias_hdul[0].data.astype(np.float64)
+                                _bias_raw, _ = _fits_image_data(bias_hdul)
+                                if _bias_raw is None:
+                                    raise ValueError("No image data found in bias master")
+                                bias_data = _bias_raw.astype(np.float64)
                                 
                                 # Validate bias dimensions match
                                 if bias_data.shape != dark_scaled.shape:
@@ -158,18 +155,17 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                                 else:
                                     # Remove bias from dark to get true thermal noise
                                     dark_scaled = dark_scaled - bias_data
-                                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s) - BIAS corrected")
+                                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} - BIAS corrected")
                                     logger.info(f"Bias-corrected dark frame: bias mean={np.mean(bias_data):.2f} ADU removed")
                         except Exception as e:
                             logger.warning(f"Failed to load bias for dark correction: {e}, using uncorrected dark")
-                            calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s) - NO BIAS CORRECTION")
+                            calibration_steps.append(f"DARK: {os.path.basename(dark_master)} - NO BIAS CORRECTION")
                     else:
                         logger.warning("No bias master available - dark correction will leave residual bias signal")
-                        calibration_steps.append(f"DARK: {os.path.basename(dark_master)} ({dark_exptime}s) - NO BIAS CORRECTION")
-                    
-                    logger.info(f"Using dark frame: {dark_exptime}s (light exposure: {light_exptime}s)")
+                        calibration_steps.append(f"DARK: {os.path.basename(dark_master)} - NO BIAS CORRECTION")
                     
                     # Apply: Light - (Dark - Bias) 
+                    corrected_dark = dark_data
                     calibrated_data = calibrated_data - dark_scaled
                     logger.debug(f"Applied dark correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
                     
@@ -184,7 +180,10 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                 progress_callback("Applying bias correction...")
             try:
                 with fits.open(bias_master) as hdul:
-                    bias_data = hdul[0].data.astype(np.float64)
+                    _bias_raw, _ = _fits_image_data(hdul)
+                    if _bias_raw is None:
+                        raise ValueError("No image data found in bias master")
+                    bias_data = _bias_raw.astype(np.float64)
                     
                     # Validate dimensions match
                     if bias_data.shape != calibrated_data.shape:
@@ -202,29 +201,42 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         # =================================================================
         # STEP 2: FLAT FIELD CORRECTION
         # =================================================================
-        # Normalize flat by full-frame median and divide
+        # Subtract master dark from flat, normalize by mean, then divide
         
         if flat_master and os.path.exists(flat_master):
             if progress_callback:
                 progress_callback("Applying flat correction...")
             try:
                 with fits.open(flat_master) as hdul:
-                    flat_data = hdul[0].data.astype(np.float64)
+                    _flat_raw, _ = _fits_image_data(hdul)
+                    if _flat_raw is None:
+                        raise ValueError("No image data found in flat master")
+                    flat_data = _flat_raw.astype(np.float64)
                     
                     # Validate dimensions match
                     if flat_data.shape != calibrated_data.shape:
                         raise ValueError(f"Flat frame shape {flat_data.shape} doesn't match light frame {calibrated_data.shape}")
                     
-                    # Normalize flat field by its FULL FRAME median (standard approach)
-                    flat_median = np.median(flat_data)
+                    # Subtract bias-corrected dark (Dark - Bias) from flat to remove
+                    # the bias pedestal and thermal signal. corrected_dark was already
+                    # computed in Step 1 and contains Dark - Bias with no scaling applied.
+                    flat_corrected = False
+                    if corrected_dark is not None and corrected_dark.shape == flat_data.shape:
+                        flat_data = flat_data - corrected_dark
+                        flat_corrected = True
+                        logger.info("Subtracted bias-corrected dark (Dark - Bias) from flat master")
+                    elif corrected_dark is not None:
+                        logger.warning("Corrected dark shape doesn't match flat shape, skipping dark subtraction from flat")
+
+                    # Normalize flat field by its mean value
+                    flat_mean = np.mean(flat_data)
                     
-                    if flat_median <= 0:
-                        raise ValueError("Flat frame median is zero or negative")
+                    if flat_mean <= 0:
+                        raise ValueError("Flat frame mean is zero or negative after bias subtraction")
                     
-                    flat_normalized = flat_data / flat_median
+                    flat_normalized = flat_data / flat_mean
                     
                     # Protect against division by very small values
-                    # Use a threshold of 10% of normalized median (0.1)
                     threshold = 0.1
                     mask = flat_normalized < threshold
                     if np.any(mask):
@@ -233,7 +245,8 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                     
                     # Apply flat correction
                     calibrated_data = calibrated_data / flat_normalized
-                    calibration_steps.append(f"FLAT: {os.path.basename(flat_master)} (median: {flat_median:.1f})")
+                    correction_note = "dark-corrected" if flat_corrected else "raw"
+                    calibration_steps.append(f"FLAT: {os.path.basename(flat_master)} ({correction_note}, mean: {flat_mean:.1f})")
                     logger.debug(f"Applied flat correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
                     
             except Exception as e:

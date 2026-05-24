@@ -28,8 +28,51 @@ from typing import Optional, Dict, Any, List, Callable
 
 from ..models import Masters, fitsSession, fitsFile, db
 from ..config import get_temp_folder
+from .utils import fits_image_data
 
 logger = logging.getLogger(__name__)
+
+# Configure SEP to handle crowded star fields better
+try:
+    import sep
+    # Increase the default sub-object limit to handle dense star fields.
+    # The default is 1024; we set it higher to avoid deblending overflow on
+    # crowded fields (the error manifests as a TypeError in astroalign).
+    sep.set_sub_object_limit(65536)
+    logger.info(f"SEP sub-object limit set to {sep.get_sub_object_limit()}")
+except ImportError:
+    pass  # SEP not available; astroalign will still work but may fail on crowded fields
+except Exception as e:
+    logger.warning(f"Could not configure SEP settings: {e}")
+
+
+def configure_sep_for_crowded_fields() -> bool:
+    """Raise the SEP sub-object limit to handle very crowded star fields."""
+    try:
+        import sep
+        sep.set_sub_object_limit(131072)
+        logger.info(f"SEP configured for crowded fields with sub-object limit: {sep.get_sub_object_limit()}")
+        return True
+    except ImportError:
+        logger.warning("SEP not available - cannot configure for crowded fields")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to configure SEP for crowded fields: {e}")
+        return False
+
+
+def reset_sep_defaults() -> bool:
+    """Reset SEP sub-object limit back to the module-level default (65536)."""
+    try:
+        import sep
+        sep.set_sub_object_limit(65536)
+        logger.info(f"SEP reset to defaults with sub-object limit: {sep.get_sub_object_limit()}")
+        return True
+    except ImportError:
+        return False
+    except Exception as e:
+        logger.error(f"Failed to reset SEP settings: {e}")
+        return False
 
 
 def check_symlink_support():
@@ -142,7 +185,7 @@ class MasterFrameManager:
             from PIL import Image
 
             with fits.open(stacked_fits_path) as hdul:
-                data = hdul[0].data
+                data, _ = fits_image_data(hdul)
             if data is None:
                 return None
 
@@ -543,8 +586,46 @@ class MasterFrameManager:
                         aligned[footprint] = np.nan
                     return aligned
                 except Exception as e:
-                    # If astroalign can't find a match, fall back to stacking the unaligned image.
-                    if _is_astroalign_maxiter_error(e):
+                    # SEP deblending overflow causes astroalign to raise TypeError
+                    # ("Input type for target not supported"). Retry once with a
+                    # higher sub-object limit before falling back to unaligned stacking.
+                    if ("deblending overflow" in str(e) or "sub-objects reached" in str(e) or
+                            "object deblending overflow" in str(e)):
+                        try:
+                            import sep as _sep
+                            _orig_limit = _sep.get_sub_object_limit()
+                            _sep.set_sub_object_limit(_orig_limit * 4)
+                            logger.info(
+                                "Increased SEP sub-object limit to %d for %s",
+                                _sep.get_sub_object_limit(),
+                                os.path.basename(file_path),
+                            )
+                            try:
+                                aligned, footprint = aa.register(
+                                    data.astype(np.float32, copy=False), ref_full, fill_value=np.nan
+                                )
+                                aligned = aligned.astype(np.float32, copy=False)
+                                if footprint is not None:
+                                    aligned = aligned.copy()
+                                    aligned[footprint] = np.nan
+                                return aligned
+                            finally:
+                                _sep.set_sub_object_limit(_orig_limit)
+                        except ImportError:
+                            pass
+                        except Exception as retry_e:
+                            e = retry_e  # Fall through with the retry error
+
+                    # Fall back for any registration failure we can recover from.
+                    should_fallback = (
+                        _is_astroalign_maxiter_error(e) or
+                        isinstance(e, TypeError) or
+                        "Input type for target not supported" in str(e) or
+                        "deblending overflow" in str(e) or
+                        "sub-objects reached" in str(e) or
+                        "object deblending overflow" in str(e)
+                    )
+                    if should_fallback:
                         def _try_wcs_reproject() -> Optional[np.ndarray]:
                             if ref_header is None or ref_full is None:
                                 return None
@@ -854,15 +935,17 @@ class MasterFrameManager:
                 progress_callback(0, 100, f"Loading {len(file_paths)} light frames...")
 
             with fits.open(file_paths[0]) as hdul:
-                header = hdul[0].header.copy()
-                data_shape = hdul[0].data.shape
+                _d0, header = fits_image_data(hdul)
+                header = header.copy()
+                data_shape = _d0.shape
 
             # Prepare reference
             candidate = reference_path if (reference_path and os.path.exists(reference_path)) else file_paths[0]
             ref_path = candidate
             with fits.open(candidate) as hdul:
-                ref_full = hdul[0].data.astype(np.float32)
-                ref_header = hdul[0].header.copy()
+                _ref_d, _ref_h = fits_image_data(hdul)
+                ref_full = _ref_d.astype(np.float32)
+                ref_header = _ref_h.copy()
 
             def _is_astroalign_maxiter_error(exc: Exception) -> bool:
                 max_iter_error = getattr(aa, 'MaxIterError', None)
@@ -889,7 +972,48 @@ class MasterFrameManager:
                         aligned[footprint] = np.nan
                     return aligned
                 except Exception as e:
-                    if _is_astroalign_maxiter_error(e):
+                    # SEP deblending overflow causes astroalign to raise TypeError
+                    # ("Input type for target not supported"). Retry once with a
+                    # higher sub-object limit before falling back to unaligned stacking.
+                    if ("deblending overflow" in str(e) or "sub-objects reached" in str(e) or
+                            "object deblending overflow" in str(e)):
+                        try:
+                            import sep as _sep
+                            _orig_limit = _sep.get_sub_object_limit()
+                            _sep.set_sub_object_limit(_orig_limit * 4)
+                            logger.info(
+                                "Increased SEP sub-object limit to %d for %s",
+                                _sep.get_sub_object_limit(),
+                                os.path.basename(file_path),
+                            )
+                            try:
+                                aligned, footprint = aa.register(
+                                    data.astype(np.float32, copy=False),
+                                    ref_full,
+                                    fill_value=np.nan,
+                                )
+                                aligned = aligned.astype(np.float32, copy=False)
+                                if footprint is not None:
+                                    aligned = aligned.copy()
+                                    aligned[footprint] = np.nan
+                                return aligned
+                            finally:
+                                _sep.set_sub_object_limit(_orig_limit)
+                        except ImportError:
+                            pass
+                        except Exception as retry_e:
+                            e = retry_e  # Fall through with the retry error
+
+                    # Fall back for any registration failure we can recover from.
+                    should_fallback = (
+                        _is_astroalign_maxiter_error(e) or
+                        isinstance(e, TypeError) or
+                        "Input type for target not supported" in str(e) or
+                        "deblending overflow" in str(e) or
+                        "sub-objects reached" in str(e) or
+                        "object deblending overflow" in str(e)
+                    )
+                    if should_fallback:
                         def _try_wcs_reproject() -> Optional[np.ndarray]:
                             if ref_full is None:
                                 return None
@@ -911,8 +1035,7 @@ class MasterFrameManager:
 
                             try:
                                 with fits.open(file_path) as hdul:
-                                    src_header = hdul[0].header
-
+                                    _, src_header = fits_image_data(hdul)
                                 src_wcs = WCS(src_header)
                                 dst_wcs = WCS(ref_header)
                                 if not (getattr(src_wcs, 'has_celestial', False) and getattr(dst_wcs, 'has_celestial', False)):
@@ -955,7 +1078,8 @@ class MasterFrameManager:
             for i, file_path in enumerate(file_paths):
                 try:
                     with fits.open(file_path) as hdul:
-                        if hdul[0].data.shape != data_shape:
+                        _fd, _ = fits_image_data(hdul)
+                        if _fd is None or _fd.shape != data_shape:
                             logger.warning("Skipping file with different dimensions: %s", file_path)
                             continue
                     valid_files.append(file_path)
@@ -974,7 +1098,8 @@ class MasterFrameManager:
 
             for i, file_path in enumerate(valid_files):
                 with fits.open(file_path) as hdul:
-                    data = hdul[0].data.astype(np.float32)
+                    _fd, _ = fits_image_data(hdul)
+                    data = _fd.astype(np.float32)
                 data = _register_to_reference(data, file_path)
                 mask = np.isfinite(data)
                 accumulator += np.where(mask, data, 0.0).astype(np.float64, copy=False)
@@ -1036,16 +1161,18 @@ class MasterFrameManager:
             
             # Read first file to get dimensions and header
             with fits.open(file_paths[0]) as hdul:
-                header = hdul[0].header.copy()
-                data_shape = hdul[0].data.shape
+                _d0, _h0 = fits_image_data(hdul)
+                header = _h0.copy()
+                data_shape = _d0.shape
                 data_stack = np.zeros((len(file_paths), *data_shape), dtype=np.float32)
-                data_stack[0] = hdul[0].data.astype(np.float32)
+                data_stack[0] = _d0.astype(np.float32)
             
             # Read remaining files
             for i, file_path in enumerate(file_paths[1:], 1):
                 try:
                     with fits.open(file_path) as hdul:
-                        data_stack[i] = hdul[0].data.astype(np.float32)
+                        _fd, _ = fits_image_data(hdul)
+                        data_stack[i] = _fd.astype(np.float32)
                 except Exception as e:
                     logger.warning(f"Skipping corrupted file {file_path}: {e}")
                     continue
@@ -1179,7 +1306,8 @@ class MasterFrameManager:
                         from astropy.io import fits
                         with fits.open(master.file_path) as hdul:
                             # Basic validation - check if we can read the data
-                            _ = hdul[0].data.shape
+                            _vd, _ = fits_image_data(hdul)
+                            _ = _vd.shape
                     except Exception as e:
                         results['corrupted_files'] += 1
                         results['invalid_masters'] += 1

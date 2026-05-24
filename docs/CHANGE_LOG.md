@@ -1,5 +1,34 @@
 # AstroFiler Change Log
 
+## Version 1.2.3
+
+### New Features
+
+- **Show Repo Button**: Added "Show Repo" button to the right of Download in the Images toolbar — opens the configured repository folder in the OS file browser
+- **Binning Column — Files View**: New Binning column (after Filter) displays `XBinning x YBinning` (e.g. `2x2`) for each file
+- **Binning Column — Sessions View**: New Binning column (after Filter) added to the Sessions view, consistent with the Files view
+
+### Enhancements
+
+- **LoadRepo Now Loads Masters**: `LoadRepo` was calling `registerFitsImages()` (which explicitly skips master frames) but never called `registerMasters()`. Added a `processor.registerMasters(moveFiles=True, ...)` call after `registerFitsImages()` so master DARK/FLAT/BIAS frames are moved to the repository and recorded in the `Masters` table
+- **LoadRepo Cleans Up Empty Masters Folder**: After `registerMasters()` runs, `LoadRepo` now removes the `Masters/` subdirectory from the source folder if it is empty; warns and leaves it in place if it still contains files
+- **F5 Shortcut Works in Images View**: The "Update Current View" `QAction` shortcut context was `Qt.WindowShortcut` (the default), so the focused `QTreeWidget` intercepted F5 before the action could fire. Changed to `Qt.ApplicationShortcut` so F5 works regardless of which child widget has focus
+
+### Fixes
+
+- **AutoCalibration CLI Crash — `DatabaseError` Unbound**: `validate_database_access()` imported `DatabaseError` inside a `try` block after calls that could themselves raise; if an earlier statement failed the name was never bound, causing `UnboundLocalError` in the `except` clause. Moved the import above the `try` block so it is always available
+- **`master_manager.py` Syntax Error on Line 1030**: An empty `with fits.open(...) as hdul:` block (missing indented body) caused a `SyntaxError` at startup. Re-indented the `fits_image_data(hdul)` call into the `with` block and added the missing `src_wcs = WCS(src_header)` assignment
+- **Calibration Files Not Routed to Repository**: DARK, FLAT, and BIAS frames were staying in the incoming folder because IMAGETYP matching used exact strings (`'DARK'`, `'FLAT'`, `'BIAS'`). Changed to substring matching (e.g. `'Dark Frame'`, `'Flat Field'`) consistent with how Light frames are detected
+- **Spurious .backup Files Created During Import**: Removed the unnecessary `.backup` copy that was written alongside each modified FITS header during import
+- **Filter Set on DARK/BIAS Frames**: DARK and BIAS frames now always have their filter field set to blank/null regardless of what the FITS header contains
+- **Empty Folders Not Cleaned Up After Import**: After each import run, the incoming folder tree is now walked bottom-up and empty subdirectories are removed (non-empty folders are silently skipped)
+- **Resources Column Shows False Masters**: Sessions view was showing MasterDark/MasterFlat/MasterBias in the Resources column even when no masters had been created, due to an overly broad equipment-based match. Resources now shows calibration frame counts (Dark/Flat/Bias) when no masters exist
+- **Masters Table Not Cleared With Files**: Clearing files or regenerating sessions now also clears the masters table, so stale master records no longer appear after a repo reset
+- **FITS Compressed File Support Throughout**: All commands and calibration pipelines now correctly read tile-compressed FITS files (Rice, GZIP-1/2, HCOMPRESS, PLIO) by iterating all HDUs to find image data rather than assuming `hdul[0]` — affects `light_calibration.py`, `master_manager.py`, `enhanced_quality.py`, and `telescope.py`. A shared `fits_image_data()` helper in `utils.py` centralises this logic
+- **Auto-Calibration Fails on Multi-Extension FITS** (PR #34): Fixed `NoneType.astype()` crash when the primary HDU has no data in multi-extension or compressed FITS files; also fixed a progress callback arity mismatch (`file_progress` accepted 2 args but was called with 3) that caused quality assessment to silently cancel every file
+- **F5 Refresh Not Working in Images View** (PR #36): `showEvent` in `main_window.py` contained severely duplicated code blocks (45 extra lines) that prevented the F5 / Refresh Current View shortcut from reloading the Images view
+- **Stack Cancellation Shown as Error** (PR #38): `RuntimeError("Stack cancelled by user")` was being caught by broad `except Exception` handlers inside `_create_master_sigma_clip` and `_create_light_stack_photometric_mean`, logging it as a stacking failure and showing a "Stack Failed" dialog instead of a clean cancellation. Fixed by adding `except RuntimeError: raise` guards before each broad handler, and ensuring progress dialogs are closed cleanly on cancellation
+
 ## Version 1.2.0
 
 - **Quality Analysis Consolidation**: Replaced basic `QualityAnalyzer` with `EnhancedQualityAnalyzer` as the sole quality assessment system

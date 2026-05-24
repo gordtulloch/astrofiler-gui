@@ -497,6 +497,10 @@ class FileProcessor:
                 else:
                     logger.debug(f"Marking file as pre-calibrated from SeeStar instrument: {instrument}")
             
+            # Determine filter: blank for DARK and BIAS frames
+            image_type_upper = image_type.upper()
+            fits_filter = None if ('DARK' in image_type_upper or 'BIAS' in image_type_upper) else hdr.get("FILTER", None)
+
             # Create new file record
             if hdr.get("OBJECT"):
                 newfile = FitsFileModel.create(
@@ -511,7 +515,7 @@ class FileProcessor:
                     fitsFileCCDTemp=hdr.get("CCD-TEMP", 0),
                     fitsFileTelescop=telescope,
                     fitsFileInstrument=instrument,
-                    fitsFileFilter=hdr.get("FILTER", None),
+                    fitsFileFilter=fits_filter,
                     fitsFileHash=fileHash,
                     fitsFileSession=None,
                     fitsFileCalibrated=1 if is_precalibrated else 0
@@ -529,7 +533,7 @@ class FileProcessor:
                     fitsFileCCDTemp=hdr.get("CCD-TEMP", 0),
                     fitsFileTelescop=telescope,
                     fitsFileInstrument=instrument,
-                    fitsFileFilter=hdr.get("FILTER", None),
+                    fitsFileFilter=fits_filter,
                     fitsFileHash=fileHash,
                     fitsFileSession=None,
                     fitsFileCalibrated=1 if is_precalibrated else 0
@@ -842,11 +846,6 @@ class FileProcessor:
         # Save modified header if required
         if header_modified and save_modified:
             try:
-                # Create backup of original file
-                backup_path = os.path.join(root, file + ".backup")
-                import shutil
-                shutil.copy2(os.path.join(root, file), backup_path)
-                
                 # Save modified header
                 with fits.open(os.path.join(root, file), mode='update') as hdul:
                     hdul[0].header = hdr

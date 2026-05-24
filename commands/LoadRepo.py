@@ -349,7 +349,38 @@ Note:
             # Backward compatibility for old return format
             registered_files = result
             duplicate_count = 0
-        
+
+        # Register any master calibration frames found in the source folder.
+        # registerFitsImages() skips master files, so they must be handled separately.
+        logger.info("Scanning for master calibration frames...")
+        try:
+            master_ids = processor.registerMasters(
+                moveFiles=True,
+                source_folder=source_folder,
+                progress_callback=None,
+            )
+            if master_ids:
+                logger.info(f"Registered {len(master_ids)} master calibration frame(s)")
+            else:
+                logger.info("No master calibration frames found")
+        except Exception as e:
+            logger.warning(f"Master calibration frame registration failed: {e}")
+            if args.verbose:
+                import traceback
+                logger.warning(traceback.format_exc())
+
+        # Remove the Masters subfolder from the source folder if it is now empty.
+        masters_source_dir = os.path.join(source_folder, 'Masters')
+        if os.path.isdir(masters_source_dir):
+            try:
+                if not os.listdir(masters_source_dir):
+                    os.rmdir(masters_source_dir)
+                    logger.info(f"Removed empty Masters folder: {masters_source_dir}")
+                else:
+                    logger.warning(f"Masters folder not empty, skipping removal: {masters_source_dir}")
+            except Exception as e:
+                logger.warning(f"Could not remove Masters folder {masters_source_dir}: {e}")
+
         # Report results
         logger.info(f"=== Processing Complete ===")
         logger.info(f"Files processed: {len(registered_files)}")

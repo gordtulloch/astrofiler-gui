@@ -16,6 +16,31 @@ from ..types import FilePath, FitsHeaderDict
 logger = logging.getLogger(__name__)
 
 
+def fits_image_data(hdul):
+    """Return (data, header) for the first HDU with 2-D+ image data.
+
+    Handles plain FITS, multi-extension FITS, and tile-compressed FITS
+    (CompImageHDU). Astropy decompresses tile-compressed HDUs transparently
+    when .data is accessed, so all standard FITS compression types are
+    supported automatically.
+
+    Args:
+        hdul: An open astropy HDUList.
+
+    Returns:
+        Tuple (data, header) where data is a numpy ndarray. If no image HDU is
+        found, returns (None, hdul[0].header).
+    """
+    for hdu in hdul:
+        try:
+            d = hdu.data
+        except Exception:
+            continue
+        if d is not None and getattr(d, 'ndim', 0) >= 2:
+            return d, hdu.header
+    return None, hdul[0].header
+
+
 def normalize_file_path(file_path: Optional[FilePath]) -> Optional[str]:
     """
     Normalize file paths to use forward slashes consistently.

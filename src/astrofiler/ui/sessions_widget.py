@@ -48,7 +48,7 @@ class SessionsWidget(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Object Name", "Thumbnail", "Date", "Telescope", "Imager", "Filter", "Images", "Resources"])
+        self.sessions_tree.setHeaderLabels(["Object Name", "Thumbnail", "Date", "Telescope", "Imager", "Filter", "Binning", "Images", "Resources"])
         self.sessions_tree.setIconSize(QSize(150, 150))
         
         # Enable multi-selection
@@ -61,8 +61,9 @@ class SessionsWidget(QWidget):
         self.sessions_tree.setColumnWidth(3, 150)  # Telescope
         self.sessions_tree.setColumnWidth(4, 150)  # Imager
         self.sessions_tree.setColumnWidth(5, 100)  # Filter
-        self.sessions_tree.setColumnWidth(6, 80)   # Images
-        self.sessions_tree.setColumnWidth(7, 140)  # Resources
+        self.sessions_tree.setColumnWidth(6, 80)   # Binning
+        self.sessions_tree.setColumnWidth(7, 80)   # Images
+        self.sessions_tree.setColumnWidth(8, 140)  # Resources
         
         # Enable context menu
         self.sessions_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -1445,16 +1446,17 @@ class SessionsWidget(QWidget):
                 parent_item.setText(3, "")  # No telescope for parent
                 parent_item.setText(4, "")  # No imager for parent
                 parent_item.setText(5, "")  # No filter for parent
-                parent_item.setText(6, str(total_images))  # Total images for this object
+                parent_item.setText(6, "")  # No binning for parent
+                parent_item.setText(7, str(total_images))  # Total images for this object
                 
                 # Show resource summary for parent
                 if total_light_sessions > 0:
                     cal_percentage = (calibrated_sessions / total_light_sessions) * 100
                     cal_summary = f"{calibrated_sessions}/{total_light_sessions} ({cal_percentage:.0f}%)"
-                    parent_item.setText(7, cal_summary)
-                    parent_item.setToolTip(7, f"Resource Coverage: {calibrated_sessions} of {total_light_sessions} sessions have calibration resources")
+                    parent_item.setText(8, cal_summary)
+                    parent_item.setToolTip(8, f"Resource Coverage: {calibrated_sessions} of {total_light_sessions} sessions have calibration resources")
                 else:
-                    parent_item.setText(7, "")
+                    parent_item.setText(8, "")
                 
                 # Style parent item differently
                 font = parent_item.font(0)
@@ -1488,7 +1490,9 @@ class SessionsWidget(QWidget):
                     child_item.setText(3, session.fitsSessionTelescope or "Unknown")
                     child_item.setText(4, session.fitsSessionImager or "Unknown")
                     child_item.setText(5, session.fitsSessionFilter or "Unknown")
-                    child_item.setText(6, str(session_image_count))  # Image count for this session
+                    binning = f"{session.fitsSessionBinningX}x{session.fitsSessionBinningY}" if session.fitsSessionBinningX and session.fitsSessionBinningY else ""
+                    child_item.setText(6, binning)  # Binning
+                    child_item.setText(7, str(session_image_count))  # Image count for this session
                     
                     # Store session ID in the item for later retrieval
                     child_item.setData(0, Qt.UserRole, session.fitsSessionId)
@@ -1505,15 +1509,15 @@ class SessionsWidget(QWidget):
                     
                     # Set resources status as simple text only
                     if calibration_info["text"]:
-                        child_item.setText(7, calibration_info["text"])
-                        child_item.setToolTip(7, calibration_info["tooltip"])
+                        child_item.setText(8, calibration_info["text"])
+                        child_item.setToolTip(8, calibration_info["tooltip"])
                     else:
-                        child_item.setText(7, "")
+                        child_item.setText(8, "")
                     
                     # Build quality metrics tooltip for all columns
                     quality_tooltip = self._build_quality_tooltip(session)
-                    for col in range(8):  # Apply tooltip to all columns
-                        if col == 7 and calibration_info["tooltip"]:
+                    for col in range(9):  # Apply tooltip to all columns
+                        if col == 8 and calibration_info["tooltip"]:
                             # Combine calibration tooltip with quality metrics
                             combined_tooltip = f"{calibration_info['tooltip']}\n\n{quality_tooltip}"
                             child_item.setToolTip(col, combined_tooltip)
@@ -1909,6 +1913,9 @@ class SessionsWidget(QWidget):
             
             # Delete all sessions
             deleted_count = FitsSessionModel.delete().execute()
+
+            # Delete all masters records
+            Masters.delete().execute()
             
             logger.info(f"Cleared {deleted_count} sessions from database")
             
@@ -2052,6 +2059,9 @@ class SessionsWidget(QWidget):
                 
                 # Delete all sessions
                 deleted_count = FitsSessionModel.delete().execute()
+
+                # Delete all masters records
+                Masters.delete().execute()
                 logger.info(f"Cleared {deleted_count} existing sessions")
                 
                 # Refresh display immediately to show empty sessions

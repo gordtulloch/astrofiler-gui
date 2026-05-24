@@ -169,12 +169,12 @@ def get_auto_calibration_config(config):
 
 def validate_database_access():
     """Validate database connectivity"""
+    from astrofiler.exceptions import DatabaseError
     try:
         ensure_astrofiler_imports()
         
         from astrofiler.database import setup_database
         from astrofiler.models import fitsFile, fitsSession
-        from astrofiler.exceptions import DatabaseError
         
         # Setup database connection
         setup_database()
@@ -685,10 +685,11 @@ def run_complete_workflow(config, session_id=None, force=False, dry_run=False):
         
         # Run the complete workflow
         result = processor.runAutoCalibrationWorkflow(
-            progress_callback=create_cli_progress_callback("Auto-calibration workflow")
+            progress_callback=create_cli_progress_callback("Auto-calibration workflow"),
+            force=force
         )
         
-        if result.get('success', False):
+        if result.get('status') == 'success' or result.get('success', False):
             logging.info("Auto-calibration workflow completed successfully")
             
             # Report results
