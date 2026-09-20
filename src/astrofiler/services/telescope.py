@@ -174,10 +174,9 @@ class SmartTelescopeManager:
         elif telescope_type == 'StellarMate':
             return 'stellarmate' in hostname_lower
         elif telescope_type == 'Celestron Origin':
-            hostname_parts = hostname_lower.replace('-', '.').split('.')
+            hostname_parts = [part for part in hostname_lower.replace('-', '.').split('.') if part]
             return (
                 'origin' in hostname_lower
-                or 'celestron' in hostname_lower
                 or 'origin' in hostname_parts
                 or 'celestron' in hostname_parts
             )
