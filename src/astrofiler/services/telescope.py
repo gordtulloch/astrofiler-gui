@@ -70,7 +70,7 @@ class SmartTelescopeManager:
                 'port': 21
             },
             'Celestron Origin': {
-                'default_hostname': '192.168.1.208',  # To be configured by user (telescope IP)
+                'default_hostname': '192.168.1.208',  # Default IP on the Origin hotspot network
                 'default_username': None,  # Use None for anonymous FTP
                 'default_password': None,  # Use None for anonymous FTP
                 'protocol': 'ftp',  # Plain FTP (not FTPS)
@@ -215,9 +215,15 @@ class SmartTelescopeManager:
                             return ip, None
                         logger.warning(f"Hostname {hostname} doesn't match expected StellarMate pattern")
                         return None, f"Hostname {hostname} doesn't match expected StellarMate pattern"
-                    else:
+                    elif telescope_type in ['Celestron Origin', 'DWARF 3']:
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
+                    elif self.is_target_device(hostname, telescope_type):
+                        logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
+                        return ip, None
+                    else:
+                        logger.warning(f"Hostname {hostname} doesn't match expected {telescope_type} pattern")
+                        return None, f"Hostname {hostname} doesn't match expected {telescope_type} pattern"
 
                 logger.warning(f"Device {hostname} found but service port is closed")
                 return None, f"Device {hostname} found but service port is closed."
