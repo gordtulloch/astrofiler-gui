@@ -16,6 +16,7 @@ from PySide6.QtGui import QFont, QDesktopServices, QIcon, QPixmap, QPainter, QCo
 from PySide6.QtCore import QUrl
 
 from astrofiler.core import fitsProcessing
+from astrofiler.core.utils import session_to_calibration_criteria
 from astrofiler.models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Masters
 
 logger = logging.getLogger(__name__)
@@ -555,18 +556,8 @@ class SessionsWidget(QWidget):
                     if flat_session and flat_session.fitsDarkSession:
                         flat_dark_session = FitsSessionModel.get_by_id(flat_session.fitsDarkSession)
                         if flat_dark_session:
-                            flat_dark_data = {
-                                'telescope': flat_dark_session.fitsSessionTelescope,
-                                'instrument': flat_dark_session.fitsSessionImager,
-                                'exposure_time': flat_dark_session.fitsSessionExposure,
-                                'filter_name': flat_dark_session.fitsSessionFilter,
-                                'binning_x': flat_dark_session.fitsSessionBinningX,
-                                'binning_y': flat_dark_session.fitsSessionBinningY,
-                                'ccd_temp': flat_dark_session.fitsSessionCCDTemp,
-                                'gain': flat_dark_session.fitsSessionGain,
-                                'offset': flat_dark_session.fitsSessionOffset,
-                            }
-                            master_flat_dark = master_manager.find_matching_master(flat_dark_data, 'dark')
+                            flat_dark_data = session_to_calibration_criteria(flat_dark_session)
+                            master_flat_dark = master_manager.find_matching_master(flat_dark_data, 'flatdark')
                             if master_flat_dark and os.path.exists(master_flat_dark.master_path):
                                 master_flat_dark_path = master_flat_dark.master_path
                 except Exception as e:
@@ -1757,11 +1748,15 @@ class SessionsWidget(QWidget):
                 # Fallback for imported masters (no source_session_id): match by session metadata.
                 # For calibration sessions, only show the master type relevant to that session.
                 cal_obj = (session.fitsSessionObjectName or '').strip().lower()
-                if cal_obj in ('bias', 'dark', 'flat', 'flatdark', 'darkflat'):
+                if cal_obj in ('flatdark', 'darkflat'):
+                    flatdark_criteria = session_to_calibration_criteria(session)
+                    matched_flatdark = master_manager.find_matching_master(flatdark_criteria, 'flatdark')
+                    if matched_flatdark and getattr(matched_flatdark, 'master_path', None) and os.path.exists(matched_flatdark.master_path):
+                        mtypes = {'flatdark'}
+                elif cal_obj in ('bias', 'dark', 'flat'):
                     matched = _matching_masters_for_session(session)
-                    expected_master_type = 'dark' if cal_obj in ('flatdark', 'darkflat') else cal_obj
-                    if expected_master_type in matched:
-                        mtypes = {expected_master_type}
+                    if cal_obj in matched:
+                        mtypes = {cal_obj}
             if not mtypes:
                 return {"text": "", "tooltip": "", "percentage": 0}
 

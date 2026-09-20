@@ -135,6 +135,21 @@ def exposures_match(
         return str(exposure_a) == str(exposure_b)
 
 
+def session_to_calibration_criteria(session: Any) -> Dict[str, Any]:
+    """Build master-matching criteria from a session-like object."""
+    return {
+        'telescope': getattr(session, 'fitsSessionTelescope', None),
+        'instrument': getattr(session, 'fitsSessionImager', None),
+        'exposure_time': getattr(session, 'fitsSessionExposure', None),
+        'filter_name': getattr(session, 'fitsSessionFilter', None),
+        'binning_x': getattr(session, 'fitsSessionBinningX', None),
+        'binning_y': getattr(session, 'fitsSessionBinningY', None),
+        'ccd_temp': getattr(session, 'fitsSessionCCDTemp', None),
+        'gain': getattr(session, 'fitsSessionGain', None),
+        'offset': getattr(session, 'fitsSessionOffset', None),
+    }
+
+
 def dwarfFixHeader(hdr: Any, root: str, file: str) -> Union[Any, bool]:
     """
     Fix FITS headers for DWARF telescope files based on folder structure and filenames.

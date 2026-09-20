@@ -90,7 +90,7 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
             master_stats = {
                 'total': masters.count(),
                 'bias': masters.where(Masters.master_type == 'bias').count(),
-                'dark': masters.where(Masters.master_type == 'dark').count(),
+                'dark': masters.where(Masters.master_type.in_(['dark', 'flatdark'])).count(),
                 'flat': masters.where(Masters.master_type == 'flat').count(),
             }
             logging.info(f"Master stats retrieved: {master_stats}")
@@ -147,6 +147,8 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
                 
                 if 'bias' in obj_name:
                     cal_type = 'BIAS'
+                elif 'flatdark' in obj_name or 'darkflat' in obj_name:
+                    cal_type = 'DARK'
                 elif 'dark' in obj_name:
                     cal_type = 'DARK'
                 elif 'flat' in obj_name:
@@ -255,6 +257,8 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
                 
                 if 'bias' in obj_name:
                     cal_type = 'bias'
+                elif 'flatdark' in obj_name or 'darkflat' in obj_name:
+                    cal_type = 'flatdark'
                 elif 'dark' in obj_name:
                     cal_type = 'dark'
                 elif 'flat' in obj_name:

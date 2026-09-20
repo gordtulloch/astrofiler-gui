@@ -27,6 +27,7 @@ from .utils import (
     is_dark_image_type,
     is_flat_dark_image_type,
     is_flat_image_type,
+    normalize_image_type,
 )
 from ..types import FilePath, FitsHeaderDict, ProcessingResult, QualityMetrics
 from ..exceptions import (
@@ -307,7 +308,7 @@ class FileProcessor:
             }
             
             # Add type-specific data
-            if master_type == 'dark':
+            if master_type in ('dark', 'flatdark'):
                 session_data['exposure_time'] = str(hdr.get('EXPTIME', hdr.get('EXPOSURE', '')))
             elif master_type == 'flat':
                 session_data['filter_name'] = hdr.get('FILTER', '')
@@ -384,34 +385,40 @@ class FileProcessor:
             hdr: FITS header
             
         Returns:
-            str or None: 'bias', 'dark', 'flat', or None if undetermined
+            str or None: 'bias', 'dark', 'flat', 'flatdark', or None if undetermined
         """
         # Check filename for master type indicators
-        filename = os.path.basename(file_path).lower()
+        filename = normalize_image_type(os.path.basename(file_path))
         
-        if any(pattern in filename for pattern in ['bias', 'masterbias', 'master_bias', 'bias_master']):
+        if any(pattern in filename for pattern in ['BIAS', 'MASTERBIAS']):
             return 'bias'
-        elif any(pattern in filename for pattern in ['dark', 'masterdark', 'master_dark', 'dark_master']):
+        elif 'FLATDARK' in filename or 'DARKFLAT' in filename:
+            return 'flatdark'
+        elif any(pattern in filename for pattern in ['DARK', 'MASTERDARK']):
             return 'dark'
-        elif any(pattern in filename for pattern in ['flat', 'masterflat', 'master_flat', 'flat_master']):
+        elif any(pattern in filename for pattern in ['FLAT', 'MASTERFLAT']):
             return 'flat'
         
         # Check FITS header
         imagetyp = hdr.get('IMAGETYP', '').upper()
         if 'BIAS' in imagetyp:
             return 'bias'
-        elif 'DARK' in imagetyp:
+        elif is_flat_dark_image_type(imagetyp):
+            return 'flatdark'
+        elif is_dark_image_type(imagetyp):
             return 'dark'
-        elif 'FLAT' in imagetyp:
+        elif is_flat_image_type(imagetyp):
             return 'flat'
         
         # Check OBJECT field for master indicators
-        object_name = hdr.get('OBJECT', '').lower()
-        if 'bias' in object_name or 'master-bias' in object_name:
+        object_name = normalize_image_type(hdr.get('OBJECT', ''))
+        if 'BIAS' in object_name:
             return 'bias'
-        elif 'dark' in object_name or 'master-dark' in object_name:
+        elif 'FLATDARK' in object_name or 'DARKFLAT' in object_name:
+            return 'flatdark'
+        elif 'DARK' in object_name:
             return 'dark'
-        elif 'flat' in object_name or 'master-flat' in object_name:
+        elif 'FLAT' in object_name:
             return 'flat'
         
         return None

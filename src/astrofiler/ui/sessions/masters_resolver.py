@@ -5,6 +5,7 @@ from typing import Iterable, List, Set, Tuple
 
 from ...models import fitsSession as FitsSessionModel
 from ...core.master_manager import get_master_manager
+from ...core.utils import session_to_calibration_criteria
 
 
 def find_matching_masters_for_light_session(session, light_files: Iterable) -> List[Tuple[str, str]]:
@@ -63,18 +64,8 @@ def find_matching_masters_for_light_session(session, light_files: Iterable) -> L
             flat_dark_session_id = getattr(flat_session, 'fitsDarkSession', None)
             if flat_dark_session_id:
                 flat_dark_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == flat_dark_session_id)
-                flat_dark_session_data = {
-                    'telescope': getattr(flat_dark_session, 'fitsSessionTelescope', None),
-                    'instrument': getattr(flat_dark_session, 'fitsSessionImager', None),
-                    'exposure_time': getattr(flat_dark_session, 'fitsSessionExposure', None),
-                    'filter_name': getattr(flat_dark_session, 'fitsSessionFilter', None),
-                    'binning_x': getattr(flat_dark_session, 'fitsSessionBinningX', None),
-                    'binning_y': getattr(flat_dark_session, 'fitsSessionBinningY', None),
-                    'ccd_temp': getattr(flat_dark_session, 'fitsSessionCCDTemp', None),
-                    'gain': getattr(flat_dark_session, 'fitsSessionGain', None),
-                    'offset': getattr(flat_dark_session, 'fitsSessionOffset', None),
-                }
-                master_flat_dark = master_manager.find_matching_master(flat_dark_session_data, 'dark')
+                flat_dark_session_data = session_to_calibration_criteria(flat_dark_session)
+                master_flat_dark = master_manager.find_matching_master(flat_dark_session_data, 'flatdark')
         except FitsSessionModel.DoesNotExist:
             master_flat_dark = None
 

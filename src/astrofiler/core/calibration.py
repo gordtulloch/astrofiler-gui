@@ -43,7 +43,7 @@ class CalibrationProcessor:
             
             from ..models import fitsSession as FitsSessionModel
             
-            results = {'bias_masters': 0, 'dark_masters': 0, 'flat_masters': 0}
+            results = {'bias_masters': 0, 'dark_masters': 0, 'flat_masters': 0, 'flatdark_masters': 0}
             
             # Get sessions to process
             if sessionList:
@@ -61,10 +61,17 @@ class CalibrationProcessor:
                 
                 if not imageType or imageType == 'dark':
                     dark_sessions = FitsSessionModel.select().where(
-                        (FitsSessionModel.fitsSessionObjectName.in_(['dark', 'Dark', 'DARK', 'FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT'])) &
+                        (FitsSessionModel.fitsSessionObjectName.in_(['dark', 'Dark', 'DARK'])) &
                         ((FitsSessionModel.fitsDarkMaster.is_null()) | (FitsSessionModel.fitsDarkMaster == ''))
                     )
                     calibration_sessions.extend(dark_sessions)
+
+                if not imageType or imageType == 'flatdark':
+                    flatdark_sessions = FitsSessionModel.select().where(
+                        (FitsSessionModel.fitsSessionObjectName.in_(['FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT'])) &
+                        ((FitsSessionModel.fitsDarkMaster.is_null()) | (FitsSessionModel.fitsDarkMaster == ''))
+                    )
+                    calibration_sessions.extend(flatdark_sessions)
                 
                 if not imageType or imageType == 'flat':
                     flat_sessions = FitsSessionModel.select().where(
@@ -87,6 +94,8 @@ class CalibrationProcessor:
                     
                     if 'bias' in obj_name:
                         cal_type = 'bias'
+                    elif 'flatdark' in obj_name or 'darkflat' in obj_name:
+                        cal_type = 'flatdark'
                     elif 'dark' in obj_name:
                         cal_type = 'dark'
                     elif 'flat' in obj_name:

@@ -35,7 +35,11 @@ from typing import Optional, Callable, Dict, List, Any
 from astropy.io import fits
 from ..models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
 from ..models.masters import Masters
-from .utils import normalize_file_path, fits_image_data as _fits_image_data
+from .utils import (
+    normalize_file_path,
+    fits_image_data as _fits_image_data,
+    session_to_calibration_criteria,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -567,21 +571,11 @@ def get_session_master_frames(session_id: str) -> Dict[str, Optional[str]]:
                 flat_dark_session_id = getattr(flat_session, 'fitsDarkSession', None)
                 if flat_dark_session_id:
                     flat_dark_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == flat_dark_session_id)
-                    flat_dark_session_data = {
-                        'telescope': flat_dark_session.fitsSessionTelescope,
-                        'instrument': flat_dark_session.fitsSessionImager,
-                        'exposure_time': flat_dark_session.fitsSessionExposure,
-                        'filter_name': flat_dark_session.fitsSessionFilter,
-                        'binning_x': flat_dark_session.fitsSessionBinningX,
-                        'binning_y': flat_dark_session.fitsSessionBinningY,
-                        'ccd_temp': flat_dark_session.fitsSessionCCDTemp,
-                        'gain': flat_dark_session.fitsSessionGain,
-                        'offset': flat_dark_session.fitsSessionOffset,
-                    }
+                    flat_dark_session_data = session_to_calibration_criteria(flat_dark_session)
                     flat_dark_master = Masters.find_matching_master(
                         telescope=flat_dark_session_data.get('telescope'),
                         instrument=flat_dark_session_data.get('instrument'),
-                        master_type='dark',
+                        master_type='flatdark',
                         exposure_time=flat_dark_session_data.get('exposure_time'),
                         binning_x=flat_dark_session_data.get('binning_x'),
                         binning_y=flat_dark_session_data.get('binning_y'),

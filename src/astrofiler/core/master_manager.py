@@ -279,7 +279,7 @@ class MasterFrameManager:
         """
         try:
             criteria = {
-                'exposure_time': session_data.get('exposure_time') if cal_type == 'dark' else None,
+                'exposure_time': session_data.get('exposure_time') if cal_type in ('dark', 'flatdark') else None,
                 'filter_name': session_data.get('filter_name') if cal_type == 'flat' else None,
                 'binning_x': session_data.get('binning_x'),
                 'binning_y': session_data.get('binning_y'),
@@ -350,7 +350,7 @@ class MasterFrameManager:
                 logger.info(f"\nFiles being stacked:")
                 for i, f in enumerate(files, 1):
                     logger.info(f"  {i:3d}. {os.path.basename(f.fitsFileName)}")
-                    if verbose and cal_type.lower() == 'dark':
+                    if verbose and cal_type.lower() in ('dark', 'flatdark'):
                         # For dark frames, also show exposure time from file
                         logger.info(f"       Exposure: {f.fitsFileExpTime}s, Temp: {f.fitsFileCCDTemp}°C")
                 logger.info(f"{'='*80}\n")
@@ -1439,7 +1439,7 @@ class MasterFrameManager:
             # Update appropriate field based on calibration type
             if cal_type == 'bias':
                 session.master_bias = master.id
-            elif cal_type == 'dark':
+            elif cal_type in ('dark', 'flatdark'):
                 session.master_dark = master.id
             elif cal_type == 'flat':
                 session.master_flat = master.id
