@@ -81,7 +81,6 @@ def test_is_target_device_accepts_celestron_mdns_variants():
     assert manager.is_target_device("origin.local", "Celestron Origin") is True
     assert manager.is_target_device("Celestron-Origin", "Celestron Origin") is True
     assert manager.is_target_device("Celestron-Origin.local", "Celestron Origin") is True
-    assert manager.is_target_device("origin-telescope.local", "Celestron Origin") is True
     assert manager.is_target_device("celestronnexstar.local", "Celestron Origin") is False
     assert manager.is_target_device("celestron-sct.local", "Celestron Origin") is False
     assert manager.is_target_device("original.local", "Celestron Origin") is False

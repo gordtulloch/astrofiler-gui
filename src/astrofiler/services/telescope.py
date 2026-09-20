@@ -300,7 +300,7 @@ class SmartTelescopeManager:
         protocol = config.get('protocol', 'smb')
 
         if protocol == 'ftp':
-            # For DWARF telescopes using FTP
+            # For FTP-based telescopes such as DWARF and Celestron Origin
             if self.check_ftp_port(ip):
                 logger.debug(f"Found FTP service at {ip} - potential {telescope_type} device")
                 return str(ip)
