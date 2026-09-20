@@ -114,9 +114,9 @@ def dwarfFixHeader(hdr: Any, root: str, file: str) -> Union[Any, bool]:
         config.read('astrofiler.ini')
         save_modified = config.getboolean('DEFAULT', 'save_modified_headers', fallback=False)
         
-        # Check if this is a DWARF telescope file
+        # Check if this is a DWARF telescope file (any variant: DWARF, DWARF3, DWARF MINI, etc.)
         telescop_value = hdr.get("TELESCOP", "")
-        if not telescop_value or telescop_value.upper() != "DWARF":
+        if telescop_value and not telescop_value.upper().startswith("DWARF"):
             logger.warning(f"dwarfFixHeader called for non-DWARF file: {file}")
             return False
         

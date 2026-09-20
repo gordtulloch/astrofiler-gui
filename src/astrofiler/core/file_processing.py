@@ -686,7 +686,16 @@ class FileProcessor:
                     f"TELESCOP={hdr.get('TELESCOP')}, INSTRUME={hdr.get('INSTRUME')}"
                 )
 
-        if telescop_value and telescop_value.upper() == "DWARF":
+        # Detect any DWARF telescope variant by TELESCOP prefix or by folder structure
+        # (Dwarf Mini, DWARF 3, DWARF II, etc. may use different TELESCOP values)
+        is_dwarf = (telescop_value and telescop_value.upper().startswith("DWARF")) or (
+            not (hdr.get("IMAGETYP") or hdr.get("FRAME"))
+            and any(
+                marker in root
+                for marker in ("DWARF_RAW", "CALI_FRAME", "DWARF_DARK")
+            )
+        )
+        if is_dwarf:
             modified_hdr = dwarfFixHeader(hdr, root, file)
             if not modified_hdr:
                 raise FitsHeaderError(
