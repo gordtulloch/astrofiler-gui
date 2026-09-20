@@ -70,9 +70,9 @@ class SmartTelescopeManager:
                 'port': 21
             },
             'Celestron Origin': {
-                'default_hostname': '',  # To be configured by user (telescope IP)
-                'default_username': 'celestron',  # Default FTP credentials per Celestron documentation
-                'default_password': 'celestron',  # Note: These are standard defaults, telescope may not support changing them
+                'default_hostname': '192.168.1.208',  # Default IP on the Origin hotspot network
+                'default_username': None,  # Use None for anonymous FTP
+                'default_password': None,  # Use None for anonymous FTP
                 'protocol': 'ftp',  # Plain FTP (not FTPS)
                 'fits_path': 'RawData',  # Celestron Origin stores raw FITS in /RawData
                 'port': 21
@@ -167,93 +167,100 @@ class SmartTelescopeManager:
         """Check if the device matches the target telescope type."""
         if not hostname:
             return False
-        
+
+        hostname_lower = hostname.lower()
         if telescope_type == 'SeeStar':
-            return 'seestar' in hostname.lower()
+            return 'seestar' in hostname_lower
         elif telescope_type == 'StellarMate':
-            return 'stellarmate' in hostname.lower()
-        
+            return 'stellarmate' in hostname_lower
+        elif telescope_type == 'Celestron Origin':
+            hostname_parts = hostname_lower.replace('-', '.').split('.')
+            return (
+                'origin' in hostname_lower
+                or 'celestron' in hostname_lower
+                or 'origin' in hostname_parts
+                or 'celestron' in hostname_parts
+            )
         return False
+
+    def _is_ip_address(self, hostname):
+        """Check if the hostname value is already an IP address."""
+        try:
+            ipaddress.ip_address(hostname)
+            return True
+        except ValueError:
+            return False
     
     def find_telescope(self, telescope_type, network_range=None, hostname=None):
         """Find a specific telescope on the network."""
         logger.info(f"Starting search for {telescope_type} telescope (hostname={hostname}, network={network_range})")
-        
+
+        config = self.supported_telescopes.get(telescope_type, {})
+        protocol = config.get('protocol', 'smb')
+
         # For iTelescope, bypass all network scanning and SMB checks
         if telescope_type == 'iTelescope':
-            if hostname:
-                logger.info(f"Using provided iTelescope hostname: {hostname}")
-                return hostname, None
-            else:
-                default_hostname = self.supported_telescopes['iTelescope']['default_hostname']
-                logger.info(f"Using default iTelescope hostname: {default_hostname}")
-                return default_hostname, None
-        
-        if not SMB_AVAILABLE:
+            target = hostname or config.get('default_hostname')
+            logger.info(f"Using iTelescope hostname: {target}")
+            return target, None
+
+        if protocol == 'smb' and not SMB_AVAILABLE:
             logger.error("SMB protocol not available. Install pysmb package.")
             return None, "SMB protocol not available. Install pysmb package."
         
         if hostname:
-            # For SeeStar, only use mDNS resolution for seestar.local hostnames
-            # No reverse DNS lookups as SeeStar patched their firmware to disable them
             try:
                 logger.debug(f"Resolving hostname {hostname}")
                 ip = socket.gethostbyname(hostname)
                 logger.debug(f"Hostname {hostname} resolved to {ip}")
-                
-                if self.check_smb_port(ip):
-                    # For SeeStar, trust the mDNS hostname and skip reverse DNS
+
+                port_open = self.check_ftp_port(ip) if protocol == 'ftp' else self.check_smb_port(ip)
+                if port_open:
                     if telescope_type == 'SeeStar':
                         if 'seestar' in hostname.lower() or hostname.upper().startswith('SEESTAR'):
                             logger.info(f"Found {telescope_type} telescope at {ip} (mDNS hostname: {hostname})")
                             return ip, None
-                        else:
-                            logger.warning(f"Hostname {hostname} doesn't match expected SeeStar pattern")
-                            return None, f"Hostname {hostname} doesn't match expected SeeStar pattern"
-                    
-                    # For StellarMate, trust the mDNS hostname and skip reverse DNS
+                        logger.warning(f"Hostname {hostname} doesn't match expected SeeStar pattern")
+                        return None, f"Hostname {hostname} doesn't match expected SeeStar pattern"
                     elif telescope_type == 'StellarMate':
                         if 'stellarmate' in hostname.lower() or hostname.upper().startswith('STELLARMATE'):
                             logger.info(f"Found {telescope_type} telescope at {ip} (mDNS hostname: {hostname})")
                             return ip, None
-                        else:
-                            logger.warning(f"Hostname {hostname} doesn't match expected StellarMate pattern")
-                            return None, f"Hostname {hostname} doesn't match expected StellarMate pattern"
-                    
-                    # For other telescope types, check if the provided hostname matches
+                        logger.warning(f"Hostname {hostname} doesn't match expected StellarMate pattern")
+                        return None, f"Hostname {hostname} doesn't match expected StellarMate pattern"
+                    elif telescope_type == 'DWARF 3':
+                        logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
+                        return ip, None
+                    elif telescope_type == 'Celestron Origin':
+                        if self.is_target_device(hostname, telescope_type) or self._is_ip_address(hostname):
+                            logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
+                            return ip, None
+                        logger.warning(f"Hostname {hostname} doesn't match expected {telescope_type} pattern")
+                        return None, f"Hostname {hostname} doesn't match expected {telescope_type} pattern"
                     elif self.is_target_device(hostname, telescope_type):
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
-                
-                logger.warning(f"Device {hostname} ({ip}) not found or not accessible")
-                return None, f"Device {hostname} not found or not accessible"
+                    else:
+                        logger.warning(f"Hostname {hostname} doesn't match expected {telescope_type} pattern")
+                        return None, f"Hostname {hostname} doesn't match expected {telescope_type} pattern"
+
+                logger.warning(f"Device {hostname} found but service port is closed")
+                return None, f"Device {hostname} found but service port is closed"
             except Exception as e:
                 logger.error(f"Unable to resolve hostname {hostname}: {e}")
                 return None, f"Unable to resolve hostname {hostname}"
-        
-        # For SeeStar, try the default mDNS hostname first before network scanning
-        if telescope_type == 'SeeStar':
-            default_hostname = self.supported_telescopes['SeeStar']['default_hostname']
-            logger.info(f"Trying default mDNS hostname: {default_hostname}")
+
+        default_hostname = config.get('default_hostname')
+        if default_hostname:
+            logger.info(f"Trying default hostname: {default_hostname}")
             try:
                 ip = socket.gethostbyname(default_hostname)
-                if self.check_smb_port(ip):
-                    logger.info(f"Found {telescope_type} telescope at {ip} via mDNS ({default_hostname})")
+                port_open = self.check_ftp_port(ip) if protocol == 'ftp' else self.check_smb_port(ip)
+                if port_open:
+                    logger.info(f"Found {telescope_type} telescope at {ip} via default hostname ({default_hostname})")
                     return ip, None
             except Exception as e:
-                logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
-        
-        # For StellarMate, try the default mDNS hostname first before network scanning
-        elif telescope_type == 'StellarMate':
-            default_hostname = self.supported_telescopes['StellarMate']['default_hostname']
-            logger.info(f"Trying default mDNS hostname: {default_hostname}")
-            try:
-                ip = socket.gethostbyname(default_hostname)
-                if self.check_smb_port(ip):
-                    logger.info(f"Found {telescope_type} telescope at {ip} via mDNS ({default_hostname})")
-                    return ip, None
-            except Exception as e:
-                logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
+                logger.debug(f"Default hostname {default_hostname} not reachable: {e}")
         
         # Scan network for device (no reverse DNS lookups for SeeStar, skip entirely for iTelescope)
         if telescope_type == 'iTelescope':
