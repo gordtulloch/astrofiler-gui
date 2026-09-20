@@ -690,10 +690,7 @@ class FileProcessor:
         # (Dwarf Mini, DWARF 3, DWARF II, etc. may use different TELESCOP values)
         is_dwarf = (telescop_value and telescop_value.upper().startswith("DWARF")) or (
             not (hdr.get("IMAGETYP") or hdr.get("FRAME"))
-            and any(
-                marker in root
-                for marker in ("DWARF_RAW", "CALI_FRAME", "DWARF_DARK")
-            )
+            and "DWARF_RAW" in root
         )
         if is_dwarf:
             modified_hdr = dwarfFixHeader(hdr, root, file)

@@ -115,9 +115,10 @@ def dwarfFixHeader(hdr: Any, root: str, file: str) -> Union[Any, bool]:
         save_modified = config.getboolean('DEFAULT', 'save_modified_headers', fallback=False)
         
         # Check if this is a DWARF telescope file (any variant: DWARF, DWARF3, DWARF MINI, etc.)
+        # An empty/missing TELESCOP is allowed — the caller may have detected DWARF via folder structure.
         telescop_value = hdr.get("TELESCOP", "")
         if telescop_value and not telescop_value.upper().startswith("DWARF"):
-            logger.warning(f"dwarfFixHeader called for non-DWARF file: {file}")
+            logger.warning(f"dwarfFixHeader called for non-DWARF file (TELESCOP={telescop_value!r}): {file}")
             return False
         
         # Skip failed images
