@@ -177,6 +177,14 @@ class SmartTelescopeManager:
             return 'origin' in hostname_lower or 'celestron' in hostname_lower
 
         return False
+
+    def _is_ip_address(self, hostname):
+        """Check if the hostname value is already an IP address."""
+        try:
+            ipaddress.ip_address(hostname)
+            return True
+        except ValueError:
+            return False
     
     def find_telescope(self, telescope_type, network_range=None, hostname=None):
         """Find a specific telescope on the network."""
@@ -218,6 +226,12 @@ class SmartTelescopeManager:
                     elif telescope_type == 'DWARF 3':
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
+                    elif telescope_type == 'Celestron Origin':
+                        if self.is_target_device(hostname, telescope_type) or self._is_ip_address(hostname):
+                            logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
+                            return ip, None
+                        logger.warning(f"Hostname {hostname} doesn't match expected {telescope_type} pattern")
+                        return None, f"Hostname {hostname} doesn't match expected {telescope_type} pattern"
                     elif self.is_target_device(hostname, telescope_type):
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None

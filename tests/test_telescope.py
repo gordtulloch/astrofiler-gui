@@ -85,8 +85,8 @@ def test_is_target_device_recognizes_celestron_origin_hostnames():
 
 def test_find_telescope_uses_ftp_for_origin_without_smb(monkeypatch):
     module = load_telescope_module()
-    manager = module.SmartTelescopeManager()
     module.SMB_AVAILABLE = False
+    manager = module.SmartTelescopeManager()
 
     def fail_if_smb_checked(_ip):
         pytest.fail("SMB should not be checked")
@@ -100,10 +100,23 @@ def test_find_telescope_uses_ftp_for_origin_without_smb(monkeypatch):
     assert (ip, error) == ("192.168.1.208", None)
 
 
+def test_find_telescope_accepts_origin_ip_hostname(monkeypatch):
+    module = load_telescope_module()
+    module.SMB_AVAILABLE = False
+    manager = module.SmartTelescopeManager()
+
+    monkeypatch.setattr(module.socket, "gethostbyname", lambda host: host)
+    monkeypatch.setattr(manager, "check_ftp_port", lambda ip: True)
+
+    ip, error = manager.find_telescope("Celestron Origin", hostname="192.168.1.208")
+
+    assert (ip, error) == ("192.168.1.208", None)
+
+
 def test_find_telescope_blocks_smb_device_when_smb_unavailable():
     module = load_telescope_module()
-    manager = module.SmartTelescopeManager()
     module.SMB_AVAILABLE = False
+    manager = module.SmartTelescopeManager()
 
     ip, error = manager.find_telescope("SeeStar", hostname="seestar.local")
 
