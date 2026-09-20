@@ -174,7 +174,8 @@ class SmartTelescopeManager:
         elif telescope_type == 'StellarMate':
             return 'stellarmate' in hostname_lower
         elif telescope_type == 'Celestron Origin':
-            return 'origin' in hostname_lower or 'celestron' in hostname_lower
+            hostname_parts = hostname_lower.replace('-', '.').split('.')
+            return 'origin' in hostname_lower or 'celestron' in hostname_parts
 
         return False
 
@@ -240,7 +241,7 @@ class SmartTelescopeManager:
                         return None, f"Hostname {hostname} doesn't match expected {telescope_type} pattern"
 
                 logger.warning(f"Device {hostname} found but service port is closed")
-                return None, f"Device {hostname} found but service port is closed."
+                return None, f"Device {hostname} found but service port is closed"
             except Exception as e:
                 logger.error(f"Unable to resolve hostname {hostname}: {e}")
                 return None, f"Unable to resolve hostname {hostname}"

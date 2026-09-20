@@ -80,6 +80,7 @@ def test_is_target_device_recognizes_celestron_origin_hostnames():
 
     assert manager.is_target_device("origin.local", "Celestron Origin") is True
     assert manager.is_target_device("Celestron-Origin", "Celestron Origin") is True
+    assert manager.is_target_device("celestronnexstar.local", "Celestron Origin") is False
     assert manager.is_target_device("astrofiler.local", "Celestron Origin") is False
 
 
