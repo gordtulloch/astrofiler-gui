@@ -133,7 +133,8 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
         opportunities = {
             'BIAS': [],
             'DARK': [],
-            'FLAT': []
+            'FLAT': [],
+            'FLATDARK': [],
         }
         
         for session in sessions:
@@ -148,7 +149,7 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
                 if 'bias' in obj_name:
                     cal_type = 'BIAS'
                 elif 'flatdark' in obj_name or 'darkflat' in obj_name:
-                    cal_type = 'DARK'
+                    cal_type = 'FLATDARK'
                 elif 'dark' in obj_name:
                     cal_type = 'DARK'
                 elif 'flat' in obj_name:

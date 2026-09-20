@@ -1439,8 +1439,14 @@ class MasterFrameManager:
             # Update appropriate field based on calibration type
             if cal_type == 'bias':
                 session.master_bias = master.id
-            elif cal_type in ('dark', 'flatdark'):
+            elif cal_type == 'dark':
                 session.master_dark = master.id
+            elif cal_type == 'flatdark':
+                logger.info(
+                    f"Created flatdark master {master_id} for session {session_id}; "
+                    "leaving session master fields unchanged and relying on source_session_id linkage"
+                )
+                return True
             elif cal_type == 'flat':
                 session.master_flat = master.id
             else:
