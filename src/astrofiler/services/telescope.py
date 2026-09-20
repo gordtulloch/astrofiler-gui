@@ -175,11 +175,7 @@ class SmartTelescopeManager:
             return 'stellarmate' in hostname_lower
         elif telescope_type == 'Celestron Origin':
             hostname_parts = [part for part in hostname_lower.replace('-', '.').split('.') if part]
-            return (
-                'origin' in hostname_lower
-                or 'origin' in hostname_parts
-                or 'celestron' in hostname_parts
-            )
+            return 'origin' in hostname_parts or 'celestron' in hostname_parts
         return False
 
     def _is_ip_address(self, hostname):
