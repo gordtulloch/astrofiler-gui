@@ -76,10 +76,10 @@ class FitsCompressor:
             'gzip': {'extension': '.gz', 'module': gzip, 'levels': (1, 9)},
             'lzma': {'extension': '.xz', 'module': lzma, 'levels': (0, 9)}, 
             'bzip2': {'extension': '.bz2', 'module': bz2, 'levels': (1, 9)},
-            'fits_rice': {'extension': '.fits', 'module': None, 'levels': (1, 9)},
-            'fits_gzip1': {'extension': '.fits', 'module': None, 'levels': (1, 9)},
-            'fits_gzip2': {'extension': '.fits', 'module': None, 'levels': (1, 9)},
-            'auto': {'extension': '.fits', 'module': None, 'levels': (1, 9)}  # Smart selection
+            'fits_rice': {'extension': '.fz', 'module': None, 'levels': (1, 9)},
+            'fits_gzip1': {'extension': '.fz', 'module': None, 'levels': (1, 9)},
+            'fits_gzip2': {'extension': '.fz', 'module': None, 'levels': (1, 9)},
+            'auto': {'extension': '.fz', 'module': None, 'levels': (1, 9)}
         }
         
         logger.info(f"FITS compression initialized: enabled={self.compression_enabled}, "
@@ -235,10 +235,8 @@ class FitsCompressor:
             # Select compression algorithm
             selected_algorithm = algorithm or self.compression_algorithm
 
-            # For auto-import, "auto" means FITS tile compression.
-            # The required convention for this project is GZIP_2.
             if selected_algorithm == 'auto':
-                selected_algorithm = 'fits_gzip2'
+                selected_algorithm = self._select_optimal_compression(input_path) or 'fits_gzip2'
             
             # Ensure we have a valid algorithm (no auto-selection)
             if selected_algorithm not in self.algorithms:
@@ -452,6 +450,7 @@ class FitsCompressor:
         Returns:
             True if verification successful, False otherwise
         """
+        temp_path = None
         try:
             # Create temporary file for decompression test using configured temp folder
             temp_folder = get_temp_folder()
@@ -493,7 +492,7 @@ class FitsCompressor:
         finally:
             # Clean up temp file
             try:
-                if os.path.exists(temp_path):
+                if temp_path is not None and os.path.exists(temp_path):
                     os.remove(temp_path)
             except:
                 pass
@@ -724,6 +723,14 @@ class FitsCompressor:
                 new_hdul = fits.HDUList(new_hdus)
                 new_hdul.writeto(temp_path, overwrite=True)
 
+            # Verify before replacing original so the comparison is temp vs intact source
+            if self.verify_compression:
+                if not self._verify_fits_internal_compression(temp_path, input_path):
+                    logger.error(f"FITS {algorithm} compression verification failed")
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    return None
+
             # Atomically move into place
             try:
                 os.replace(temp_path, output_path)
@@ -737,16 +744,6 @@ class FitsCompressor:
             
             logger.info(f"{algorithm} FITS compression complete: {original_size:,} bytes -> "
                        f"{compressed_size:,} bytes ({compression_ratio:.1f}% reduction)")
-            
-            # Verify compression if enabled
-            if self.verify_compression:
-                if not self._verify_fits_internal_compression(output_path, input_path):
-                    logger.error(f"FITS {algorithm} compression verification failed")
-                    if os.path.exists(output_path) and output_path != input_path:
-                        os.remove(output_path)
-                    return None
-            
-            # If replacing original, we already overwrote it in-place.
             
             return output_path
             
@@ -809,54 +806,6 @@ class FitsCompressor:
             
         except Exception as e:
             logger.error(f"Error verifying FITS internal compression: {e}")
-            return False
-        """
-        Verify that a compressed file can be decompressed to match the original.
-        
-        Args:
-            compressed_path: Path to the compressed file
-            original_path: Path to the original file
-            algorithm: Compression algorithm used
-            
-        Returns:
-            True if verification passes, False otherwise
-        """
-        try:
-            # Create temporary file for decompression test using configured temp folder
-            temp_folder = get_temp_folder()
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.fits', dir=temp_folder) as temp_file:
-                temp_path = temp_file.name
-            
-            try:
-                # Decompress to temporary file using specific algorithm
-                if algorithm == 'gzip':
-                    with gzip.open(compressed_path, 'rb') as f_in:
-                        with open(temp_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                elif algorithm == 'lzma':
-                    with lzma.open(compressed_path, 'rb') as f_in:
-                        with open(temp_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                elif algorithm == 'bzip2':
-                    with bz2.open(compressed_path, 'rb') as f_in:
-                        with open(temp_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                else:
-                    return False
-                
-                # Compare file hashes
-                original_hash = self.calculate_file_hash(original_path)
-                decompressed_hash = self.calculate_file_hash(temp_path)
-                
-                return original_hash == decompressed_hash
-                
-            finally:
-                # Clean up temporary file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                    
-        except Exception as e:
-            logger.error(f"Error verifying compressed file {compressed_path}: {e}")
             return False
     
     def should_compress_file(self, file_path: str) -> bool:
