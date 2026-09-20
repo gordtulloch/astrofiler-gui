@@ -183,7 +183,7 @@ sudo yum install git # CentOS distros
 cd $HOME
 git clone https://github.com/gordtulloch/astrofiler-gui.git
 cd astrofiler-gui
-chmod +x install/install.sh && ./install/install.sh
+./install/install.sh
 ```
 
 ### macOS
@@ -193,7 +193,7 @@ There are several ways to install Git on macOS. The easiest is probably to insta
 git --version # If you don’t have it installed already, it will prompt you to install it.
 git clone https://github.com/gordtulloch/astrofiler-gui.git
 cd astrofiler-gui
-chmod +x install/install_macos.sh && ./install/install_macos.sh
+./install/install_macos.sh
 ```
 
 **What the installer does:**
