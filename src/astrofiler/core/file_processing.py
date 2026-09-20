@@ -24,6 +24,10 @@ from .utils import (
     dwarfFixHeader,
     mapFitsHeader,
     get_master_calibration_path,
+    is_dark_image_type,
+    is_flat_dark_image_type,
+    is_flat_image_type,
+    normalize_image_type,
 )
 from ..types import FilePath, FitsHeaderDict, ProcessingResult, QualityMetrics
 from ..exceptions import (
@@ -304,7 +308,7 @@ class FileProcessor:
             }
             
             # Add type-specific data
-            if master_type == 'dark':
+            if master_type in ('dark', 'flatdark'):
                 session_data['exposure_time'] = str(hdr.get('EXPTIME', hdr.get('EXPOSURE', '')))
             elif master_type == 'flat':
                 session_data['filter_name'] = hdr.get('FILTER', '')
@@ -381,34 +385,40 @@ class FileProcessor:
             hdr: FITS header
             
         Returns:
-            str or None: 'bias', 'dark', 'flat', or None if undetermined
+            str or None: 'bias', 'dark', 'flat', 'flatdark', or None if undetermined
         """
         # Check filename for master type indicators
-        filename = os.path.basename(file_path).lower()
+        filename = normalize_image_type(os.path.basename(file_path))
         
-        if any(pattern in filename for pattern in ['bias', 'masterbias', 'master_bias', 'bias_master']):
+        if any(pattern in filename for pattern in ['BIAS', 'MASTERBIAS']):
             return 'bias'
-        elif any(pattern in filename for pattern in ['dark', 'masterdark', 'master_dark', 'dark_master']):
+        elif 'FLATDARK' in filename or 'DARKFLAT' in filename:
+            return 'flatdark'
+        elif any(pattern in filename for pattern in ['DARK', 'MASTERDARK']):
             return 'dark'
-        elif any(pattern in filename for pattern in ['flat', 'masterflat', 'master_flat', 'flat_master']):
+        elif any(pattern in filename for pattern in ['FLAT', 'MASTERFLAT']):
             return 'flat'
         
         # Check FITS header
         imagetyp = hdr.get('IMAGETYP', '').upper()
         if 'BIAS' in imagetyp:
             return 'bias'
-        elif 'DARK' in imagetyp:
+        elif is_flat_dark_image_type(imagetyp):
+            return 'flatdark'
+        elif is_dark_image_type(imagetyp):
             return 'dark'
-        elif 'FLAT' in imagetyp:
+        elif is_flat_image_type(imagetyp):
             return 'flat'
         
         # Check OBJECT field for master indicators
-        object_name = hdr.get('OBJECT', '').lower()
-        if 'bias' in object_name or 'master-bias' in object_name:
+        object_name = normalize_image_type(hdr.get('OBJECT', ''))
+        if 'BIAS' in object_name:
             return 'bias'
-        elif 'dark' in object_name or 'master-dark' in object_name:
+        elif 'FLATDARK' in object_name or 'DARKFLAT' in object_name:
+            return 'flatdark'
+        elif 'DARK' in object_name:
             return 'dark'
-        elif 'flat' in object_name or 'master-flat' in object_name:
+        elif 'FLAT' in object_name:
             return 'flat'
         
         return None
@@ -734,10 +744,13 @@ class FileProcessor:
         telescope = hdr.get("TELESCOP", "Unknown")
         
         # Fix calibration frames where OBJECT is set to an object rather than the frame type
-        if "DARK" in hdr["IMAGETYP"].upper():
+        if is_flat_dark_image_type(hdr["IMAGETYP"]):
+            hdr["OBJECT"] = "FlatDark"
+            header_modified = True
+        elif is_dark_image_type(hdr["IMAGETYP"]):
             hdr["OBJECT"] = "Dark"
             header_modified = True
-        elif "FLAT" in hdr["IMAGETYP"].upper():
+        elif is_flat_image_type(hdr["IMAGETYP"]):
             hdr["OBJECT"] = "Flat"
             header_modified = True
         elif "BIAS" in hdr["IMAGETYP"].upper():
@@ -804,7 +817,18 @@ class FileProcessor:
                     file_path=os.path.join(root, file)
                 )
 
-        elif "FLAT" in hdr["IMAGETYP"].upper():
+        elif is_flat_dark_image_type(hdr["IMAGETYP"]):
+            newName = "{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(
+                "FlatDark",
+                sanitize_filesystem_name(telescope),
+                sanitize_filesystem_name(hdr.get("INSTRUME", "Unknown")),
+                fitsDate, exposure,
+                hdr.get("XBINNING", 1),
+                hdr.get("YBINNING", 1),
+                hdr.get("CCD-TEMP", 0)
+            )
+
+        elif is_flat_image_type(hdr["IMAGETYP"]):
             # Create filename for flat frames
             filter_name = hdr.get("FILTER", "OSC")
             newName = "{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(
@@ -818,7 +842,7 @@ class FileProcessor:
                 hdr.get("CCD-TEMP", 0)
             )
 
-        elif "DARK" in hdr["IMAGETYP"].upper():
+        elif is_dark_image_type(hdr["IMAGETYP"]):
             # Create filename for dark frames
             newName = "{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(
                 "Dark",

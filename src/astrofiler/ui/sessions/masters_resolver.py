@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 from typing import Iterable, List, Set, Tuple
 
+from ...models import fitsSession as FitsSessionModel
 from ...core.master_manager import get_master_manager
+from ...core.utils import session_to_calibration_criteria
 
 
 def find_matching_masters_for_light_session(session, light_files: Iterable) -> List[Tuple[str, str]]:
@@ -37,6 +39,7 @@ def find_matching_masters_for_light_session(session, light_files: Iterable) -> L
 
     master_bias = master_manager.find_matching_master(session_data, 'bias')
     master_dark = master_manager.find_matching_master(session_data, 'dark')
+    master_flat_dark = None
 
     if master_bias and os.path.exists(master_bias.master_path):
         master_files.append(('bias', master_bias.master_path))
@@ -53,6 +56,21 @@ def find_matching_masters_for_light_session(session, light_files: Iterable) -> L
         master_flat = master_manager.find_matching_master(flat_session_data, 'flat')
         if master_flat and os.path.exists(master_flat.master_path):
             master_files.append(('flat', master_flat.master_path))
+
+    flat_session_id = getattr(session, 'fitsFlatSession', None)
+    if flat_session_id:
+        try:
+            flat_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == flat_session_id)
+            flat_dark_session_id = getattr(flat_session, 'fitsDarkSession', None)
+            if flat_dark_session_id:
+                flat_dark_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == flat_dark_session_id)
+                flat_dark_session_data = session_to_calibration_criteria(flat_dark_session)
+                master_flat_dark = master_manager.find_matching_master(flat_dark_session_data, 'flatdark')
+        except FitsSessionModel.DoesNotExist:
+            master_flat_dark = None
+
+    if master_flat_dark and os.path.exists(master_flat_dark.master_path):
+        master_files.append(('flatdark', master_flat_dark.master_path))
 
     # De-dupe by path while preserving order (prevents double-counting the same master).
     seen: Set[str] = set()
