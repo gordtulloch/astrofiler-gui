@@ -118,7 +118,7 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
             progress_callback(30, "Scanning for calibration sessions...")
         
         # Find calibration sessions
-        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT']
+        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT', 'FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT']
         query = fitsSession.select().where(fitsSession.fitsSessionObjectName.in_(calibration_types))
         if session_id:
             query = query.where(fitsSession.fitsSessionId == session_id)
@@ -238,7 +238,7 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
             progress_callback(10, "Finding calibration sessions...")
         
         # Find calibration sessions that need masters
-        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT']
+        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT', 'FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT']
         query = fitsSession.select().where(fitsSession.fitsSessionObjectName.in_(calibration_types))
         if session_id:
             query = query.where(fitsSession.fitsSessionId == session_id)

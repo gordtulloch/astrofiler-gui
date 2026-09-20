@@ -24,6 +24,9 @@ from .utils import (
     dwarfFixHeader,
     mapFitsHeader,
     get_master_calibration_path,
+    is_dark_image_type,
+    is_flat_dark_image_type,
+    is_flat_image_type,
 )
 from ..types import FilePath, FitsHeaderDict, ProcessingResult, QualityMetrics
 from ..exceptions import (
@@ -734,10 +737,13 @@ class FileProcessor:
         telescope = hdr.get("TELESCOP", "Unknown")
         
         # Fix calibration frames where OBJECT is set to an object rather than the frame type
-        if "DARK" in hdr["IMAGETYP"].upper():
+        if is_flat_dark_image_type(hdr["IMAGETYP"]):
+            hdr["OBJECT"] = "FlatDark"
+            header_modified = True
+        elif is_dark_image_type(hdr["IMAGETYP"]):
             hdr["OBJECT"] = "Dark"
             header_modified = True
-        elif "FLAT" in hdr["IMAGETYP"].upper():
+        elif is_flat_image_type(hdr["IMAGETYP"]):
             hdr["OBJECT"] = "Flat"
             header_modified = True
         elif "BIAS" in hdr["IMAGETYP"].upper():
@@ -804,7 +810,18 @@ class FileProcessor:
                     file_path=os.path.join(root, file)
                 )
 
-        elif "FLAT" in hdr["IMAGETYP"].upper():
+        elif is_flat_dark_image_type(hdr["IMAGETYP"]):
+            newName = "{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(
+                "FlatDark",
+                sanitize_filesystem_name(telescope),
+                sanitize_filesystem_name(hdr.get("INSTRUME", "Unknown")),
+                fitsDate, exposure,
+                hdr.get("XBINNING", 1),
+                hdr.get("YBINNING", 1),
+                hdr.get("CCD-TEMP", 0)
+            )
+
+        elif is_flat_image_type(hdr["IMAGETYP"]):
             # Create filename for flat frames
             filter_name = hdr.get("FILTER", "OSC")
             newName = "{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(
@@ -818,7 +835,7 @@ class FileProcessor:
                 hdr.get("CCD-TEMP", 0)
             )
 
-        elif "DARK" in hdr["IMAGETYP"].upper():
+        elif is_dark_image_type(hdr["IMAGETYP"]):
             # Create filename for dark frames
             newName = "{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(
                 "Dark",

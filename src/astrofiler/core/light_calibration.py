@@ -39,8 +39,9 @@ from .utils import normalize_file_path, fits_image_data as _fits_image_data
 
 logger = logging.getLogger(__name__)
 
-def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None, 
-                         flat_master: Optional[str] = None, bias_master: Optional[str] = None, 
+def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
+                         flat_master: Optional[str] = None, bias_master: Optional[str] = None,
+                         flat_dark_master: Optional[str] = None,
                          output_path: Optional[str] = None, progress_callback: Optional[Callable] = None) -> Dict:
     """
     Calibrate a single light frame using master calibration frames.
@@ -59,9 +60,10 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
     
     Args:
         light_path (str): Path to the light frame FITS file
-        dark_master (str, optional): Path to master dark frame
+        dark_master (str, optional): Path to master dark frame for the light
         flat_master (str, optional): Path to master flat frame  
         bias_master (str, optional): Path to master bias frame (REQUIRED for proper dark correction)
+        flat_dark_master (str, optional): Path to master flat-dark frame for flat calibration
         output_path (str, optional): Path for calibrated output file (auto-generated if not provided)
         progress_callback (callable, optional): Callback for progress updates
         
@@ -113,7 +115,8 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         
         calibrated_data = light_data.copy()
         calibration_steps = []
-        corrected_dark = None  # bias-corrected dark, reused for flat correction
+        corrected_dark = None
+        corrected_flat_dark = None
         
         # =================================================================
         # STEP 1: DARK SUBTRACTION (or BIAS if no dark available)
@@ -139,6 +142,8 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                     if dark_data.shape != calibrated_data.shape:
                         raise ValueError(f"Dark frame shape {dark_data.shape} doesn't match light frame {calibrated_data.shape}")
                     
+                    dark_scaled = dark_data.copy()
+
                     # CRITICAL FIX: Subtract bias master from dark master before applying
                     # Dark masters contain bias signal that must be removed
                     if bias_master and os.path.exists(bias_master):
@@ -165,7 +170,7 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                         calibration_steps.append(f"DARK: {os.path.basename(dark_master)} - NO BIAS CORRECTION")
                     
                     # Apply: Light - (Dark - Bias) 
-                    corrected_dark = dark_data
+                    corrected_dark = dark_scaled
                     calibrated_data = calibrated_data - dark_scaled
                     logger.debug(f"Applied dark correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
                     
@@ -203,6 +208,35 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
         # =================================================================
         # Subtract master dark from flat, normalize by mean, then divide
         
+        if flat_dark_master and os.path.exists(flat_dark_master):
+            try:
+                with fits.open(flat_dark_master) as hdul:
+                    _flat_dark_raw, _ = _fits_image_data(hdul)
+                    if _flat_dark_raw is None:
+                        raise ValueError("No image data found in flat-dark master")
+                    corrected_flat_dark = _flat_dark_raw.astype(np.float64)
+
+                if bias_master and os.path.exists(bias_master):
+                    try:
+                        with fits.open(bias_master) as bias_hdul:
+                            _bias_raw, _ = _fits_image_data(bias_hdul)
+                            if _bias_raw is None:
+                                raise ValueError("No image data found in bias master")
+                            bias_data = _bias_raw.astype(np.float64)
+                            if bias_data.shape == corrected_flat_dark.shape:
+                                corrected_flat_dark = corrected_flat_dark - bias_data
+                            else:
+                                logger.warning(
+                                    f"Bias shape {bias_data.shape} doesn't match flat-dark "
+                                    f"{corrected_flat_dark.shape}, skipping bias correction"
+                                )
+                    except Exception as e:
+                        logger.warning(f"Failed to load bias for flat-dark correction: {e}")
+            except Exception as e:
+                logger.error(f"Failed to prepare flat-dark correction: {e}")
+                if progress_callback:
+                    progress_callback(f"Warning: Failed to prepare flat-dark correction: {e}")
+
         if flat_master and os.path.exists(flat_master):
             if progress_callback:
                 progress_callback("Applying flat correction...")
@@ -217,15 +251,24 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                     if flat_data.shape != calibrated_data.shape:
                         raise ValueError(f"Flat frame shape {flat_data.shape} doesn't match light frame {calibrated_data.shape}")
                     
-                    # Subtract bias-corrected dark (Dark - Bias) from flat to remove
-                    # the bias pedestal and thermal signal. corrected_dark was already
-                    # computed in Step 1 and contains Dark - Bias with no scaling applied.
+                    # Subtract the flat-specific bias-corrected dark first when available.
+                    # Fall back to the light-frame dark for backward compatibility.
                     flat_corrected = False
-                    if corrected_dark is not None and corrected_dark.shape == flat_data.shape:
-                        flat_data = flat_data - corrected_dark
+                    if corrected_flat_dark is not None:
+                        flat_correction_frame = corrected_flat_dark
+                        flat_correction_label = os.path.basename(flat_dark_master) if flat_dark_master else None
+                    else:
+                        flat_correction_frame = corrected_dark
+                        flat_correction_label = os.path.basename(dark_master) if corrected_dark is not None and dark_master else None
+                    if flat_correction_frame is not None and flat_correction_frame.shape == flat_data.shape:
+                        flat_data = flat_data - flat_correction_frame
                         flat_corrected = True
-                        logger.info("Subtracted bias-corrected dark (Dark - Bias) from flat master")
-                    elif corrected_dark is not None:
+                        if corrected_flat_dark is not None:
+                            calibration_steps.append(f"FLATDARK: {os.path.basename(flat_dark_master)} - BIAS corrected")
+                            logger.info("Subtracted bias-corrected flat-dark from flat master")
+                        else:
+                            logger.info("Subtracted bias-corrected dark (Dark - Bias) from flat master")
+                    elif flat_correction_frame is not None:
                         logger.warning("Corrected dark shape doesn't match flat shape, skipping dark subtraction from flat")
 
                     # Normalize flat field by its mean value
@@ -245,7 +288,10 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
                     
                     # Apply flat correction
                     calibrated_data = calibrated_data / flat_normalized
-                    correction_note = "dark-corrected" if flat_corrected else "raw"
+                    if corrected_flat_dark is not None and flat_corrected:
+                        correction_note = f"flat-dark corrected with {flat_correction_label}"
+                    else:
+                        correction_note = "dark-corrected" if flat_corrected else "raw"
                     calibration_steps.append(f"FLAT: {os.path.basename(flat_master)} ({correction_note}, mean: {flat_mean:.1f})")
                     logger.debug(f"Applied flat correction, data range: [{np.min(calibrated_data):.2f}, {np.max(calibrated_data):.2f}]")
                     
@@ -276,7 +322,8 @@ def calibrate_light_frame(light_path: str, dark_master: Optional[str] = None,
             bias_master, 
             dark_master, 
             flat_master, 
-            calibrated_data, 
+            flat_dark_master,
+            calibrated_data,
             light_path
         )
         light_header['CALMETOD'] = 'Numpy'
@@ -410,6 +457,7 @@ def calibrate_session_lights(session_id: str, progress_callback: Optional[Callab
                 dark_master=master_frames['dark'],
                 flat_master=master_frames['flat'],
                 bias_master=master_frames['bias'],
+                flat_dark_master=master_frames.get('flat_dark'),
                 progress_callback=progress_callback
             )
             
@@ -479,12 +527,12 @@ def get_session_master_frames(session_id: str) -> Dict[str, Optional[str]]:
         session_id (str): Database ID of the session
         
     Returns:
-        dict: Paths to master frames (dark, flat, bias) or None if not available
+        dict: Paths to master frames (dark, flat, flat_dark, bias) or None if not available
     """
     try:
         session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session_id)
         
-        masters = {"dark": None, "flat": None, "bias": None}
+        masters = {"dark": None, "flat": None, "flat_dark": None, "bias": None}
         
         # Get session characteristics for matching
         criteria = session.get_calibration_criteria()
@@ -512,6 +560,39 @@ def get_session_master_frames(session_id: str) -> Dict[str, Optional[str]]:
                 master = master_query.first()
                 if master.master_path and os.path.exists(master.master_path):
                     masters[master_type] = master.master_path
+
+        if session.fitsFlatSession:
+            try:
+                flat_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == session.fitsFlatSession)
+                flat_dark_session_id = getattr(flat_session, 'fitsDarkSession', None)
+                if flat_dark_session_id:
+                    flat_dark_session = FitsSessionModel.get(FitsSessionModel.fitsSessionId == flat_dark_session_id)
+                    flat_dark_session_data = {
+                        'telescope': flat_dark_session.fitsSessionTelescope,
+                        'instrument': flat_dark_session.fitsSessionImager,
+                        'exposure_time': flat_dark_session.fitsSessionExposure,
+                        'filter_name': flat_dark_session.fitsSessionFilter,
+                        'binning_x': flat_dark_session.fitsSessionBinningX,
+                        'binning_y': flat_dark_session.fitsSessionBinningY,
+                        'ccd_temp': flat_dark_session.fitsSessionCCDTemp,
+                        'gain': flat_dark_session.fitsSessionGain,
+                        'offset': flat_dark_session.fitsSessionOffset,
+                    }
+                    flat_dark_master = Masters.find_matching_master(
+                        telescope=flat_dark_session_data.get('telescope'),
+                        instrument=flat_dark_session_data.get('instrument'),
+                        master_type='dark',
+                        exposure_time=flat_dark_session_data.get('exposure_time'),
+                        binning_x=flat_dark_session_data.get('binning_x'),
+                        binning_y=flat_dark_session_data.get('binning_y'),
+                        ccd_temp=flat_dark_session_data.get('ccd_temp'),
+                        gain=flat_dark_session_data.get('gain'),
+                        offset=flat_dark_session_data.get('offset'),
+                    )
+                    if flat_dark_master and flat_dark_master.master_path and os.path.exists(flat_dark_master.master_path):
+                        masters['flat_dark'] = flat_dark_master.master_path
+            except FitsSessionModel.DoesNotExist:
+                pass
                     
     except Exception as e:
         logger.error(f"Error getting session master frames: {e}")
@@ -519,8 +600,9 @@ def get_session_master_frames(session_id: str) -> Dict[str, Optional[str]]:
     return masters
 
 
-def _update_calibrated_frame_header(header, calibration_steps: List[str], bias_master: Optional[str], 
-                                   dark_master: Optional[str], flat_master: Optional[str], 
+def _update_calibrated_frame_header(header, calibration_steps: List[str], bias_master: Optional[str],
+                                   dark_master: Optional[str], flat_master: Optional[str],
+                                   flat_dark_master: Optional[str],
                                    calibrated_data: np.ndarray, light_path: str) -> None:
     """
     Update FITS header of calibrated light frame with comprehensive metadata.
@@ -538,6 +620,7 @@ def _update_calibrated_frame_header(header, calibration_steps: List[str], bias_m
         bias_master: Path to bias master (or None)
         dark_master: Path to dark master (or None)
         flat_master: Path to flat master (or None)
+        flat_dark_master: Path to flat-dark master (or None)
         calibrated_data: Calibrated image data array
         light_path: Original light frame path
     """
@@ -602,6 +685,10 @@ def _update_calibrated_frame_header(header, calibration_steps: List[str], bias_m
             header['FLATMD5'] = (flat_hash, 'MD5 checksum of flat master (truncated)')
         except:
             pass
+
+    if flat_dark_master and os.path.exists(flat_dark_master):
+        header['FDARKMST'] = (os.path.basename(flat_dark_master), 'Master flat-dark frame filename')
+        header['FDARKREF'] = (flat_dark_master, 'Full path to master flat-dark frame')
     
     # Summary information
     header['CALMAST'] = (master_count, 'Number of master frames used')
@@ -652,7 +739,7 @@ def find_light_sessions_for_calibration() -> List[str]:
     """
     try:
         # Light sessions are those that don't have calibration object names
-        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT']
+        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT', 'FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT']
         light_sessions = FitsSessionModel.select().where(
             ~FitsSessionModel.fitsSessionObjectName.in_(calibration_types)
         )
@@ -673,7 +760,7 @@ def get_calibration_statistics() -> Dict:
     """
     try:
         # Get all light frames (non-calibration frames)
-        calibration_types = ['BIAS', 'DARK', 'FLAT']
+        calibration_types = ['BIAS', 'DARK', 'FLAT', 'FLATDARK', 'DARKFLAT']
         all_lights = FitsFileModel.select().where(
             ~FitsFileModel.fitsFileType.in_(calibration_types)
         )

@@ -61,7 +61,7 @@ class CalibrationProcessor:
                 
                 if not imageType or imageType == 'dark':
                     dark_sessions = FitsSessionModel.select().where(
-                        (FitsSessionModel.fitsSessionObjectName.in_(['dark', 'Dark', 'DARK'])) &
+                        (FitsSessionModel.fitsSessionObjectName.in_(['dark', 'Dark', 'DARK', 'FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT'])) &
                         ((FitsSessionModel.fitsDarkMaster.is_null()) | (FitsSessionModel.fitsDarkMaster == ''))
                     )
                     calibration_sessions.extend(dark_sessions)

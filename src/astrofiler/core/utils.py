@@ -96,6 +96,45 @@ def sanitize_filesystem_name(name: Optional[Union[str, Any]]) -> str:
     return sanitized
 
 
+def normalize_image_type(image_type: Optional[Union[str, Any]]) -> str:
+    """Normalize image type strings for reliable matching."""
+    if image_type is None:
+        return ""
+    return "".join(ch for ch in str(image_type).upper() if ch.isalnum())
+
+
+def is_flat_dark_image_type(image_type: Optional[Union[str, Any]]) -> bool:
+    """Return True when the image type represents a flat-dark frame."""
+    normalized = normalize_image_type(image_type)
+    return "FLATDARK" in normalized or "DARKFLAT" in normalized
+
+
+def is_dark_image_type(image_type: Optional[Union[str, Any]]) -> bool:
+    """Return True for regular dark frames, excluding flat-darks."""
+    normalized = normalize_image_type(image_type)
+    return "DARK" in normalized and not is_flat_dark_image_type(normalized)
+
+
+def is_flat_image_type(image_type: Optional[Union[str, Any]]) -> bool:
+    """Return True for regular flat frames, excluding flat-darks."""
+    normalized = normalize_image_type(image_type)
+    return "FLAT" in normalized and not is_flat_dark_image_type(normalized)
+
+
+def exposures_match(
+    exposure_a: Optional[Union[str, float, int]],
+    exposure_b: Optional[Union[str, float, int]],
+    tolerance: float = 1e-3,
+) -> bool:
+    """Compare exposure values numerically with a small tolerance."""
+    try:
+        if exposure_a is None or exposure_b is None:
+            return exposure_a == exposure_b
+        return abs(float(exposure_a) - float(exposure_b)) <= tolerance
+    except (TypeError, ValueError):
+        return str(exposure_a) == str(exposure_b)
+
+
 def dwarfFixHeader(hdr: Any, root: str, file: str) -> Union[Any, bool]:
     """
     Fix FITS headers for DWARF telescope files based on folder structure and filenames.

@@ -67,7 +67,7 @@ def checkout_single_session(parent: QWidget, item) -> None:
         flat_files = []
         master_files: list[tuple[str, str]] = []
 
-        if object_name not in ['Bias', 'Dark', 'Flat']:
+        if object_name not in ['Bias', 'Dark', 'Flat', 'FlatDark']:
             if not lights_calibrated:
                 if session.fitsBiasSession:
                     bias_files = FitsFileModel.select().where(
@@ -120,7 +120,7 @@ def checkout_single_session(parent: QWidget, item) -> None:
         include_calibration_frames = (
             (not masters_only)
             and (not lights_calibrated)
-            and (object_name not in ['Bias', 'Dark', 'Flat'])
+            and (object_name not in ['Bias', 'Dark', 'Flat', 'FlatDark'])
         )
 
         all_files = list(light_files)
@@ -142,7 +142,7 @@ def checkout_single_session(parent: QWidget, item) -> None:
         bias_dir = None
         masters_dir = None
 
-        if (not lights_calibrated) and (object_name not in ['Bias', 'Dark', 'Flat']):
+        if (not lights_calibrated) and (object_name not in ['Bias', 'Dark', 'Flat', 'FlatDark']):
             masters_dir = os.path.join(session_dir, "masters")
             os.makedirs(masters_dir, exist_ok=True)
 
@@ -362,7 +362,7 @@ def checkout_multiple_sessions(parent: QWidget, session_items) -> None:
                 include_calibration_frames = (
                     (not masters_only)
                     and (not lights_calibrated)
-                    and (object_name not in ['Bias', 'Dark', 'Flat'])
+                    and (object_name not in ['Bias', 'Dark', 'Flat', 'FlatDark'])
                 )
 
                 if include_calibration_frames:
@@ -423,7 +423,7 @@ def checkout_multiple_sessions(parent: QWidget, session_items) -> None:
                     f"Successfully processed session {object_name} - {session_date} with {session_links} links"
                 )
 
-                if masters_only and (not lights_calibrated) and (object_name not in ['Bias', 'Dark', 'Flat']):
+                if masters_only and (not lights_calibrated) and (object_name not in ['Bias', 'Dark', 'Flat', 'FlatDark']):
                     try:
                         if masters_dir is None:
                             masters_dir = os.path.join(checkout_dir, "masters")
