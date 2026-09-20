@@ -83,6 +83,7 @@ def test_is_target_device_accepts_celestron_mdns_variants():
     assert manager.is_target_device("Celestron-Origin.local", "Celestron Origin") is True
     assert manager.is_target_device("origin-telescope.local", "Celestron Origin") is True
     assert manager.is_target_device("celestronnexstar.local", "Celestron Origin") is False
+    assert manager.is_target_device("celestron-sct.local", "Celestron Origin") is False
     assert manager.is_target_device("original.local", "Celestron Origin") is False
     assert manager.is_target_device("astrofiler.local", "Celestron Origin") is False
 
@@ -117,10 +118,11 @@ def test_find_telescope_accepts_origin_ip_hostname(monkeypatch):
     assert (ip, error) == ("192.168.1.208", None)
 
 
-def test_find_telescope_blocks_smb_device_when_smb_unavailable():
+def test_find_telescope_blocks_smb_device_when_smb_unavailable(monkeypatch):
     module = load_telescope_module()
     module.SMB_AVAILABLE = False
     manager = module.SmartTelescopeManager()
+    monkeypatch.setattr(module.socket, "gethostbyname", lambda host: "192.168.1.50")
 
     ip, error = manager.find_telescope("SeeStar", hostname="seestar.local")
 
