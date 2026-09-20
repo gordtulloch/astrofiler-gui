@@ -215,7 +215,7 @@ class SmartTelescopeManager:
                             return ip, None
                         logger.warning(f"Hostname {hostname} doesn't match expected StellarMate pattern")
                         return None, f"Hostname {hostname} doesn't match expected StellarMate pattern"
-                    elif telescope_type in ['Celestron Origin', 'DWARF 3']:
+                    elif telescope_type == 'DWARF 3':
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
                     elif self.is_target_device(hostname, telescope_type):

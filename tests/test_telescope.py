@@ -3,6 +3,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TELESCOPE_PATH = REPO_ROOT / "src" / "astrofiler" / "services" / "telescope.py"
@@ -86,9 +88,12 @@ def test_find_telescope_uses_ftp_for_origin_without_smb(monkeypatch):
     manager = module.SmartTelescopeManager()
     module.SMB_AVAILABLE = False
 
+    def fail_if_smb_checked(_ip):
+        pytest.fail("SMB should not be checked")
+
     monkeypatch.setattr(module.socket, "gethostbyname", lambda host: "192.168.1.208")
     monkeypatch.setattr(manager, "check_ftp_port", lambda ip: True)
-    monkeypatch.setattr(manager, "check_smb_port", lambda ip: (_ for _ in ()).throw(AssertionError("SMB should not be checked")))
+    monkeypatch.setattr(manager, "check_smb_port", fail_if_smb_checked)
 
     ip, error = manager.find_telescope("Celestron Origin", hostname="origin.local")
 
