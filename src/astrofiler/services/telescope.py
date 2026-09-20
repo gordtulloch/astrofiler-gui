@@ -297,13 +297,14 @@ class SmartTelescopeManager:
     def _scan_ip_for_telescope(self, ip, telescope_type):
         """Scan a single IP for the target telescope type."""
         config = self.supported_telescopes.get(telescope_type, {})
-        
-        if config.get('protocol') == 'ftp':
+        protocol = config.get('protocol', 'smb')
+
+        if protocol == 'ftp':
             # For DWARF telescopes using FTP
             if self.check_ftp_port(ip):
                 logger.debug(f"Found FTP service at {ip} - potential {telescope_type} device")
                 return str(ip)
-        else:
+        elif protocol == 'smb':
             # For SMB-based telescopes (SeeStar, StellarMate)
             if self.check_smb_port(ip):
                 if telescope_type in ['SeeStar', 'StellarMate']:
