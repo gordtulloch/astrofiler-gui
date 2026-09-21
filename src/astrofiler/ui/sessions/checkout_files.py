@@ -126,22 +126,21 @@ def create_symlink(src_path: str, dest_path: str) -> bool:
             return True
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
-        if sys.platform == 'win32':
-            import subprocess
-
-            result = subprocess.run(
-                f'mklink "{dest_path}" "{src_path}"',
-                shell=True,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                raise Exception(f"mklink failed: {result.stderr}")
-            return True
-
+        # os.symlink needs no shell (paths are never interpreted as commands) and
+        # creates the same file symlink that `mklink` would on Windows.
         os.symlink(src_path, dest_path)
         return True
 
+    except OSError as e:
+        if sys.platform == 'win32' and getattr(e, 'winerror', None) == 1314:
+            logger.error(
+                f"Failed to create symlink {dest_path} -> {src_path}: Windows requires Developer Mode "
+                f"(Settings > System > For developers) or an elevated process to create symlinks. "
+                f"Use the 'copy files' option instead if that is not available."
+            )
+        else:
+            logger.error(f"Failed to create symlink {dest_path} -> {src_path}: {e}")
+        return False
     except Exception as e:
         logger.error(f"Failed to create symlink {dest_path} -> {src_path}: {e}")
         return False

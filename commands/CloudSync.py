@@ -11,7 +11,7 @@ Usage:
 Options:
     -h, --help       Show this help message and exit
     -v, --verbose    Enable verbose logging
-    -c, --config     Path to configuration file (default: astrofiler.ini)
+    -c, --config     Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)
     -p, --profile    Override sync profile (backup|complete)
     -a, --analyze    Only analyze cloud storage, don't sync
     -y, --yes        Skip confirmation prompts (auto-confirm)
@@ -52,6 +52,7 @@ from datetime import datetime
 # Add the parent directory to the path to import astrofiler modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import setup_path  # Configure Python path for new package structure
+from astrofiler.paths import DEFAULT_CONFIG_PATH, get_config_path, get_log_path
 
 def setup_logging(verbose=False):
     """Setup logging configuration"""
@@ -60,12 +61,12 @@ def setup_logging(verbose=False):
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler('astrofiler.log', mode='a'),
+            logging.FileHandler(get_log_path(), mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )
 
-def load_config(config_path='astrofiler.ini'):
+def load_config(config_path=DEFAULT_CONFIG_PATH):
     """Load configuration from file"""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -222,7 +223,7 @@ def perform_sync(cloud_config, sync_profile, auto_confirm=False):
     
     # Get repository path
     config = configparser.ConfigParser()
-    config.read('astrofiler.ini')
+    config.read(get_config_path())
     repo_path = config.get('DEFAULT', 'repo', fallback='')
     
     if not repo_path or not os.path.exists(repo_path):
@@ -563,7 +564,7 @@ def perform_complete_sync_cli(cloud_config, repo_path):
     
     # Read configuration file
     config = configparser.ConfigParser()
-    config.read('astrofiler.ini')
+    config.read(get_config_path())
     
     # Get bucket info
     bucket_url = cloud_config['bucket_url']
@@ -691,8 +692,8 @@ def main():
     
     parser.add_argument('-v', '--verbose', action='store_true',
                       help='Enable verbose logging')
-    parser.add_argument('-c', '--config', default='astrofiler.ini',
-                      help='Path to configuration file (default: astrofiler.ini)')
+    parser.add_argument('-c', '--config', default=DEFAULT_CONFIG_PATH,
+                      help='Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)')
     parser.add_argument('-p', '--profile', choices=['backup', 'complete', 'ondemand'],
                       help='Override sync profile (backup|complete|ondemand)')
     parser.add_argument('-a', '--analyze', action='store_true',

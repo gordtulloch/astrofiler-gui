@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astrofiler"
-version = "1.3.0"
+dynamic = ["version"]  # read from astrofiler.__version__ (src/astrofiler/__init__.py)
 description = "Professional Astronomical Image Management and Processing Suite"
 authors = [
     {name = "Gord Tulloch", email = "gord.tulloch@gmail.com"}
@@ -19,14 +19,12 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Astronomy",
     "Topic :: Multimedia :: Graphics :: Viewers",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 dependencies = [
     "astropy>=4.0",
     "peewee>=3.14",
@@ -42,6 +40,8 @@ dependencies = [
     "sep>=1.2.1",
     "lz4>=3.0.0",
     "reproject>=0.12",
+    "astroalign",  # used by master_manager for light-frame alignment
+    "keyring>=24",  # system credential store for the iTelescope password
 ]
 
 [project.optional-dependencies]
@@ -68,7 +68,6 @@ cloud = [
 
 [project.scripts]
 astrofiler = "astrofiler.main:main"
-astrofiler-cli = "astrofiler.cli.main:main"
 
 [project.gui-scripts]
 astrofiler-gui = "astrofiler.main:main"
@@ -80,16 +79,19 @@ Repository = "https://github.com/gordtulloch/astrofiler-gui.git"
 Issues = "https://github.com/gordtulloch/astrofiler-gui/issues"
 Changelog = "https://github.com/gordtulloch/astrofiler-gui/blob/main/CHANGE_LOG.md"
 
+[tool.setuptools.dynamic]
+version = {attr = "astrofiler.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["astrofiler*"]
 
 [tool.setuptools.package-data]
-astrofiler = ["ui/css/*.css", "ui/images/*", "*.ini"]
+astrofiler = ["resources/*.png", "resources/css/*.css", "resources/images/*", "migrations/*.py"]
 
 [tool.black]
 line-length = 88
-target-version = ["py38", "py39", "py310", "py311"]
+target-version = ["py312"]
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -108,7 +110,7 @@ known_first_party = ["astrofiler"]
 known_third_party = ["astropy", "peewee", "PySide6", "numpy", "matplotlib"]
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -136,6 +138,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

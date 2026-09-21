@@ -19,7 +19,7 @@ class Masters(BaseModel):
     
     id = pw.AutoField()
     master_id = pw.TextField(unique=True)
-    master_type = pw.TextField()  # 'bias', 'dark', 'flat'
+    master_type = pw.TextField()  # 'bias', 'dark', 'flat', 'flatdark'
     master_path = pw.TextField()  # Full path to master file
     creation_date = pw.DateTimeField()
     telescope = pw.TextField(null=True)
@@ -67,7 +67,7 @@ class Masters(BaseModel):
         )
         
         # Add type-specific criteria
-        if master_type == 'dark' and 'exposure_time' in criteria:
+        if master_type in ('dark', 'flatdark') and 'exposure_time' in criteria:
             query = query.where(cls.exposure_time == criteria['exposure_time'])
         elif master_type == 'flat' and 'filter_name' in criteria:
             query = query.where(cls.filter_name == criteria['filter_name'])
@@ -140,7 +140,7 @@ class Masters(BaseModel):
                 creation_date=datetime.datetime.now(),
                 telescope=session_data.get('telescope'),
                 instrument=session_data.get('instrument'),
-                exposure_time=session_data.get('exposure_time') if cal_type == 'dark' else None,
+                exposure_time=session_data.get('exposure_time') if cal_type in ('dark', 'flatdark') else None,
                 binning_x=session_data.get('binning_x'),
                 binning_y=session_data.get('binning_y'),
                 ccd_temp=session_data.get('ccd_temp'),
@@ -185,7 +185,7 @@ class Masters(BaseModel):
             'master_type': self.master_type
         }
         
-        if self.master_type == 'dark' and self.exposure_time:
+        if self.master_type in ('dark', 'flatdark') and self.exposure_time:
             criteria['exposure_time'] = self.exposure_time
         elif self.master_type == 'flat' and self.filter_name:
             criteria['filter_name'] = self.filter_name
@@ -290,7 +290,7 @@ class Masters(BaseModel):
         """
         total_size = 0
         total_count = 0
-        by_type = {'bias': 0, 'dark': 0, 'flat': 0}
+        by_type = {'bias': 0, 'dark': 0, 'flat': 0, 'flatdark': 0}
         
         for master in cls.select().where(cls.soft_delete == False):
             if master.file_size:

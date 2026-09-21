@@ -17,7 +17,7 @@ Main Components:
     config: Configuration management with environment support
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"  # Single source of truth: pyproject.toml, the UI and FITS headers all read this
 __author__ = "Gord Tulloch"
 __email__ = "gord.tulloch@gmail.com"
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .exceptions import ConfigurationError
+from .paths import get_config_path
 
 
 class LogLevel(Enum):
@@ -137,7 +138,7 @@ class ConfigManager:
     def _find_config_file(self) -> str:
         """Find configuration file in standard locations."""
         possible_paths = [
-            "astrofiler.ini",
+            str(get_config_path()),
             os.path.expanduser("~/.astrofiler/config.ini"),
             os.path.expanduser("~/.config/astrofiler.ini"),
         ]
@@ -147,7 +148,7 @@ class ConfigManager:
                 return path
         
         # Return default path if none found
-        return "astrofiler.ini"
+        return str(get_config_path())
     
     def load_config(self) -> AstroFilerConfig:
         """Load configuration from file and environment variables."""
@@ -279,7 +280,7 @@ def get_temp_folder() -> str:
     
     # Try to read from config file
     config = configparser.ConfigParser()
-    config_file = 'astrofiler.ini'
+    config_file = str(get_config_path())
     
     if os.path.exists(config_file):
         config.read(config_file)

@@ -54,7 +54,10 @@ class fitsFile(BaseModel):
         Returns:
             bool: True if this is a calibration frame
         """
-        return self.fitsFileType in ['Bias Frame', 'Dark Frame', 'Flat Field']
+        if not self.fitsFileType:
+            return False
+        file_type = self.fitsFileType.upper()
+        return any(token in file_type for token in ['BIAS', 'DARK', 'FLAT'])
     
     def is_light_frame(self):
         """
@@ -80,8 +83,8 @@ class fitsFile(BaseModel):
             'ccd_temp': self.fitsFileCCDTemp,
             'gain': self.fitsFileGain,
             'offset': self.fitsFileOffset,
-            'exposure_time': self.fitsFileExpTime if self.fitsFileType == 'Dark Frame' else None,
-            'filter_name': self.fitsFileFilter if self.fitsFileType == 'Flat Field' else None
+            'exposure_time': self.fitsFileExpTime if self.fitsFileType and 'DARK' in self.fitsFileType.upper() else None,
+            'filter_name': self.fitsFileFilter if self.fitsFileType and 'FLAT' in self.fitsFileType.upper() and 'DARK' not in self.fitsFileType.upper() else None
         }
     
     def mark_as_calibrated(self, calibration_date=None):

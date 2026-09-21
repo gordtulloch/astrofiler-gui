@@ -1,12 +1,15 @@
 # Misc files
 *.ini
-REPOSITORY/
-REPOSITORY.incoming/
 *.json
 xisfFile/samples/*
 book/
 registration_server/
 backups/
+
+# Pycache
+__pycache__/
+*.py[cod]
+*$py.class
 
 # Log files
 *.log

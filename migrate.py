@@ -29,6 +29,7 @@ src_path = os.path.join(project_root, 'src')
 if src_path in sys.path:
     sys.path.remove(src_path)
 sys.path.insert(0, src_path)
+from astrofiler.paths import get_log_path
 
 # Now import astrofiler modules
 try:
@@ -51,7 +52,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('astrofiler.log', mode='a'),
+        logging.FileHandler(get_log_path(), mode='a'),
         logging.StreamHandler(sys.stdout)
     ]
 )

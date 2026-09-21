@@ -9,6 +9,7 @@ import os
 import shutil
 import logging
 import configparser
+from ..paths import get_config_path, default_repo_folder, default_source_folder
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,9 @@ class RepositoryManager:
     def __init__(self):
         """Initialize RepositoryManager with configuration."""
         config = configparser.ConfigParser()
-        config.read('astrofiler.ini')
-        self.sourceFolder = config.get('DEFAULT', 'source', fallback='.')
-        self.repoFolder = config.get('DEFAULT', 'repo', fallback='.')
+        config.read(get_config_path())
+        self.sourceFolder = config.get('DEFAULT', 'source', fallback=default_source_folder())
+        self.repoFolder = config.get('DEFAULT', 'repo', fallback=default_repo_folder())
 
     def createRepositoryStructure(self):
         """
@@ -78,7 +79,12 @@ class RepositoryManager:
             instrument = hdr.get('INSTRUME', 'Unknown')
             
             # Sanitize names for filesystem
-            from .utils import sanitize_filesystem_name
+            from .utils import (
+                sanitize_filesystem_name,
+                is_dark_image_type,
+                is_flat_dark_image_type,
+                is_flat_image_type,
+            )
             object_safe = sanitize_filesystem_name(object_name)
             telescope_safe = sanitize_filesystem_name(telescope)
             instrument_safe = sanitize_filesystem_name(instrument)
@@ -91,10 +97,24 @@ class RepositoryManager:
                     self.repoFolder, 'Light', object_safe, 
                     telescope_safe, instrument_safe, date_str
                 )
-            elif imagetyp in ['BIAS', 'DARK', 'FLAT']:
+            elif (
+                is_dark_image_type(imagetyp)
+                or is_flat_dark_image_type(imagetyp)
+                or is_flat_image_type(imagetyp)
+                or 'BIAS' in imagetyp
+            ):
                 # Calibration frames: Calibrate/{TYPE}/{TELESCOPE}/{INSTRUMENT}/
+                # Normalize the type name to the canonical short form
+                if is_flat_dark_image_type(imagetyp):
+                    cal_type = 'FLATDARK'
+                elif is_dark_image_type(imagetyp):
+                    cal_type = 'DARK'
+                elif is_flat_image_type(imagetyp):
+                    cal_type = 'FLAT'
+                else:
+                    cal_type = 'BIAS'
                 dest_dir = os.path.join(
-                    self.repoFolder, 'Calibrate', imagetyp,
+                    self.repoFolder, 'Calibrate', cal_type,
                     telescope_safe, instrument_safe
                 )
             else:

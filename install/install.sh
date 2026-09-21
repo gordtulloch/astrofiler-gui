@@ -49,7 +49,7 @@ install_python() {
         brew install python
     else
         echo "Error: Could not detect package manager."
-        echo "Please install Python 3.8+ manually and run this script again."
+        echo "Please install Python 3.12+ manually and run this script again."
         echo "Visit: https://www.python.org/downloads/"
         exit 1
     fi
@@ -64,10 +64,10 @@ fi
 echo "Checking Python installation..."
 python3 --version
 
-# Check if Python version is 3.8+
-python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null
+# Check if Python version is 3.12+
+python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null
 if [ $? -ne 0 ]; then
-    echo "Error: Python 3.8 or higher is required."
+    echo "Error: Python 3.12 or higher is required."
     echo "Please upgrade your Python installation."
     exit 1
 fi

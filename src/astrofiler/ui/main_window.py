@@ -6,10 +6,13 @@ from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QMainWindow,
                                QStackedWidget, QStatusBar, QMessageBox, QDialog)
 from PySide6.QtGui import QAction, QDesktopServices
 
+from .. import __version__
+from ..paths import resource_path
+
 logger = logging.getLogger(__name__)
 
 # Global version variable
-VERSION = "1.3.0"
+VERSION = __version__
 
 def load_stylesheet(filename):
     """Load stylesheet from a file"""
@@ -26,11 +29,11 @@ def load_stylesheet(filename):
 
 def get_dark_stylesheet():
     """Return a dark theme stylesheet for the application"""
-    return load_stylesheet("css/dark.css")
+    return load_stylesheet(str(resource_path("css", "dark.css")))
 
 def get_light_stylesheet():
     """Return a light theme stylesheet for the application"""
-    return load_stylesheet("css/light.css")
+    return load_stylesheet(str(resource_path("css", "light.css")))
 
 def detect_system_theme():
     """Detect if the system is using dark theme"""
@@ -204,6 +207,7 @@ class AstroFilerGUI(QMainWindow):
         # Refresh action
         refresh_action = view_menu.addAction('&Refresh Current View')
         refresh_action.setShortcut('F5')
+        refresh_action.setShortcutContext(Qt.ApplicationShortcut)
         refresh_action.triggered.connect(self.refresh_current_view)
         
         # Tools Menu
@@ -437,49 +441,5 @@ class AstroFilerGUI(QMainWindow):
             self.config_widget.theme.setCurrentText("Dark")
 
     def showEvent(self, event):
-        """Handle show events to reload data when window regains focus"""
+        """Handle show events"""
         super().showEvent(event)
-        # Load images data by default since that's the default view
-        if hasattr(self.images_widget, 'load_fits_data'):
-            self.images_widget.load_fits_data()
-        super().showEvent(event)
-        # Load images data by default since that's the default view
-        if hasattr(self.images_widget, 'load_fits_data'):
-            self.images_widget.load_fits_data()
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        if hasattr(self.images_widget, 'load_fits_data'):
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-            self.images_widget.load_fits_data()
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")
-        app = QApplication.instance()
-        app.setStyleSheet(get_dark_stylesheet())
-        self.current_theme = "Dark"
-        if hasattr(self, 'config_widget'):
-            self.config_widget.theme.setCurrentText("Dark")

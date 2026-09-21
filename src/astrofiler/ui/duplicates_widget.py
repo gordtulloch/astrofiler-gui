@@ -1,7 +1,6 @@
 import os
 import logging
 import sqlite3
-import setup_path  # Configure Python path for new package structure
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QTreeWidget, QTreeWidgetItem,
@@ -9,6 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtGui import QFont
 
 from astrofiler.models import fitsFile as FitsFileModel
+from astrofiler.paths import get_database_path
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ class DuplicatesWidget(QWidget):
             GROUP BY fitsFileHash 
             HAVING COUNT(*) > 1
             """
-            conn = sqlite3.connect('astrofiler.db')
+            conn = sqlite3.connect(str(get_database_path()))
             cursor = conn.cursor()
             cursor.execute(query)
             duplicate_hashes = cursor.fetchall()
@@ -212,7 +212,7 @@ class DuplicatesWidget(QWidget):
             GROUP BY fitsFileHash 
             HAVING COUNT(*) > 1
             """
-            conn = sqlite3.connect('astrofiler.db')
+            conn = sqlite3.connect(str(get_database_path()))
             cursor = conn.cursor()
             cursor.execute(query)
             duplicate_hashes = [row[0] for row in cursor.fetchall()]

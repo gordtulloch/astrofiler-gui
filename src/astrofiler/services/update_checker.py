@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -140,11 +141,14 @@ def _launch_upgrade_script_new_console() -> bool:
 
         if sys.platform == "darwin":
             # Open Terminal.app and run the script.
-            cmd = f"cd {script.parent.parent.as_posix()}; bash {script.as_posix()}"
+            cmd = f"cd {shlex.quote(script.parent.parent.as_posix())}; bash {shlex.quote(script.as_posix())}"
+            # Escape for embedding in an AppleScript string literal. Done outside the
+            # f-string: backslashes/reused quotes in f-string expressions need Python 3.12.
+            cmd_escaped = cmd.replace("\\", "\\\\").replace('"', '\\"')
             osa = (
                 "tell application \"Terminal\"\n"
                 "  activate\n"
-                f"  do script \"{cmd.replace('\\', '\\\\').replace('"', '\\"')}\"\n"
+                f"  do script \"{cmd_escaped}\"\n"
                 "end tell\n"
             )
             subprocess.Popen(["osascript", "-e", osa])

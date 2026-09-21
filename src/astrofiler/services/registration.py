@@ -6,6 +6,9 @@ import socket
 import threading
 from typing import Callable, Optional
 
+from .. import __version__
+from ..paths import get_config_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -14,7 +17,7 @@ REGISTRATION_ENABLED = True
 REGISTRATION_HOST = "www.gordtulloch.com"
 REGISTRATION_PORT = 5050
 REGISTRATION_TIMEOUT_SECONDS = 2.0
-REGISTRATION_HANDSHAKE = "AF1.2.0"
+REGISTRATION_HANDSHAKE = f"AF{__version__}"  # e.g. "AF1.3.0"
 
 
 def _ini_allows_registration() -> bool:
@@ -26,7 +29,7 @@ def _ini_allows_registration() -> bool:
 
     try:
         config = configparser.ConfigParser()
-        config.read("astrofiler.ini")
+        config.read(get_config_path())
         return config.getboolean("DEFAULT", "Registration", fallback=True)
     except Exception:
         # Fail open: registration must never break startup.

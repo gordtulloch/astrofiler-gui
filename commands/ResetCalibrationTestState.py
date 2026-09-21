@@ -33,6 +33,7 @@ src_path = os.path.join(project_root, 'src')
 if src_path in sys.path:
     sys.path.remove(src_path)
 sys.path.insert(0, src_path)
+from astrofiler.paths import get_log_path
 
 from astrofiler.database import setup_database
 from astrofiler.models import fitsFile as FitsFileModel
@@ -45,7 +46,7 @@ def setup_logging(verbose: bool) -> logging.Logger:
         level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler('astrofiler.log', mode='a'),
+            logging.FileHandler(get_log_path(), mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )

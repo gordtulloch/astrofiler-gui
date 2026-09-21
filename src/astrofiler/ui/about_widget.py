@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtGui import QFont, QPixmap
 
+from ..paths import resource_path
+
 logger = logging.getLogger(__name__)
 
 class AboutWidget(QWidget):
@@ -82,7 +84,7 @@ class AboutWidget(QWidget):
         """Load the background image from local images/background.jpg file"""
         try:
             # Try to load the image from the images directory
-            pixmap = QPixmap("images/background.jpg")
+            pixmap = QPixmap(str(resource_path("images", "background.jpg")))
             
             if not pixmap.isNull():
                 # Get the size of the container

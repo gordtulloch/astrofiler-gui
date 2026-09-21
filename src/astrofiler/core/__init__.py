@@ -17,7 +17,7 @@ from typing import Optional, Union, Any
 
 from ..types import FilePath
 
-__version__ = "1.2.0"
+from .. import __version__  # defined once in astrofiler/__init__.py
 
 # Import key classes and functions for convenient access
 from .file_processing import FileProcessor
@@ -35,6 +35,7 @@ from .utils import (
     clearMappingCache,
     get_master_calibration_path
 )
+from ..paths import get_config_path, default_repo_folder, default_source_folder
 
 # Create a unified processing class that combines all functionality
 class fitsProcessing:
@@ -57,9 +58,9 @@ class fitsProcessing:
         # Load configuration for backwards compatibility
         import configparser
         self.config = configparser.ConfigParser()
-        self.config.read('astrofiler.ini')
-        self.sourceFolder: str = self.config.get('DEFAULT', 'source', fallback='.')
-        self.repoFolder: str = self.config.get('DEFAULT', 'repo', fallback='.')
+        self.config.read(get_config_path())
+        self.sourceFolder: str = self.config.get('DEFAULT', 'source', fallback=default_source_folder())
+        self.repoFolder: str = self.config.get('DEFAULT', 'repo', fallback=default_repo_folder())
     
     # Delegate methods to appropriate processors with original signatures
     def calculateFileHash(self, filePath: FilePath) -> Optional[str]:
@@ -143,6 +144,20 @@ class fitsProcessing:
                         logger = logging.getLogger(__name__)
                         logger.error(f"Error processing {file}: {e}")
         
+        # Attempt to remove any leftover subdirectories in the incoming folder.
+        # Walk bottom-up so child directories are tried before parents.
+        # Ignore OSError (directory not empty) and continue.
+        try:
+            for dirpath, dirnames, filenames in os.walk(scan_folder, topdown=False):
+                if os.path.abspath(dirpath) == os.path.abspath(scan_folder):
+                    continue  # Never remove the incoming root itself
+                try:
+                    os.rmdir(dirpath)
+                except OSError:
+                    pass  # Not empty or other transient error — skip
+        except Exception:
+            pass
+
         return processed_files
     
     def submitFileToDB(self, fileName, hdr, fileHash=None):
@@ -192,7 +207,7 @@ class fitsProcessing:
         """Find a matching master frame for the given session."""
         return self.master_manager.find_matching_master(session_data, cal_type)
     
-    def runAutoCalibrationWorkflow(self, progress_callback=None, operations=None):
+    def runAutoCalibrationWorkflow(self, progress_callback=None, operations=None, force=False):
         """
         Run the auto-calibration workflow with optional operation selection.
         
@@ -229,7 +244,7 @@ class fitsProcessing:
         
         try:
             # Load configuration
-            config = load_config('astrofiler.ini')
+            config = load_config(str(get_config_path()))
             
             # Validate database access
             if not validate_database_access():
@@ -264,7 +279,7 @@ class fitsProcessing:
                             raise Exception("Analysis failed")
                     
                     elif operation == 'masters':
-                        success = create_master_frames(config, progress_callback=operation_progress)
+                        success = create_master_frames(config, force=force, progress_callback=operation_progress)
                         if success:
                             # Count created masters (rough estimate based on opportunities)
                             results['masters_created'] = results.get('calibration_opportunities', 1)
@@ -272,7 +287,7 @@ class fitsProcessing:
                             raise Exception("Master creation failed")
                     
                     elif operation == 'calibrate':
-                        success = calibrate_light_frames(config, progress_callback=operation_progress)
+                        success = calibrate_light_frames(config, force_recalibrate=force, progress_callback=operation_progress)
                         if success:
                             # Rough estimate of calibrated sessions
                             results['light_frames_calibrated'] = 10  # Placeholder

@@ -27,7 +27,8 @@ def _resolve_migrations_dir() -> Path:
 
     Tries (in order):
     - ASTROFILER_MIGRATIONS_DIR env var
-    - A 'migrations' folder found by walking up from this file
+    - A 'migrations' folder found by walking up from this file (normally src/astrofiler/migrations,
+      which is bundled with the package)
     - A 'migrations' folder under the current working directory
     """
     env_dir = os.environ.get("ASTROFILER_MIGRATIONS_DIR")
@@ -44,10 +45,8 @@ def _resolve_migrations_dir() -> Path:
     if cwd_candidate.is_dir():
         return cwd_candidate
 
-    # Fall back to the expected repo layout when running from source:
-    # <repo>/src/astrofiler/database.py -> <repo>/migrations
-    repo_root_candidate = module_path.parents[2] / "migrations"
-    return repo_root_candidate
+    # Fall back to the bundled location: <package>/migrations (ships in the wheel)
+    return module_path.parent / "migrations"
 
 
 MIGRATIONS_DIR = _resolve_migrations_dir()

@@ -12,8 +12,34 @@ from typing import Optional, Dict, Any, List, Union
 from pathlib import Path
 
 from ..types import FilePath, FitsHeaderDict
+from ..paths import get_config_path, default_repo_folder
 
 logger = logging.getLogger(__name__)
+
+
+def fits_image_data(hdul):
+    """Return (data, header) for the first HDU with 2-D+ image data.
+
+    Handles plain FITS, multi-extension FITS, and tile-compressed FITS
+    (CompImageHDU). Astropy decompresses tile-compressed HDUs transparently
+    when .data is accessed, so all standard FITS compression types are
+    supported automatically.
+
+    Args:
+        hdul: An open astropy HDUList.
+
+    Returns:
+        Tuple (data, header) where data is a numpy ndarray. If no image HDU is
+        found, returns (None, hdul[0].header).
+    """
+    for hdu in hdul:
+        try:
+            d = hdu.data
+        except Exception:
+            continue
+        if d is not None and getattr(d, 'ndim', 0) >= 2:
+            return d, hdu.header
+    return None, hdul[0].header
 
 
 def normalize_file_path(file_path: Optional[FilePath]) -> Optional[str]:
@@ -71,6 +97,60 @@ def sanitize_filesystem_name(name: Optional[Union[str, Any]]) -> str:
     return sanitized
 
 
+def normalize_image_type(image_type: Optional[Union[str, Any]]) -> str:
+    """Normalize image type strings for reliable matching."""
+    if image_type is None:
+        return ""
+    return "".join(ch for ch in str(image_type).upper() if ch.isalnum())
+
+
+def is_flat_dark_image_type(image_type: Optional[Union[str, Any]]) -> bool:
+    """Return True when the image type represents a flat-dark frame."""
+    normalized = normalize_image_type(image_type)
+    return "FLATDARK" in normalized or "DARKFLAT" in normalized
+
+
+def is_dark_image_type(image_type: Optional[Union[str, Any]]) -> bool:
+    """Return True for regular dark frames, excluding flat-darks."""
+    normalized = normalize_image_type(image_type)
+    return "DARK" in normalized and not is_flat_dark_image_type(normalized)
+
+
+def is_flat_image_type(image_type: Optional[Union[str, Any]]) -> bool:
+    """Return True for regular flat frames, excluding flat-darks."""
+    normalized = normalize_image_type(image_type)
+    return "FLAT" in normalized and not is_flat_dark_image_type(normalized)
+
+
+def exposures_match(
+    exposure_a: Optional[Union[str, float, int]],
+    exposure_b: Optional[Union[str, float, int]],
+    tolerance: float = 1e-3,
+) -> bool:
+    """Compare exposure values numerically with a small tolerance."""
+    try:
+        if exposure_a is None or exposure_b is None:
+            return exposure_a == exposure_b
+        return abs(float(exposure_a) - float(exposure_b)) <= tolerance
+    except (TypeError, ValueError):
+        return str(exposure_a) == str(exposure_b)
+
+
+def session_to_calibration_criteria(session: Any) -> Dict[str, Any]:
+    """Build master-matching criteria from a session-like object."""
+    return {
+        'telescope': getattr(session, 'fitsSessionTelescope', None),
+        'instrument': getattr(session, 'fitsSessionImager', None),
+        'exposure_time': getattr(session, 'fitsSessionExposure', None),
+        'filter_name': getattr(session, 'fitsSessionFilter', None),
+        'binning_x': getattr(session, 'fitsSessionBinningX', None),
+        'binning_y': getattr(session, 'fitsSessionBinningY', None),
+        'ccd_temp': getattr(session, 'fitsSessionCCDTemp', None),
+        'gain': getattr(session, 'fitsSessionGain', None),
+        'offset': getattr(session, 'fitsSessionOffset', None),
+    }
+
+
 def dwarfFixHeader(hdr: Any, root: str, file: str) -> Union[Any, bool]:
     """
     Fix FITS headers for DWARF telescope files based on folder structure and filenames.
@@ -86,13 +166,14 @@ def dwarfFixHeader(hdr: Any, root: str, file: str) -> Union[Any, bool]:
     try:
         # Read configuration to check if we should save modified headers
         config = configparser.ConfigParser()
-        config.read('astrofiler.ini')
+        config.read(get_config_path())
         save_modified = config.getboolean('DEFAULT', 'save_modified_headers', fallback=False)
         
-        # Check if this is a DWARF telescope file
+        # Check if this is a DWARF telescope file (any variant: DWARF, DWARF3, DWARF MINI, etc.)
+        # An empty/missing TELESCOP is allowed — the caller may have detected DWARF via folder structure.
         telescop_value = hdr.get("TELESCOP", "")
-        if not telescop_value or telescop_value.upper() != "DWARF":
-            logger.warning(f"dwarfFixHeader called for non-DWARF file: {file}")
+        if telescop_value and not telescop_value.upper().startswith("DWARF"):
+            logger.warning(f"dwarfFixHeader called for non-DWARF file (TELESCOP={telescop_value!r}): {file}")
             return False
         
         # Skip failed images
@@ -371,8 +452,8 @@ def get_master_calibration_path() -> Optional[str]:
     """
     try:
         config = configparser.ConfigParser()
-        config.read('astrofiler.ini')
-        repo_folder = config.get('DEFAULT', 'repo', fallback='.')
+        config.read(get_config_path())
+        repo_folder = config.get('DEFAULT', 'repo', fallback=default_repo_folder())
         return os.path.join(repo_folder, 'Masters')
     except Exception as e:
         logger.error(f"Error getting master calibration path: {e}")

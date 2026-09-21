@@ -18,7 +18,7 @@ Options:
     -h, --help          Show this help message and exit
     -v, --verbose       Enable verbose logging
     -q, --quiet         Suppress console output (logs only to file)
-    -c, --config        Path to configuration file (default: astrofiler.ini)
+    -c, --config        Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)
     -o, --operation     Operation to perform (analyze|masters|calibrate-lights|quality|all|clear-masters)
     -s, --session       Specific session ID to process (optional)
     -f, --force         Force operation even if masters exist or frames already calibrated
@@ -27,7 +27,7 @@ Options:
     --min-files         Override minimum files per master (default: from config)
     --no-cleanup        Skip cleanup operations after processing
     --dry-run           Show what would be done without making changes
-    --log-file          Write logs to specified file (default: astrofiler.log)
+    --log-file          Write logs to specified file (default: astrofiler.log in the AstroFiler app directory)
 
 Operations:
     analyze             Analyze sessions for calibration opportunities
@@ -83,6 +83,7 @@ src_path = os.path.join(project_root, 'src')
 if src_path in sys.path:
     sys.path.remove(src_path)
 sys.path.insert(0, src_path)
+from astrofiler.paths import DEFAULT_CONFIG_PATH, get_log_path, default_repo_folder
 
 import time
 
@@ -111,7 +112,7 @@ def setup_logging(verbose=False, quiet=False, log_file=None):
     
     # Default to astrofiler.log if no specific log file provided
     if log_file is None:
-        log_file = 'astrofiler.log'
+        log_file = get_log_path()
     
     # Add file handler
     try:
@@ -139,7 +140,7 @@ def setup_logging(verbose=False, quiet=False, log_file=None):
     peewee_logger = logging.getLogger('peewee')
     peewee_logger.setLevel(logging.WARNING)
 
-def load_config(config_path='astrofiler.ini'):
+def load_config(config_path=DEFAULT_CONFIG_PATH):
     """Load configuration from file"""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -169,12 +170,12 @@ def get_auto_calibration_config(config):
 
 def validate_database_access():
     """Validate database connectivity"""
+    from astrofiler.exceptions import DatabaseError
     try:
         ensure_astrofiler_imports()
         
         from astrofiler.database import setup_database
         from astrofiler.models import fitsFile, fitsSession
-        from astrofiler.exceptions import DatabaseError
         
         # Setup database connection
         setup_database()
@@ -498,7 +499,7 @@ def clear_all_masters(config, dry_run=False):
                 logging.warning(f"Failed to delete database record {master.master_id}: {e}")
         
         # Clean up ALL files and directories in Masters folder
-        masters_dir = os.path.join(config.get('DEFAULT', 'repo', fallback='./'), 'Masters')
+        masters_dir = os.path.join(config.get('DEFAULT', 'repo', fallback=default_repo_folder()), 'Masters')
         if os.path.exists(masters_dir):
             try:
                 import shutil
@@ -685,10 +686,11 @@ def run_complete_workflow(config, session_id=None, force=False, dry_run=False):
         
         # Run the complete workflow
         result = processor.runAutoCalibrationWorkflow(
-            progress_callback=create_cli_progress_callback("Auto-calibration workflow")
+            progress_callback=create_cli_progress_callback("Auto-calibration workflow"),
+            force=force
         )
         
-        if result.get('success', False):
+        if result.get('status') == 'success' or result.get('success', False):
             logging.info("Auto-calibration workflow completed successfully")
             
             # Report results
@@ -809,8 +811,8 @@ def main():
                        help='Enable verbose logging')
     parser.add_argument('-q', '--quiet', action='store_true',
                        help='Suppress console output (logs only to file)')
-    parser.add_argument('-c', '--config', default='astrofiler.ini',
-                       help='Path to configuration file (default: astrofiler.ini)')
+    parser.add_argument('-c', '--config', default=DEFAULT_CONFIG_PATH,
+                       help='Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)')
     parser.add_argument('-o', '--operation', choices=['analyze', 'masters', 'calibrate-lights', 'quality', 'all', 'clear-masters'],
                        default='all', help='Operation to perform (default: all)')
     parser.add_argument('-s', '--session', type=str,
@@ -828,7 +830,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true',
                        help='Show what would be done without making changes')
     parser.add_argument('--log-file',
-                       help='Write logs to specified file (default: astrofiler.log)')
+                       help='Write logs to specified file (default: astrofiler.log in the AstroFiler app directory)')
     
     args = parser.parse_args()
     

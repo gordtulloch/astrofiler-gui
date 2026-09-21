@@ -13,6 +13,12 @@ from peewee import IntegrityError
 
 from ..models.fits_file import fitsFile as FitsFileModel
 from ..models.fits_session import fitsSession as fitsSessionModel
+from .utils import (
+    exposures_match,
+    is_dark_image_type,
+    is_flat_dark_image_type,
+    is_flat_image_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +340,7 @@ class SessionProcessor:
         createdBiasSessions = []
         createdDarkSessions = []
         createdFlatSessions = []
+        createdFlatDarkSessions = []
         
         # Query for all calibration files that are not assigned to a session
         # Order by telescope, instrument, date, then binning so grouping is stable
@@ -351,7 +358,8 @@ class SessionProcessor:
         # Order by telescope, instrument, date, then exposure and binning for darks
         unassignedDarks = FitsFileModel.select().where(
             FitsFileModel.fitsFileSession.is_null(True), 
-            FitsFileModel.fitsFileType.contains("DARK")
+            FitsFileModel.fitsFileType.contains("DARK"),
+            ~FitsFileModel.fitsFileType.contains("FLAT")
         ).order_by(
             FitsFileModel.fitsFileTelescop,
             FitsFileModel.fitsFileInstrument,
@@ -364,7 +372,8 @@ class SessionProcessor:
         # Order by telescope, instrument, date, then filter and binning for flats
         unassignedFlats = FitsFileModel.select().where(
             FitsFileModel.fitsFileSession.is_null(True), 
-            FitsFileModel.fitsFileType.contains("FLAT")
+            FitsFileModel.fitsFileType.contains("FLAT"),
+            ~FitsFileModel.fitsFileType.contains("DARK")
         ).order_by(
             FitsFileModel.fitsFileTelescop,
             FitsFileModel.fitsFileInstrument,
@@ -373,18 +382,33 @@ class SessionProcessor:
             FitsFileModel.fitsFileXBinning,
             FitsFileModel.fitsFileYBinning
         )
+
+        unassignedFlatDarks = FitsFileModel.select().where(
+            FitsFileModel.fitsFileSession.is_null(True),
+            FitsFileModel.fitsFileType.contains("FLAT"),
+            FitsFileModel.fitsFileType.contains("DARK")
+        ).order_by(
+            FitsFileModel.fitsFileTelescop,
+            FitsFileModel.fitsFileInstrument,
+            FitsFileModel.fitsFileDate,
+            FitsFileModel.fitsFileExpTime,
+            FitsFileModel.fitsFileXBinning,
+            FitsFileModel.fitsFileYBinning
+        )
         
         # Calculate total files for progress tracking
         total_biases = len(unassignedBiases)
         total_darks = len(unassignedDarks)
         total_flats = len(unassignedFlats)
-        total_files = total_biases + total_darks + total_flats
+        total_flatdarks = len(unassignedFlatDarks)
+        total_files = total_biases + total_darks + total_flats + total_flatdarks
         current_count = 0
         
         # How many unassigned_files are there?
         logger.info("createCalibrationSessions found "+str(total_biases)+" unassigned Bias calibration files to Session")
         logger.info("createCalibrationSessions found "+str(total_darks)+" unassigned Dark calibration files to Session")
         logger.info("createCalibrationSessions found "+str(total_flats)+" unassigned Flat calibration files to Session")
+        logger.info("createCalibrationSessions found "+str(total_flatdarks)+" unassigned FlatDark calibration files to Session")
 
         # Bias calibration files - group by date, telescope, imager, binning
         currentDate = None
@@ -577,17 +601,85 @@ class SessionProcessor:
             flatFitsFile.fitsFileSession = uuidStr
             flatFitsFile.save()   
             logger.debug("Set Session for flat "+flatFitsFile.fitsFileName+" to "+str(uuidStr))
+
+        # Flat-dark calibration files - group like darks by date, telescope, imager, exposure, binning
+        currentDate = None
+        currentTelescope = None
+        currentImager = None
+        currentExpTime = None
+        currentBinningX = None
+        currentBinningY = None
+        uuidStr = None
+
+        for flatDarkFitsFile in unassignedFlatDarks:
+            current_count += 1
+
+            if progress_callback:
+                should_continue = progress_callback(current_count, total_files, f"FlatDark: {flatDarkFitsFile.fitsFileName}")
+                if not should_continue:
+                    logger.info("Calibration Session creation cancelled by user")
+                    return createdCalibrationSessions
+
+            fits_date = self.dateToDateField(flatDarkFitsFile.fitsFileDate)
+            if (
+                fits_date != currentDate
+                or flatDarkFitsFile.fitsFileTelescop != currentTelescope
+                or flatDarkFitsFile.fitsFileInstrument != currentImager
+                or not exposures_match(flatDarkFitsFile.fitsFileExpTime, currentExpTime)
+                or flatDarkFitsFile.fitsFileXBinning != currentBinningX
+                or flatDarkFitsFile.fitsFileYBinning != currentBinningY
+            ):
+                logger.debug("Creating new flat-dark session for date " + str(flatDarkFitsFile.fitsFileDate))
+                uuidStr = uuid.uuid4()
+                fitsSessionModel.create(
+                    fitsSessionId=uuidStr,
+                    fitsSessionDate=fits_date,
+                    fitsSessionObjectName='FlatDark',
+                    fitsSessionTelescope=flatDarkFitsFile.fitsFileTelescop,
+                    fitsSessionImager=flatDarkFitsFile.fitsFileInstrument,
+                    fitsSessionExposure=flatDarkFitsFile.fitsFileExpTime,
+                    fitsSessionBinningX=flatDarkFitsFile.fitsFileXBinning,
+                    fitsSessionBinningY=flatDarkFitsFile.fitsFileYBinning,
+                    fitsSessionCCDTemp=flatDarkFitsFile.fitsFileCCDTemp,
+                    fitsSessionGain=flatDarkFitsFile.fitsFileGain,
+                    fitsSessionOffset=flatDarkFitsFile.fitsFileOffset,
+                    fitsSessionFilter=flatDarkFitsFile.fitsFileFilter,
+                    fitsBiasSession=None,
+                    fitsDarkSession=None,
+                    fitsFlatSession=None
+                )
+
+                currentDate = fits_date
+                currentTelescope = flatDarkFitsFile.fitsFileTelescop
+                currentImager = flatDarkFitsFile.fitsFileInstrument
+                currentExpTime = flatDarkFitsFile.fitsFileExpTime
+                currentBinningX = flatDarkFitsFile.fitsFileXBinning
+                currentBinningY = flatDarkFitsFile.fitsFileYBinning
+
+                createdCalibrationSessions.append(uuidStr)
+                createdFlatDarkSessions.append(uuidStr)
+                logger.debug(
+                    f"New flat-dark session {uuidStr} for {flatDarkFitsFile.fitsFileTelescop}/"
+                    f"{flatDarkFitsFile.fitsFileInstrument} {flatDarkFitsFile.fitsFileXBinning}x"
+                    f"{flatDarkFitsFile.fitsFileYBinning} {flatDarkFitsFile.fitsFileExpTime}s"
+                )
+
+            flatDarkFitsFile.fitsFileSession = uuidStr
+            flatDarkFitsFile.save()
+            logger.debug("Set Session for flat-dark " + flatDarkFitsFile.fitsFileName + " to " + str(uuidStr))
         
         # Calculate session counts by type
         bias_sessions_created = len(createdBiasSessions)
         dark_sessions_created = len(createdDarkSessions)
         flat_sessions_created = len(createdFlatSessions)
-        total_sessions_created = bias_sessions_created + dark_sessions_created + flat_sessions_created
+        flatdark_sessions_created = len(createdFlatDarkSessions)
+        total_sessions_created = bias_sessions_created + dark_sessions_created + flat_sessions_created + flatdark_sessions_created
         
         logger.info(f"Calibration session creation complete:")
         logger.info(f"  Bias sessions: {bias_sessions_created} (from {total_biases} files)")
         logger.info(f"  Dark sessions: {dark_sessions_created} (from {total_darks} files)")
         logger.info(f"  Flat sessions: {flat_sessions_created} (from {total_flats} files)")
+        logger.info(f"  FlatDark sessions: {flatdark_sessions_created} (from {total_flatdarks} files)")
         logger.info(f"  Total calibration sessions: {total_sessions_created}")
         return createdCalibrationSessions
 
@@ -618,7 +710,8 @@ class SessionProcessor:
                              .select()
                              .where(fitsSessionModel.fitsSessionObjectName != 'Bias',
                                    fitsSessionModel.fitsSessionObjectName != 'Dark',
-                                   fitsSessionModel.fitsSessionObjectName != 'Flat'))
+                                   fitsSessionModel.fitsSessionObjectName != 'Flat',
+                                   fitsSessionModel.fitsSessionObjectName != 'FlatDark'))
             
             total_sessions = len(light_sessions)
             current_count = 0
@@ -673,23 +766,7 @@ class SessionProcessor:
                 
                 # Find most recent dark session with matching telescope/imager/binning/exposure/gain/offset/ccd_temp (within 5 degrees)
                 if not light_session.fitsDarkSession:
-                    # Select most recent dark session matching parameters (excluding CCD temperature)
-                    dark_session = (fitsSessionModel
-                        .select()
-                        .where(
-                            fitsSessionModel.fitsSessionObjectName == 'Dark',
-                            fitsSessionModel.fitsSessionTelescope == light_session.fitsSessionTelescope,
-                            fitsSessionModel.fitsSessionImager == light_session.fitsSessionImager,
-                            fitsSessionModel.fitsSessionDate <= light_session.fitsSessionDate,
-                            fitsSessionModel.fitsSessionBinningX == light_x_binning,
-                            fitsSessionModel.fitsSessionBinningY == light_y_binning,
-                            fitsSessionModel.fitsSessionExposure == light_exp_time,
-                            fitsSessionModel.fitsSessionGain == light_gain,
-                            fitsSessionModel.fitsSessionOffset == light_offset
-                        )
-                        .order_by(fitsSessionModel.fitsSessionDate.desc())
-                        .first()
-                    )
+                    dark_session = self._find_matching_dark_session(light_session, 'Dark')
                     if dark_session:
                         light_session.fitsDarkSession = str(dark_session.fitsSessionId)
                         session_updated = True
@@ -725,7 +802,27 @@ class SessionProcessor:
                     light_session.save()
                     updated_sessions.append(str(light_session.fitsSessionId))
                     logger.debug(f"Updated light session {light_session.fitsSessionId} with calibration links")
-            
+
+            flat_sessions = (
+                fitsSessionModel
+                .select()
+                .where(fitsSessionModel.fitsSessionObjectName == 'Flat')
+            )
+
+            for flat_session in flat_sessions:
+                if flat_session.fitsDarkSession:
+                    continue
+
+                flat_dark_session = self._find_matching_dark_session(flat_session, 'FlatDark')
+                if flat_dark_session:
+                    flat_session.fitsDarkSession = str(flat_dark_session.fitsSessionId)
+                    flat_session.save()
+                    updated_sessions.append(str(flat_session.fitsSessionId))
+                    logger.debug(
+                        f"Linked flat-dark session {flat_dark_session.fitsSessionId} "
+                        f"to flat session {flat_session.fitsSessionId}"
+                    )
+             
             logger.info(f"Session linking complete. Updated {len(updated_sessions)} light sessions with calibration links")
             
         except Exception as e:
@@ -733,6 +830,42 @@ class SessionProcessor:
             raise
         
         return updated_sessions
+
+    def _temperatures_within_tolerance(self, session_a, session_b, tolerance: float = 5.0) -> bool:
+        """Return True when session temperatures are within tolerance."""
+        try:
+            temp_a = float(session_a.fitsSessionCCDTemp or 0)
+            temp_b = float(session_b.fitsSessionCCDTemp or 0)
+            return abs(temp_a - temp_b) <= tolerance
+        except (TypeError, ValueError):
+            return session_a.fitsSessionCCDTemp == session_b.fitsSessionCCDTemp
+
+    def _find_matching_dark_session(self, target_session, dark_object_name: str):
+        """Find the most recent matching dark-like session for a target session."""
+        candidates = (
+            fitsSessionModel
+            .select()
+            .where(
+                fitsSessionModel.fitsSessionObjectName == dark_object_name,
+                fitsSessionModel.fitsSessionTelescope == target_session.fitsSessionTelescope,
+                fitsSessionModel.fitsSessionImager == target_session.fitsSessionImager,
+                fitsSessionModel.fitsSessionDate <= target_session.fitsSessionDate,
+                fitsSessionModel.fitsSessionBinningX == target_session.fitsSessionBinningX,
+                fitsSessionModel.fitsSessionBinningY == target_session.fitsSessionBinningY,
+                fitsSessionModel.fitsSessionGain == target_session.fitsSessionGain,
+                fitsSessionModel.fitsSessionOffset == target_session.fitsSessionOffset
+            )
+            .order_by(fitsSessionModel.fitsSessionDate.desc())
+        )
+
+        for candidate in candidates:
+            if not exposures_match(candidate.fitsSessionExposure, target_session.fitsSessionExposure):
+                continue
+            if not self._temperatures_within_tolerance(candidate, target_session):
+                continue
+            return candidate
+
+        return None
 
     def sameDay(self, Date1: str, Date2: str) -> bool:
         """

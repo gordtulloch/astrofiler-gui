@@ -9,6 +9,7 @@ import os
 import logging
 import configparser
 from astropy.io import fits
+from ..paths import get_config_path, default_repo_folder
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,8 @@ class CalibrationProcessor:
     def __init__(self):
         """Initialize CalibrationProcessor with configuration."""
         config = configparser.ConfigParser()
-        config.read('astrofiler.ini')
-        self.repoFolder = config.get('DEFAULT', 'repo', fallback='.')
+        config.read(get_config_path())
+        self.repoFolder = config.get('DEFAULT', 'repo', fallback=default_repo_folder())
 
     def createMasterCalibrationFrames(self, sessionList=None, imageType=None, progressbar=None):
         """
@@ -43,7 +44,7 @@ class CalibrationProcessor:
             
             from ..models import fitsSession as FitsSessionModel
             
-            results = {'bias_masters': 0, 'dark_masters': 0, 'flat_masters': 0}
+            results = {'bias_masters': 0, 'dark_masters': 0, 'flat_masters': 0, 'flatdark_masters': 0}
             
             # Get sessions to process
             if sessionList:
@@ -65,6 +66,13 @@ class CalibrationProcessor:
                         ((FitsSessionModel.fitsDarkMaster.is_null()) | (FitsSessionModel.fitsDarkMaster == ''))
                     )
                     calibration_sessions.extend(dark_sessions)
+
+                if not imageType or imageType == 'flatdark':
+                    flatdark_sessions = FitsSessionModel.select().where(
+                        (FitsSessionModel.fitsSessionObjectName.in_(['FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT'])) &
+                        ((FitsSessionModel.fitsDarkMaster.is_null()) | (FitsSessionModel.fitsDarkMaster == ''))
+                    )
+                    calibration_sessions.extend(flatdark_sessions)
                 
                 if not imageType or imageType == 'flat':
                     flat_sessions = FitsSessionModel.select().where(
@@ -87,6 +95,8 @@ class CalibrationProcessor:
                     
                     if 'bias' in obj_name:
                         cal_type = 'bias'
+                    elif 'flatdark' in obj_name or 'darkflat' in obj_name:
+                        cal_type = 'flatdark'
                     elif 'dark' in obj_name:
                         cal_type = 'dark'
                     elif 'flat' in obj_name:

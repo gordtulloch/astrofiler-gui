@@ -14,6 +14,7 @@ from PySide6.QtGui import QDesktopServices
 from astropy.io import fits
 from astrofiler.core import fitsProcessing
 from ..services.telescope import smart_telescope_manager
+from ..paths import get_config_path, default_source_folder
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +344,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         self.telescope_list.addItem("StellarMate")
         self.telescope_list.addItem("DWARF 3")
         self.telescope_list.addItem("iTelescope")
+        self.telescope_list.addItem("Celestron Origin")
         self.telescope_list.setCurrentRow(0)
         self.telescope_list.setMaximumHeight(100)
         
@@ -412,18 +414,18 @@ class SmartTelescopeDownloadDialog(QDialog):
         """Get the default target directory from configuration (source path)."""
         try:
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             
             if config.has_option('DEFAULT', 'source'):
                 source_path = config.get('DEFAULT', 'source')
                 if source_path and os.path.exists(source_path):
                     return source_path
             
-            return os.getcwd()
+            return default_source_folder()
             
         except Exception as e:
             logger.debug(f"Error reading configuration: {e}")
-            return os.getcwd()
+            return default_source_folder()
     
     def browse_target_directory(self):
         """Open directory picker for target directory."""
@@ -454,6 +456,13 @@ class SmartTelescopeDownloadDialog(QDialog):
                 self.hostname_edit.setText("dwarf.local")
             elif telescope_type == "iTelescope":
                 self.hostname_edit.setText("data.itelescope.net")
+            elif telescope_type == "Celestron Origin":
+                # Load hostname from config if available
+                hostname = smart_telescope_manager.get_celestron_hostname()
+                if hostname:
+                    self.hostname_edit.setText(hostname)
+                else:
+                    self.hostname_edit.setText("")  # User needs to configure
     
     def start_download(self):
         """Start the download process."""

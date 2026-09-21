@@ -16,9 +16,13 @@ import numpy as np
 import hashlib
 from datetime import datetime
 from astropy.io import fits
+from .. import __version__
 from ..models import fitsSession, fitsFile
 from ..core import get_master_calibration_path
+from ..core.utils import fits_image_data
 
+from ..credentials import ITELESCOPE_PASSWORD, get_ini_secret
+from ..paths import get_config_path
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -67,6 +71,14 @@ class SmartTelescopeManager:
                 'protocol': 'ftps',  # FTP with TLS
                 'fits_path': '',  # Start scanning from root
                 'port': 21
+            },
+            'Celestron Origin': {
+                'default_hostname': '192.168.1.208',  # Default IP on the Origin hotspot network
+                'default_username': None,  # Use None for anonymous FTP
+                'default_password': None,  # Use None for anonymous FTP
+                'protocol': 'ftp',  # Plain FTP (not FTPS)
+                'fits_path': 'RawData',  # Celestron Origin stores raw FITS in /RawData
+                'port': 21
             }
         }
     
@@ -74,15 +86,28 @@ class SmartTelescopeManager:
         """Get iTelescope credentials from configuration file."""
         try:
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             
             username = config.get('DEFAULT', 'itelescope_username', fallback='')
-            password = config.get('DEFAULT', 'itelescope_password', fallback='')
+            password = get_ini_secret(config, ITELESCOPE_PASSWORD)
             
             return username.strip(), password.strip()
         except Exception as e:
             logger.error(f"Error reading iTelescope credentials: {e}")
             return '', ''
+    
+    def get_celestron_hostname(self):
+        """Get Celestron Origin hostname from configuration file."""
+        try:
+            config = configparser.ConfigParser()
+            config.read(get_config_path())
+            
+            hostname = config.get('DEFAULT', 'celestron_hostname', fallback='')
+            
+            return hostname.strip()
+        except Exception as e:
+            logger.error(f"Error reading Celestron Origin hostname: {e}")
+            return ''
     
     def get_local_network(self):
         """Get the local network range based on the local IP address."""
@@ -145,93 +170,97 @@ class SmartTelescopeManager:
         """Check if the device matches the target telescope type."""
         if not hostname:
             return False
-        
+
+        hostname_lower = hostname.lower()
         if telescope_type == 'SeeStar':
-            return 'seestar' in hostname.lower()
+            return 'seestar' in hostname_lower
         elif telescope_type == 'StellarMate':
-            return 'stellarmate' in hostname.lower()
-        
+            return 'stellarmate' in hostname_lower
+        elif telescope_type == 'Celestron Origin':
+            hostname_parts = hostname_lower.replace('-', '.').split('.')
+            return 'origin' in hostname_lower or 'celestron' in hostname_parts
+
         return False
+
+    def _is_ip_address(self, hostname):
+        """Check if the hostname value is already an IP address."""
+        try:
+            ipaddress.ip_address(hostname)
+            return True
+        except ValueError:
+            return False
     
     def find_telescope(self, telescope_type, network_range=None, hostname=None):
         """Find a specific telescope on the network."""
         logger.info(f"Starting search for {telescope_type} telescope (hostname={hostname}, network={network_range})")
-        
+
+        config = self.supported_telescopes.get(telescope_type, {})
+        protocol = config.get('protocol', 'smb')
+
         # For iTelescope, bypass all network scanning and SMB checks
         if telescope_type == 'iTelescope':
-            if hostname:
-                logger.info(f"Using provided iTelescope hostname: {hostname}")
-                return hostname, None
-            else:
-                default_hostname = self.supported_telescopes['iTelescope']['default_hostname']
-                logger.info(f"Using default iTelescope hostname: {default_hostname}")
-                return default_hostname, None
-        
-        if not SMB_AVAILABLE:
+            target = hostname or config.get('default_hostname')
+            logger.info(f"Using iTelescope hostname: {target}")
+            return target, None
+
+        if protocol == 'smb' and not SMB_AVAILABLE:
             logger.error("SMB protocol not available. Install pysmb package.")
             return None, "SMB protocol not available. Install pysmb package."
         
         if hostname:
-            # For SeeStar, only use mDNS resolution for seestar.local hostnames
-            # No reverse DNS lookups as SeeStar patched their firmware to disable them
             try:
                 logger.debug(f"Resolving hostname {hostname}")
                 ip = socket.gethostbyname(hostname)
                 logger.debug(f"Hostname {hostname} resolved to {ip}")
-                
-                if self.check_smb_port(ip):
-                    # For SeeStar, trust the mDNS hostname and skip reverse DNS
+
+                port_open = self.check_ftp_port(ip) if protocol == 'ftp' else self.check_smb_port(ip)
+                if port_open:
                     if telescope_type == 'SeeStar':
                         if 'seestar' in hostname.lower() or hostname.upper().startswith('SEESTAR'):
                             logger.info(f"Found {telescope_type} telescope at {ip} (mDNS hostname: {hostname})")
                             return ip, None
-                        else:
-                            logger.warning(f"Hostname {hostname} doesn't match expected SeeStar pattern")
-                            return None, f"Hostname {hostname} doesn't match expected SeeStar pattern"
-                    
-                    # For StellarMate, trust the mDNS hostname and skip reverse DNS
+                        logger.warning(f"Hostname {hostname} doesn't match expected SeeStar pattern")
+                        return None, f"Hostname {hostname} doesn't match expected SeeStar pattern"
                     elif telescope_type == 'StellarMate':
                         if 'stellarmate' in hostname.lower() or hostname.upper().startswith('STELLARMATE'):
                             logger.info(f"Found {telescope_type} telescope at {ip} (mDNS hostname: {hostname})")
                             return ip, None
-                        else:
-                            logger.warning(f"Hostname {hostname} doesn't match expected StellarMate pattern")
-                            return None, f"Hostname {hostname} doesn't match expected StellarMate pattern"
-                    
-                    # For other telescope types, check if the provided hostname matches
+                        logger.warning(f"Hostname {hostname} doesn't match expected StellarMate pattern")
+                        return None, f"Hostname {hostname} doesn't match expected StellarMate pattern"
+                    elif telescope_type == 'DWARF 3':
+                        logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
+                        return ip, None
+                    elif telescope_type == 'Celestron Origin':
+                        if self.is_target_device(hostname, telescope_type) or self._is_ip_address(hostname):
+                            logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
+                            return ip, None
+                        logger.warning(f"Hostname {hostname} doesn't match expected {telescope_type} pattern")
+                        return None, f"Hostname {hostname} doesn't match expected {telescope_type} pattern"
                     elif self.is_target_device(hostname, telescope_type):
                         logger.info(f"Found {telescope_type} telescope at {ip} (user provided hostname: {hostname})")
                         return ip, None
-                
-                logger.warning(f"Device {hostname} ({ip}) not found or not accessible")
-                return None, f"Device {hostname} not found or not accessible"
+                    else:
+                        logger.warning(f"Hostname {hostname} doesn't match expected {telescope_type} pattern")
+                        return None, f"Hostname {hostname} doesn't match expected {telescope_type} pattern"
+
+                logger.warning(f"Device {hostname} found but service port is closed")
+                return None, f"Device {hostname} found but service port is closed"
             except Exception as e:
                 logger.error(f"Unable to resolve hostname {hostname}: {e}")
                 return None, f"Unable to resolve hostname {hostname}"
+
         
-        # For SeeStar, try the default mDNS hostname first before network scanning
-        if telescope_type == 'SeeStar':
-            default_hostname = self.supported_telescopes['SeeStar']['default_hostname']
-            logger.info(f"Trying default mDNS hostname: {default_hostname}")
+        default_hostname = config.get('default_hostname')
+        if default_hostname:
+            logger.info(f"Trying default hostname: {default_hostname}")
             try:
                 ip = socket.gethostbyname(default_hostname)
-                if self.check_smb_port(ip):
-                    logger.info(f"Found {telescope_type} telescope at {ip} via mDNS ({default_hostname})")
+                port_open = self.check_ftp_port(ip) if protocol == 'ftp' else self.check_smb_port(ip)
+                if port_open:
+                    logger.info(f"Found {telescope_type} telescope at {ip} via default hostname ({default_hostname})")
                     return ip, None
             except Exception as e:
-                logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
-        
-        # For StellarMate, try the default mDNS hostname first before network scanning
-        elif telescope_type == 'StellarMate':
-            default_hostname = self.supported_telescopes['StellarMate']['default_hostname']
-            logger.info(f"Trying default mDNS hostname: {default_hostname}")
-            try:
-                ip = socket.gethostbyname(default_hostname)
-                if self.check_smb_port(ip):
-                    logger.info(f"Found {telescope_type} telescope at {ip} via mDNS ({default_hostname})")
-                    return ip, None
-            except Exception as e:
-                logger.debug(f"Default mDNS hostname {default_hostname} not reachable: {e}")
+                logger.debug(f"Default hostname {default_hostname} not reachable: {e}")
         
         # Scan network for device (no reverse DNS lookups for SeeStar, skip entirely for iTelescope)
         if telescope_type == 'iTelescope':
@@ -358,29 +387,57 @@ class SmartTelescopeManager:
             return [], f"Connection error: {e}"
     
     def _get_fits_files_ftp(self, telescope_type, ip, username=None, password=None):
-        """Get FITS files via FTP protocol (DWARF)."""
+        """Get FITS files via FTP protocol (DWARF, Celestron Origin)."""
         logger.info(f"Using FTP connection for {telescope_type}")
         
+        config = self.supported_telescopes.get(telescope_type)
+        
+        # Use provided credentials, or fall back to defaults from config
+        username = username or config.get('default_username')
+        password = password or config.get('default_password')
+        
+        logger.debug(f"FTP credentials: username={'<set>' if username else '<none>'}, password={'<set>' if password else '<none>'}")
+        
         try:
-            # Create FTP connection (no authentication for DWARF)
+            # Create FTP connection
             ftp = ftplib.FTP()
             logger.debug(f"Attempting FTP connection to {ip}:21...")
             ftp.connect(ip, 21, timeout=10)
             
-            # Anonymous login (no username/password for DWARF)
-            ftp.login()
-            logger.info(f"Successfully connected to FTP service at {ip}")
+            # Set passive mode (required by many FTP servers behind firewalls/NAT)
+            ftp.set_pasv(True)
+            logger.debug("Enabled passive FTP mode")
+            
+            # Login with credentials (or anonymous if no credentials available)
+            if username and password:
+                logger.debug(f"Logging in as user '{username}'")
+                ftp.login(username, password)
+                logger.info(f"Successfully connected to FTP service at {ip} (authenticated as {username})")
+            else:
+                logger.debug(f"Using anonymous login")
+                ftp.login()  # Anonymous login
+                logger.info(f"Successfully connected to FTP service at {ip} (anonymous)")
             
             try:
-                # Check for DWARF folder structure
-                if not self._validate_dwarf_structure(ftp):
+                # Check telescope type and scan appropriately
+                if telescope_type == 'DWARF 3':
+                    # Check for DWARF folder structure
+                    if not self._validate_dwarf_structure(ftp):
+                        ftp.quit()
+                        return [], "DWARF folder structure not recognized"
+                    
+                    # Get FITS files from DWARF structure
+                    start_time = time.time()
+                    fits_files = self._get_fits_files_from_dwarf_ftp(ftp)
+                    scan_time = time.time() - start_time
+                elif telescope_type == 'Celestron Origin':
+                    # Get FITS files from Celestron Origin structure
+                    start_time = time.time()
+                    fits_files = self._get_fits_files_from_celestron_ftp(ftp, config.get('fits_path', 'RawData'))
+                    scan_time = time.time() - start_time
+                else:
                     ftp.quit()
-                    return [], "DWARF folder structure not recognized"
-                
-                # Get FITS files from DWARF structure
-                start_time = time.time()
-                fits_files = self._get_fits_files_from_dwarf_ftp(ftp)
-                scan_time = time.time() - start_time
+                    return [], f"Unsupported FTP telescope type: {telescope_type}"
                 
                 ftp.quit()
                 logger.info(f"Found {len(fits_files)} FITS files in {scan_time:.2f} seconds")
@@ -705,6 +762,112 @@ class SmartTelescopeManager:
         except Exception as e:
             logger.error(f"Error scanning DWARF_DARK folder: {e}")
     
+    def _get_fits_files_from_celestron_ftp(self, ftp, fits_path='RawData'):
+        """Get FITS files from Celestron Origin telescope via FTP."""
+        fits_files = []
+        
+        try:
+            # Try to access the specified fits_path directory
+            logger.debug(f"Scanning Celestron Origin '{fits_path}' folder")
+            
+            # Test if the directory exists
+            try:
+                ftp.cwd('/')
+                if fits_path:
+                    ftp.cwd(fits_path)
+                    logger.debug(f"Successfully accessed /{fits_path} directory")
+                    ftp.cwd('/')  # Go back to root
+                    self._scan_celestron_folder(ftp, fits_path, fits_files)
+                else:
+                    # Scan from root
+                    logger.debug("Scanning from root directory")
+                    self._scan_celestron_folder(ftp, '', fits_files)
+                    
+            except ftplib.error_perm as e:
+                # Directory doesn't exist, scan from root instead
+                logger.warning(f"Directory '{fits_path}' not found ({e}), scanning from root directory")
+                self._scan_celestron_folder(ftp, '', fits_files)
+            
+        except Exception as e:
+            logger.error(f"Error scanning Celestron Origin FTP structure: {e}")
+        
+        return fits_files
+    
+    def _scan_celestron_folder(self, ftp, folder_path, fits_files, depth=0, max_depth=5):
+        """Recursively scan Celestron Origin folders for FITS files."""
+        if depth > max_depth:
+            logger.debug(f"Maximum depth reached at '{folder_path}', stopping recursion")
+            return
+            
+        try:
+            # Navigate to the folder
+            ftp.cwd('/')
+            if folder_path:
+                ftp.cwd(folder_path)
+            
+            # Get list of items in current directory
+            items = []
+            try:
+                ftp.retrlines('LIST', items.append)
+            except Exception as e:
+                logger.debug(f"Could not list directory {folder_path}: {e}")
+                return
+            
+            for item_line in items:
+                # Parse FTP LIST output
+                parts = item_line.split()
+                if len(parts) < 9:
+                    continue
+                
+                permissions = parts[0]
+                filename = ' '.join(parts[8:])  # Handle filenames with spaces
+                
+                # Skip hidden files and current/parent directory references
+                if filename.startswith('.') or filename in ['.', '..']:
+                    continue
+                
+                item_path = f"{folder_path}/{filename}" if folder_path else filename
+                
+                if permissions.startswith('d'):
+                    # It's a directory - recurse into it
+                    logger.debug(f"Scanning Celestron subdirectory: {item_path}")
+                    self._scan_celestron_folder(ftp, item_path, fits_files, depth + 1, max_depth)
+                    
+                elif filename.lower().endswith(('.fits', '.fit', '.fts')):
+                    # It's a FITS file
+                    # Extract file size from LIST output (more efficient than using SIZE command)
+                    try:
+                        size = int(parts[4])
+                    except (ValueError, IndexError):
+                        size = 0
+                    
+                    # Extract date from LIST output if possible
+                    try:
+                        date_str = f"{parts[5]} {parts[6]} {parts[7]}"
+                    except:
+                        date_str = "Unknown"
+                    
+                    # Extract object name from filename if possible
+                    object_name = self._extract_object_from_filename(filename)
+                    
+                    fits_files.append({
+                        "name": filename,
+                        "path": item_path,
+                        "size": size,
+                        "date": date_str,
+                        "share_name": "ftp_root",
+                        "folder_name": os.path.basename(folder_path) if folder_path else "root",
+                        "telescope_type": "Celestron Origin",
+                        "file_type": "light",
+                        "object": object_name,
+                        "instrument": "Celestron Origin"
+                    })
+                    logger.debug(f"Found Celestron Origin FITS file: {item_path}")
+                    
+        except Exception as e:
+            logger.error(f"Error scanning Celestron folder {folder_path}: {e}")
+
+    
     def _get_fits_files_from_itelescope_ftps(self, ftps, hostname):
         """Get all calibrated FITS files from iTelescope FTPS server."""
         fits_files = []
@@ -807,8 +970,13 @@ class SmartTelescopeManager:
             logger.error(f"Error scanning iTelescope directory {current_path}: {e}")
     
     def _extract_object_from_filename(self, filename):
-        """Extract object name from iTelescope filename if possible."""
-        # iTelescope filenames might contain object information
+        """Extract object name from telescope filename if possible.
+        
+        Handles various filename patterns:
+        - iTelescope: removes 'calibrated' prefix and extracts first part
+        - Celestron Origin: extracts first part of filename before underscore
+        - Generic: returns first part of filename as object name
+        """
         # This is a basic implementation - may need refinement based on actual filename patterns
         try:
             # Remove 'calibrated' prefix and file extension
@@ -824,6 +992,8 @@ class SmartTelescopeManager:
             elif base_name.endswith('.fits'):
                 base_name = base_name[:-5]
             elif base_name.endswith('.fit'):
+                base_name = base_name[:-4]
+            elif base_name.endswith('.fts'):
                 base_name = base_name[:-4]
             
             # Extract first part which might be object name
@@ -939,12 +1109,31 @@ class SmartTelescopeManager:
         """Download file via FTP protocol."""
         file_name = os.path.basename(file_info['path'])
         
+        config = self.supported_telescopes.get(telescope_type)
+        username = config.get('default_username')
+        password = config.get('default_password')
+        
+        logger.debug(f"FTP download credentials: username={'<set>' if username else '<none>'}, password={'<set>' if password else '<none>'}")
+        
         try:
             # Create FTP connection
             ftp = ftplib.FTP()
             logger.debug(f"Connecting to {ip} for FTP file download...")
             ftp.connect(ip, 21, timeout=10)
-            ftp.login()  # Anonymous login for DWARF
+            
+            # Set passive mode (required by many FTP servers behind firewalls/NAT)
+            ftp.set_pasv(True)
+            logger.debug("Enabled passive FTP mode for download")
+            
+            # Login with credentials (or anonymous)
+            if username and password:
+                logger.debug(f"Logging in as user '{username}' for download")
+                ftp.login(username, password)
+                logger.debug(f"FTP login successful (authenticated as {username})")
+            else:
+                logger.debug(f"Using anonymous login for download")
+                ftp.login()  # Anonymous login
+                logger.debug(f"FTP login successful (anonymous)")
             
             try:
                 # Create local directory if it doesn't exist
@@ -1122,7 +1311,7 @@ def _update_calibrated_frame_header(header, calibration_steps, bias_master, dark
     header['CALIBRAT'] = (True, 'Image has been calibrated')
     header['IMAGETYP'] = ('LIGHT_CAL', 'Calibrated light frame')
     header['CALDATE'] = (datetime.now().isoformat(), 'Calibration processing timestamp')
-    header['CALSOFT'] = ('AstroFiler v1.2.0', 'Calibration software and version')
+    header['CALSOFT'] = (f'AstroFiler v{__version__}', 'Calibration software and version')
     
     # Original file reference
     header['ORIGFILE'] = (os.path.basename(light_path), 'Original uncalibrated filename')
@@ -1276,7 +1465,7 @@ def _update_calibrated_frame_header(header, calibration_steps, bias_master, dark
     header['REDDATE'] = (datetime.now().strftime('%Y-%m-%d'), 'Date of calibration processing')
     
     # Compatibility with common pipeline formats
-    header['HISTORY'] = f"CALIBRATED by AstroFiler v1.2.0 on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    header['HISTORY'] = f"CALIBRATED by AstroFiler v{__version__} on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     if calibration_steps:
         header['HISTORY'] = f"Applied: {' -> '.join(calibration_steps)}"
     
@@ -1312,8 +1501,9 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
             
         # Load light frame
         with fits.open(light_path) as hdul:
-            light_data = hdul[0].data.astype(np.float32)
-            light_header = hdul[0].header.copy()
+            _ld, light_header = fits_image_data(hdul)
+            light_data = _ld.astype(np.float32)
+            light_header = light_header.copy()
             
         if light_data is None or light_data.size == 0:
             return {"error": "No image data found in light frame"}
@@ -1327,7 +1517,8 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
                 progress_callback("Applying bias correction...")
             try:
                 with fits.open(bias_master) as hdul:
-                    bias_data = hdul[0].data.astype(np.float32)
+                    _bd, _ = fits_image_data(hdul)
+                    bias_data = _bd.astype(np.float32)
                 calibrated_data -= bias_data
                 calibration_steps.append(f"BIAS: {os.path.basename(bias_master)}")
             except Exception as e:
@@ -1340,20 +1531,11 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
                 progress_callback("Applying dark correction...")
             try:
                 with fits.open(dark_master) as hdul:
-                    dark_data = hdul[0].data.astype(np.float32)
-                    dark_header = hdul[0].header
+                    _dd, _dh = fits_image_data(hdul)
+                    dark_data = _dd.astype(np.float32)
+                    dark_header = _dh
                     
-                # Scale dark frame by exposure time ratio if needed
-                light_exptime = light_header.get('EXPTIME', 1.0)
-                dark_exptime = dark_header.get('EXPTIME', 1.0)
-                
-                if dark_exptime > 0 and light_exptime != dark_exptime:
-                    scale_factor = light_exptime / dark_exptime
-                    dark_data *= scale_factor
-                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)} (scaled {scale_factor:.3f})")
-                else:
-                    calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
-                
+                calibration_steps.append(f"DARK: {os.path.basename(dark_master)}")
                 calibrated_data -= dark_data
             except Exception as e:
                 if progress_callback:
@@ -1365,7 +1547,8 @@ def calibrate_light_frame(light_path, dark_master=None, flat_master=None, bias_m
                 progress_callback("Applying flat correction...")
             try:
                 with fits.open(flat_master) as hdul:
-                    flat_data = hdul[0].data.astype(np.float32)
+                    _fd, _ = fits_image_data(hdul)
+                    flat_data = _fd.astype(np.float32)
                     
                 # Normalize flat field (avoid division by zero)
                 flat_mean = np.mean(flat_data[flat_data > 0])

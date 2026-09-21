@@ -2,11 +2,11 @@ import os
 import logging
 import configparser
 import base64
-import setup_path  # Configure Python path for new package structure
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QLabel, QFrame, QMessageBox, QGroupBox, QApplication)
 from PySide6.QtGui import QFont
+from ..paths import get_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -341,7 +341,7 @@ class CloudSyncDialog(QDialog):
         """Load cloud configuration from astrofiler.ini"""
         try:
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             
             return {
                 'vendor': config.get('DEFAULT', 'cloud_vendor', fallback='Not configured'),
@@ -1032,7 +1032,7 @@ class CloudSyncDialog(QDialog):
         try:
             # Get repository path from configuration
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             repo_path = config.get('DEFAULT', 'repo', fallback='')
             
             if not repo_path or not os.path.exists(repo_path):
@@ -1209,7 +1209,7 @@ class CloudSyncDialog(QDialog):
         try:
             # Get repository path from configuration
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             repo_path = config.get('DEFAULT', 'repo', fallback='')
             
             if not repo_path or not os.path.exists(repo_path):
@@ -1496,7 +1496,7 @@ class CloudSyncDialog(QDialog):
         try:
             # Get repository path from configuration
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             repo_path = config.get('DEFAULT', 'repo', fallback='')
             
             if not repo_path or not os.path.exists(repo_path):

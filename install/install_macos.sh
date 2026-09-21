@@ -69,7 +69,7 @@ if [ -z "$python_cmd" ]; then
     read -p "Do you want to install Python via Homebrew? [Y/n]: " choice
     case "$choice" in 
         n|N ) 
-            echo "Please install Python 3.8+ manually and run this script again."
+            echo "Please install Python 3.12+ manually and run this script again."
             echo "You can download it from: https://www.python.org/downloads/"
             echo "Or install via Homebrew: brew install python"
             exit 1
@@ -85,10 +85,10 @@ fi
 echo "Checking Python installation..."
 $python_cmd --version
 
-# Check if Python version is 3.8+
-$python_cmd -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null
+# Check if Python version is 3.12+
+$python_cmd -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null
 if [ $? -ne 0 ]; then
-    echo "Error: Python 3.8 or higher is required."
+    echo "Error: Python 3.12 or higher is required."
     echo "Please upgrade your Python installation."
     exit 1
 fi
@@ -228,7 +228,10 @@ case "$create_app" in
         mkdir -p "$app_name/Contents/MacOS"
         mkdir -p "$app_name/Contents/Resources"
         
-        # Create Info.plist
+        # Create Info.plist (version comes from the package so it never drifts)
+        app_version=$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' src/astrofiler/__init__.py | head -n 1)
+        app_version="${app_version:-1.0.0}"
+
         cat > "$app_name/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -243,9 +246,9 @@ case "$create_app" in
     <key>CFBundleDisplayName</key>
     <string>AstroFiler</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>${app_version}</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${app_version}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>

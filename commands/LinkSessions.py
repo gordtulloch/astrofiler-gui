@@ -12,7 +12,7 @@ Usage:
 Options:
     -h, --help      Show help message
     -v, --verbose   Enable verbose logging
-    -c, --config    Path to configuration file (default: astrofiler.ini)
+    -c, --config    Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)
 
 Examples:
     python LinkSessions.py
@@ -34,6 +34,7 @@ src_path = os.path.join(project_root, 'src')
 if src_path in sys.path:
     sys.path.remove(src_path)
 sys.path.insert(0, src_path)
+from astrofiler.paths import DEFAULT_CONFIG_PATH, get_log_path
 
 def ensure_astrofiler_imports():
     """Ensure astrofiler package can be imported correctly from src directory"""
@@ -59,7 +60,7 @@ def setup_logging(verbose=False):
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler('astrofiler.log', mode='a'),
+            logging.FileHandler(get_log_path(), mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -81,8 +82,8 @@ Examples:
     
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose logging')
-    parser.add_argument('-c', '--config', default='astrofiler.ini',
-                        help='Path to configuration file (default: astrofiler.ini)')
+    parser.add_argument('-c', '--config', default=DEFAULT_CONFIG_PATH,
+                        help='Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)')
     
     args = parser.parse_args()
     

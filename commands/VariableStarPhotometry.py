@@ -25,6 +25,7 @@ src_path = os.path.join(project_root, "src")
 if src_path in sys.path:
     sys.path.remove(src_path)
 sys.path.insert(0, src_path)
+from astrofiler.paths import get_config_path, get_log_path
 
 
 def setup_logging(verbose: bool = False) -> logging.Logger:
@@ -32,7 +33,7 @@ def setup_logging(verbose: bool = False) -> logging.Logger:
     logging.basicConfig(
         level=level,
         format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler("astrofiler.log", mode="a")],
+        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(get_log_path(), mode="a")],
         force=True,
     )
     logging.getLogger("peewee").setLevel(logging.WARNING)
@@ -110,7 +111,7 @@ def main() -> int:
         if need_calibration:
             logger.info(f"Calibrating session {session_id} before photometric stack...")
             config = configparser.ConfigParser()
-            config.read("astrofiler.ini")
+            config.read(get_config_path())
             ok = calibrate_light_frames(config, session_id=session_id)
             if not ok:
                 logger.error("Calibration failed")

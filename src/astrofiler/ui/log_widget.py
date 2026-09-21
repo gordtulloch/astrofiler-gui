@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QTextEdit, QMessageBox)
 from PySide6.QtGui import QFont, QTextCursor
 
+from ..paths import get_log_path
+
 logger = logging.getLogger(__name__)
 
 class LogWidget(QWidget):
@@ -12,7 +14,7 @@ class LogWidget(QWidget):
     
     def __init__(self):
         super().__init__()
-        self.log_file_path = "astrofiler.log"
+        self.log_file_path = str(get_log_path())
         self.init_ui()
         self.load_log_content()
     

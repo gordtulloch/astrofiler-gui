@@ -24,6 +24,10 @@ from .utils import (
     dwarfFixHeader,
     mapFitsHeader,
     get_master_calibration_path,
+    is_dark_image_type,
+    is_flat_dark_image_type,
+    is_flat_image_type,
+    normalize_image_type,
 )
 from ..types import FilePath, FitsHeaderDict, ProcessingResult, QualityMetrics
 from ..exceptions import (
@@ -33,6 +37,7 @@ from ..exceptions import (
 from .file_formats import get_file_format_processor
 from .services.file_hash_calculator import get_file_hash_calculator
 from .compress_files import get_fits_compressor
+from ..paths import get_config_path, default_repo_folder, default_source_folder
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +50,9 @@ class FileProcessor:
     def __init__(self) -> None:
         """Initialize FileProcessor with configuration and services."""
         config = configparser.ConfigParser()
-        config.read('astrofiler.ini')
-        self.sourceFolder: str = config.get('DEFAULT', 'source', fallback='.')
-        self.repoFolder: str = config.get('DEFAULT', 'repo', fallback='.')
+        config.read(get_config_path())
+        self.sourceFolder: str = config.get('DEFAULT', 'source', fallback=default_source_folder())
+        self.repoFolder: str = config.get('DEFAULT', 'repo', fallback=default_repo_folder())
         
         # Initialize services following Dependency Inversion Principle
         self.format_processor = get_file_format_processor()
@@ -304,7 +309,7 @@ class FileProcessor:
             }
             
             # Add type-specific data
-            if master_type == 'dark':
+            if master_type in ('dark', 'flatdark'):
                 session_data['exposure_time'] = str(hdr.get('EXPTIME', hdr.get('EXPOSURE', '')))
             elif master_type == 'flat':
                 session_data['filter_name'] = hdr.get('FILTER', '')
@@ -381,34 +386,40 @@ class FileProcessor:
             hdr: FITS header
             
         Returns:
-            str or None: 'bias', 'dark', 'flat', or None if undetermined
+            str or None: 'bias', 'dark', 'flat', 'flatdark', or None if undetermined
         """
         # Check filename for master type indicators
-        filename = os.path.basename(file_path).lower()
+        filename = normalize_image_type(os.path.basename(file_path))
         
-        if any(pattern in filename for pattern in ['bias', 'masterbias', 'master_bias', 'bias_master']):
+        if any(pattern in filename for pattern in ['BIAS', 'MASTERBIAS']):
             return 'bias'
-        elif any(pattern in filename for pattern in ['dark', 'masterdark', 'master_dark', 'dark_master']):
+        elif 'FLATDARK' in filename or 'DARKFLAT' in filename:
+            return 'flatdark'
+        elif any(pattern in filename for pattern in ['DARK', 'MASTERDARK']):
             return 'dark'
-        elif any(pattern in filename for pattern in ['flat', 'masterflat', 'master_flat', 'flat_master']):
+        elif any(pattern in filename for pattern in ['FLAT', 'MASTERFLAT']):
             return 'flat'
         
         # Check FITS header
         imagetyp = hdr.get('IMAGETYP', '').upper()
         if 'BIAS' in imagetyp:
             return 'bias'
-        elif 'DARK' in imagetyp:
+        elif is_flat_dark_image_type(imagetyp):
+            return 'flatdark'
+        elif is_dark_image_type(imagetyp):
             return 'dark'
-        elif 'FLAT' in imagetyp:
+        elif is_flat_image_type(imagetyp):
             return 'flat'
         
         # Check OBJECT field for master indicators
-        object_name = hdr.get('OBJECT', '').lower()
-        if 'bias' in object_name or 'master-bias' in object_name:
+        object_name = normalize_image_type(hdr.get('OBJECT', ''))
+        if 'BIAS' in object_name:
             return 'bias'
-        elif 'dark' in object_name or 'master-dark' in object_name:
+        elif 'FLATDARK' in object_name or 'DARKFLAT' in object_name:
+            return 'flatdark'
+        elif 'DARK' in object_name:
             return 'dark'
-        elif 'flat' in object_name or 'master-flat' in object_name:
+        elif 'FLAT' in object_name:
             return 'flat'
         
         return None
@@ -497,6 +508,10 @@ class FileProcessor:
                 else:
                     logger.debug(f"Marking file as pre-calibrated from SeeStar instrument: {instrument}")
             
+            # Determine filter: blank for DARK and BIAS frames
+            image_type_upper = image_type.upper()
+            fits_filter = None if ('DARK' in image_type_upper or 'BIAS' in image_type_upper) else hdr.get("FILTER", None)
+
             # Create new file record
             if hdr.get("OBJECT"):
                 newfile = FitsFileModel.create(
@@ -511,7 +526,7 @@ class FileProcessor:
                     fitsFileCCDTemp=hdr.get("CCD-TEMP", 0),
                     fitsFileTelescop=telescope,
                     fitsFileInstrument=instrument,
-                    fitsFileFilter=hdr.get("FILTER", None),
+                    fitsFileFilter=fits_filter,
                     fitsFileHash=fileHash,
                     fitsFileSession=None,
                     fitsFileCalibrated=1 if is_precalibrated else 0
@@ -529,7 +544,7 @@ class FileProcessor:
                     fitsFileCCDTemp=hdr.get("CCD-TEMP", 0),
                     fitsFileTelescop=telescope,
                     fitsFileInstrument=instrument,
-                    fitsFileFilter=hdr.get("FILTER", None),
+                    fitsFileFilter=fits_filter,
                     fitsFileHash=fileHash,
                     fitsFileSession=None,
                     fitsFileCalibrated=1 if is_precalibrated else 0
@@ -595,7 +610,7 @@ class FileProcessor:
         
         # Read configuration
         config = configparser.ConfigParser()
-        config.read('astrofiler.ini')
+        config.read(get_config_path())
         save_modified = config.getboolean('DEFAULT', 'save_modified_headers', fallback=False)
 
         # Process files through the FileFormatProcessor following Open/Closed Principle
@@ -651,7 +666,44 @@ class FileProcessor:
         # Special handling for vendors with incomplete headers
         header_modified = False
         telescop_value = hdr.get("TELESCOP", "")
-        if telescop_value and telescop_value.upper() == "DWARF":
+
+        # Celestron Origin FITS files often omit TELESCOP/INSTRUME.
+        # If CREATOR indicates Origin, populate missing fields.
+        creator_value = hdr.get("CREATOR", "")
+        try:
+            creator_str = "" if creator_value is None else str(creator_value)
+        except Exception:
+            creator_str = ""
+
+        if "origin" in creator_str.lower():
+            origin_changes_made = False
+
+            telescop_current = hdr.get("TELESCOP")
+            if not (telescop_current and str(telescop_current).strip()):
+                hdr["TELESCOP"] = "Celestron Origin"
+                origin_changes_made = True
+
+            instrume_current = hdr.get("INSTRUME")
+            if not (instrume_current and str(instrume_current).strip()):
+                camera_value = hdr.get("CAMERA")
+                if camera_value and str(camera_value).strip():
+                    hdr["INSTRUME"] = str(camera_value).strip()
+                    origin_changes_made = True
+
+            if origin_changes_made:
+                header_modified = True
+                logger.info(
+                    f"Populated missing Origin header fields for {os.path.join(root, file)}: "
+                    f"TELESCOP={hdr.get('TELESCOP')}, INSTRUME={hdr.get('INSTRUME')}"
+                )
+
+        # Detect any DWARF telescope variant by TELESCOP prefix or by folder structure
+        # (Dwarf Mini, DWARF 3, DWARF II, etc. may use different TELESCOP values)
+        is_dwarf = (telescop_value and telescop_value.upper().startswith("DWARF")) or (
+            not (hdr.get("IMAGETYP") or hdr.get("FRAME"))
+            and "DWARF_RAW" in root
+        )
+        if is_dwarf:
             modified_hdr = dwarfFixHeader(hdr, root, file)
             if not modified_hdr:
                 raise FitsHeaderError(
@@ -693,10 +745,13 @@ class FileProcessor:
         telescope = hdr.get("TELESCOP", "Unknown")
         
         # Fix calibration frames where OBJECT is set to an object rather than the frame type
-        if "DARK" in hdr["IMAGETYP"].upper():
+        if is_flat_dark_image_type(hdr["IMAGETYP"]):
+            hdr["OBJECT"] = "FlatDark"
+            header_modified = True
+        elif is_dark_image_type(hdr["IMAGETYP"]):
             hdr["OBJECT"] = "Dark"
             header_modified = True
-        elif "FLAT" in hdr["IMAGETYP"].upper():
+        elif is_flat_image_type(hdr["IMAGETYP"]):
             hdr["OBJECT"] = "Flat"
             header_modified = True
         elif "BIAS" in hdr["IMAGETYP"].upper():
@@ -763,7 +818,18 @@ class FileProcessor:
                     file_path=os.path.join(root, file)
                 )
 
-        elif "FLAT" in hdr["IMAGETYP"].upper():
+        elif is_flat_dark_image_type(hdr["IMAGETYP"]):
+            newName = "{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(
+                "FlatDark",
+                sanitize_filesystem_name(telescope),
+                sanitize_filesystem_name(hdr.get("INSTRUME", "Unknown")),
+                fitsDate, exposure,
+                hdr.get("XBINNING", 1),
+                hdr.get("YBINNING", 1),
+                hdr.get("CCD-TEMP", 0)
+            )
+
+        elif is_flat_image_type(hdr["IMAGETYP"]):
             # Create filename for flat frames
             filter_name = hdr.get("FILTER", "OSC")
             newName = "{0}-{1}-{2}-{3}-{4}-{5}s-{6}x{7}-t{8}.fits".format(
@@ -777,7 +843,7 @@ class FileProcessor:
                 hdr.get("CCD-TEMP", 0)
             )
 
-        elif "DARK" in hdr["IMAGETYP"].upper():
+        elif is_dark_image_type(hdr["IMAGETYP"]):
             # Create filename for dark frames
             newName = "{0}-{1}-{2}-{3}-{4}s-{5}x{6}-t{7}.fits".format(
                 "Dark",
@@ -811,11 +877,6 @@ class FileProcessor:
         # Save modified header if required
         if header_modified and save_modified:
             try:
-                # Create backup of original file
-                backup_path = os.path.join(root, file + ".backup")
-                import shutil
-                shutil.copy2(os.path.join(root, file), backup_path)
-                
                 # Save modified header
                 with fits.open(os.path.join(root, file), mode='update') as hdul:
                     hdul[0].header = hdr

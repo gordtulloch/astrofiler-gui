@@ -15,9 +15,10 @@ from datetime import datetime
 from ..models import fitsFile, fitsSession, Masters
 from ..database import DatabaseManager
 from .master_manager import get_master_manager
+from ..paths import DEFAULT_CONFIG_PATH
 
 
-def load_config(config_path: str = 'astrofiler.ini') -> configparser.ConfigParser:
+def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> configparser.ConfigParser:
     """Load configuration from file."""
     config = configparser.ConfigParser()
     config.read(config_path)
@@ -90,7 +91,7 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
             master_stats = {
                 'total': masters.count(),
                 'bias': masters.where(Masters.master_type == 'bias').count(),
-                'dark': masters.where(Masters.master_type == 'dark').count(),
+                'dark': masters.where(Masters.master_type.in_(['dark', 'flatdark'])).count(),
                 'flat': masters.where(Masters.master_type == 'flat').count(),
             }
             logging.info(f"Master stats retrieved: {master_stats}")
@@ -118,7 +119,7 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
             progress_callback(30, "Scanning for calibration sessions...")
         
         # Find calibration sessions
-        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT']
+        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT', 'FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT']
         query = fitsSession.select().where(fitsSession.fitsSessionObjectName.in_(calibration_types))
         if session_id:
             query = query.where(fitsSession.fitsSessionId == session_id)
@@ -133,7 +134,8 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
         opportunities = {
             'BIAS': [],
             'DARK': [],
-            'FLAT': []
+            'FLAT': [],
+            'FLATDARK': [],
         }
         
         for session in sessions:
@@ -147,6 +149,8 @@ def analyze_calibration_opportunities(config: configparser.ConfigParser, session
                 
                 if 'bias' in obj_name:
                     cal_type = 'BIAS'
+                elif 'flatdark' in obj_name or 'darkflat' in obj_name:
+                    cal_type = 'FLATDARK'
                 elif 'dark' in obj_name:
                     cal_type = 'DARK'
                 elif 'flat' in obj_name:
@@ -238,7 +242,7 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
             progress_callback(10, "Finding calibration sessions...")
         
         # Find calibration sessions that need masters
-        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT']
+        calibration_types = ['bias', 'Bias', 'BIAS', 'dark', 'Dark', 'DARK', 'flat', 'Flat', 'FLAT', 'FlatDark', 'FLATDARK', 'DarkFlat', 'DARKFLAT']
         query = fitsSession.select().where(fitsSession.fitsSessionObjectName.in_(calibration_types))
         if session_id:
             query = query.where(fitsSession.fitsSessionId == session_id)
@@ -255,6 +259,8 @@ def create_master_frames(config: configparser.ConfigParser, session_id: Optional
                 
                 if 'bias' in obj_name:
                     cal_type = 'bias'
+                elif 'flatdark' in obj_name or 'darkflat' in obj_name:
+                    cal_type = 'flatdark'
                 elif 'dark' in obj_name:
                     cal_type = 'dark'
                 elif 'flat' in obj_name:
@@ -512,14 +518,15 @@ def perform_quality_assessment(config: configparser.ConfigParser, session_id: Op
         for i, fits_file in enumerate(files_to_analyze):
             try:
                 # Create progress callback for individual file
-                def file_progress(percentage, message):
-                    # Calculate overall progress
+                def file_progress(current, total, message):
+                    # Calculate overall progress using current/total ratio
                     file_progress_weight = 80.0 / len(files_to_analyze)  # 80% for file analysis
-                    overall_progress = 10 + (i * file_progress_weight) + (percentage * file_progress_weight / 100)
+                    overall_progress = 10 + (i * file_progress_weight) + (current * file_progress_weight / max(total, 1))
                     
                     if progress_callback:
                         progress_callback(int(overall_progress), 
                                         f"Analyzing {fits_file.fitsFileObject} ({i+1}/{len(files_to_analyze)}): {message}")
+                    return True
                 
                 # Perform quality analysis
                 quality_results = analyzer.analyze_and_update_file(

@@ -1,7 +1,6 @@
 import os
 import logging
 import configparser
-import setup_path  # Configure Python path for new package structure
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                                QLabel, QPushButton, QLineEdit, QCheckBox, 
@@ -10,6 +9,7 @@ from PySide6.QtGui import QFont
 from astropy.io import fits
 
 from astrofiler.models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel
+from ..paths import get_config_path, default_repo_folder
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +191,8 @@ class MergeWidget(QWidget):
         try:
             # Get repository folder from config
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
-            repo_folder = config.get('DEFAULT', 'repo', fallback='.')
+            config.read(get_config_path())
+            repo_folder = config.get('DEFAULT', 'repo', fallback=default_repo_folder())
             if not repo_folder.endswith('/'):
                 repo_folder += '/'
             

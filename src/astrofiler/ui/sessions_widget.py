@@ -16,7 +16,9 @@ from PySide6.QtGui import QFont, QDesktopServices, QIcon, QPixmap, QPainter, QCo
 from PySide6.QtCore import QUrl
 
 from astrofiler.core import fitsProcessing
+from astrofiler.core.utils import session_to_calibration_criteria
 from astrofiler.models import fitsFile as FitsFileModel, fitsSession as FitsSessionModel, Masters
+from ..paths import get_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class SessionsWidget(QWidget):
         
         # Sessions list
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setHeaderLabels(["Object Name", "Thumbnail", "Date", "Telescope", "Imager", "Filter", "Images", "Resources"])
+        self.sessions_tree.setHeaderLabels(["Object Name", "Thumbnail", "Date", "Telescope", "Imager", "Filter", "Binning", "Images", "Resources"])
         self.sessions_tree.setIconSize(QSize(150, 150))
         
         # Enable multi-selection
@@ -61,8 +63,9 @@ class SessionsWidget(QWidget):
         self.sessions_tree.setColumnWidth(3, 150)  # Telescope
         self.sessions_tree.setColumnWidth(4, 150)  # Imager
         self.sessions_tree.setColumnWidth(5, 100)  # Filter
-        self.sessions_tree.setColumnWidth(6, 80)   # Images
-        self.sessions_tree.setColumnWidth(7, 140)  # Resources
+        self.sessions_tree.setColumnWidth(6, 80)   # Binning
+        self.sessions_tree.setColumnWidth(7, 80)   # Images
+        self.sessions_tree.setColumnWidth(8, 140)  # Resources
         
         # Enable context menu
         self.sessions_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -111,7 +114,7 @@ class SessionsWidget(QWidget):
                 return
 
             object_name = parent.text(0) or (session.fitsSessionObjectName or "Unknown")
-            if object_name in ['Bias', 'Dark', 'Flat']:
+            if object_name in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                 return
 
             out_dir = self._get_session_stack_output_dir(session)
@@ -231,7 +234,7 @@ class SessionsWidget(QWidget):
                 
             # This is a session item
             object_name = parent.text(0)
-            if object_name in ['Bias', 'Dark', 'Flat']:
+            if object_name in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                 calibration_sessions.append(selected_item)
             else:
                 light_sessions.append(selected_item)
@@ -350,7 +353,7 @@ class SessionsWidget(QWidget):
 
                 parent_item = item.parent()
                 object_name = parent_item.text(0) if parent_item else "Unknown"
-                if object_name in ['Bias', 'Dark', 'Flat']:
+                if object_name in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                     QMessageBox.information(self, "Not Applicable", "Thumbnails are only generated for light sessions.")
                     return
 
@@ -445,7 +448,7 @@ class SessionsWidget(QWidget):
         # Read configuration to get FITS viewer path
         import configparser
         config = configparser.ConfigParser()
-        config.read('astrofiler.ini')
+        config.read(get_config_path())
         fits_viewer_path = config.get('DEFAULT', 'fits_viewer_path', fallback=None)
 
         # Try to open with configured FITS viewer first
@@ -458,17 +461,13 @@ class SessionsWidget(QWidget):
             except Exception as e:
                 logger.warning(f"Failed to open with configured viewer {fits_viewer_path}: {e}")
 
-        # Fall back to OS default viewer
+        # Fall back to the OS default viewer. Qt hands the path to the platform's
+        # file-association mechanism directly (no shell), so file names containing
+        # quotes or shell metacharacters are safe.
         try:
-            if os.name == 'nt':
-                os.startfile(file_path)
-            elif os.name == 'posix':
-                if hasattr(os, 'uname') and os.uname().sysname == 'Darwin':
-                    os.system(f'open "{file_path}"')
-                else:
-                    os.system(f'xdg-open "{file_path}"')
-            else:
-                QMessageBox.information(self, "Unsupported", "File viewing not supported on this platform")
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(file_path)):
+                QMessageBox.information(self, "Cannot Open File",
+                                        f"No application is available to open:\n{file_path}")
         except Exception as e:
             logger.error(f"Failed to open file in external viewer: {e}")
             QMessageBox.critical(self, "Error", f"Failed to open file:\n{str(e)}")
@@ -521,7 +520,7 @@ class SessionsWidget(QWidget):
             logger.info(f"Starting calibration for session: {object_name} on {session_date}")
             
             # Check if this is a calibration session
-            if object_name in ['Bias', 'Dark', 'Flat']:
+            if object_name in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                 if show_results:
                     QMessageBox.information(
                         self,
@@ -547,6 +546,19 @@ class SessionsWidget(QWidget):
             master_bias = master_manager.find_matching_master(session_data, 'bias')
             master_dark = master_manager.find_matching_master(session_data, 'dark')
             master_flat = master_manager.find_matching_master(session_data, 'flat')
+            master_flat_dark_path = None
+            if session.fitsFlatSession:
+                try:
+                    flat_session = FitsSessionModel.get_by_id(session.fitsFlatSession)
+                    if flat_session and flat_session.fitsDarkSession:
+                        flat_dark_session = FitsSessionModel.get_by_id(flat_session.fitsDarkSession)
+                        if flat_dark_session:
+                            flat_dark_data = session_to_calibration_criteria(flat_dark_session)
+                            master_flat_dark = master_manager.find_matching_master(flat_dark_data, 'flatdark')
+                            if master_flat_dark and os.path.exists(master_flat_dark.master_path):
+                                master_flat_dark_path = master_flat_dark.master_path
+                except Exception as e:
+                    logger.debug(f"Unable to resolve flat-dark master for session {session_id}: {e}")
             
             has_bias = master_bias is not None and os.path.exists(master_bias.master_path)
             has_dark = master_dark is not None and os.path.exists(master_dark.master_path)
@@ -573,6 +585,8 @@ class SessionsWidget(QWidget):
                 available_masters.append(f"Dark: {os.path.basename(master_dark.master_path)}")
             if has_flat:
                 available_masters.append(f"Flat: {os.path.basename(master_flat.master_path)}")
+            if master_flat_dark_path:
+                available_masters.append(f"FlatDark: {os.path.basename(master_flat_dark_path)}")
             
             if confirm:
                 # Confirm calibration
@@ -611,6 +625,7 @@ class SessionsWidget(QWidget):
             master_bias_data = None
             master_dark_data = None
             master_flat_data = None
+            master_flat_dark_data = None
 
             def _extract_image_hdu(hdul):
                 """Return the first HDU with 2D image data, or None."""
@@ -661,14 +676,14 @@ class SessionsWidget(QWidget):
                     QApplication.processEvents()
                     flat_data, _flat_header = _read_fits_image(master_flat.master_path)
                     master_flat_data = flat_data.astype(np.float32, copy=False)
-                    flat_mean = np.mean(master_flat_data)
-                    if flat_mean > 0:
-                        master_flat_data = master_flat_data / flat_mean
-                    else:
-                        logger.warning("Flat frame has zero mean, skipping flat correction")
-                        master_flat_data = None
-                    if master_flat_data is not None:
-                        logger.info(f"Loaded and normalized flat master: {os.path.basename(master_flat.master_path)}")
+                    logger.info(f"Loaded flat master: {os.path.basename(master_flat.master_path)}")
+
+                if master_flat_dark_path:
+                    progress.setLabelText("Loading flat-dark master...")
+                    QApplication.processEvents()
+                    flat_dark_data, _flat_dark_header = _read_fits_image(master_flat_dark_path)
+                    master_flat_dark_data = flat_dark_data.astype(np.float32, copy=False)
+                    logger.info(f"Loaded flat-dark master: {os.path.basename(master_flat_dark_path)}")
                 
             except Exception as e:
                 progress.close()
@@ -738,10 +753,35 @@ class SessionsWidget(QWidget):
                         )
                         flat_data = None
 
+                    flat_dark_data = master_flat_dark_data
+                    if flat_dark_data is not None and flat_data is not None:
+                        if flat_dark_data.shape != flat_data.shape:
+                            logger.warning(
+                                f"Flat-dark master shape {flat_dark_data.shape} does not match flat shape {flat_data.shape}; "
+                                "skipping flat-dark subtraction"
+                            )
+                            flat_dark_data = None
+                        else:
+                            flat_data = flat_data - flat_dark_data
+                            light_header['HISTORY'] = (
+                                f'Flat corrected using flat-dark {os.path.basename(master_flat_dark_path)}'
+                            )
+
                     if flat_data is not None:
-                        mask = flat_data > 0
-                        calibrated_data[mask] /= flat_data[mask]
-                        light_header['HISTORY'] = f'Flat corrected using {os.path.basename(master_flat.master_path)}'
+                        flat_mean = np.mean(flat_data)
+                        if flat_mean > 0:
+                            flat_data = flat_data / flat_mean
+                            mask = flat_data > 0
+                            calibrated_data[mask] /= flat_data[mask]
+                            if master_flat_dark_path and flat_dark_data is not None:
+                                light_header['HISTORY'] = (
+                                    f'Flat corrected using {os.path.basename(master_flat.master_path)} '
+                                    f'with flat-dark {os.path.basename(master_flat_dark_path)}'
+                                )
+                            else:
+                                light_header['HISTORY'] = f'Flat corrected using {os.path.basename(master_flat.master_path)}'
+                        else:
+                            logger.warning("Flat frame has zero mean after flat-dark subtraction, skipping flat correction")
                     
                     # Update header
                     light_header['CALIBRAT'] = True
@@ -849,6 +889,7 @@ class SessionsWidget(QWidget):
 
     def sample_stack_session(self, item):
         """Create a quick stack of calibrated frames for review and open it in external viewer."""
+        progress = None
         try:
             from ..core.master_manager import get_master_manager
             from ..core.utils import sanitize_filesystem_name
@@ -865,7 +906,7 @@ class SessionsWidget(QWidget):
 
             parent_item = item.parent()
             object_name = parent_item.text(0) if parent_item else (session.fitsSessionObjectName or "Unknown")
-            if object_name in ['Bias', 'Dark', 'Flat']:
+            if object_name in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                 QMessageBox.information(self, "Not Applicable", "Stack is only available for light sessions.")
                 return
 
@@ -975,6 +1016,8 @@ class SessionsWidget(QWidget):
 
         except RuntimeError as e:
             # Cancellation
+            if progress is not None:
+                progress.close()
             logger.info(f"Stack cancelled: {e}")
         except Exception as e:
             logger.error(f"Error creating stack: {e}")
@@ -982,6 +1025,7 @@ class SessionsWidget(QWidget):
 
     def photometric_stack_session(self, item):
         """Create a photometry-safe stack of light frames and open it in the external viewer."""
+        progress = None
         try:
             from astrofiler.core.master_manager import get_master_manager
             from astrofiler.core.utils import sanitize_filesystem_name
@@ -1000,7 +1044,7 @@ class SessionsWidget(QWidget):
 
             parent_item = item.parent()
             object_name = parent_item.text(0) if parent_item else (session.fitsSessionObjectName or "Unknown")
-            if object_name in ['Bias', 'Dark', 'Flat']:
+            if object_name in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                 QMessageBox.information(self, "Not Applicable", "Photometric stack is only available for light sessions.")
                 return
 
@@ -1119,6 +1163,8 @@ class SessionsWidget(QWidget):
             self.load_sessions_data()
 
         except RuntimeError as e:
+            if progress is not None:
+                progress.close()
             logger.info(f"Photometric stack cancelled: {e}")
         except Exception as e:
             logger.error(f"Error creating photometric stack: {e}")
@@ -1425,7 +1471,7 @@ class SessionsWidget(QWidget):
                 total_light_sessions = 0
                 
                 for session in object_sessions:
-                    if session.fitsSessionObjectName not in ['Bias', 'Dark', 'Flat']:
+                    if session.fitsSessionObjectName not in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                         total_light_sessions += 1
                         calibration_info = self._build_resources_status(session)
                         if calibration_info["percentage"] > 0:
@@ -1439,16 +1485,17 @@ class SessionsWidget(QWidget):
                 parent_item.setText(3, "")  # No telescope for parent
                 parent_item.setText(4, "")  # No imager for parent
                 parent_item.setText(5, "")  # No filter for parent
-                parent_item.setText(6, str(total_images))  # Total images for this object
+                parent_item.setText(6, "")  # No binning for parent
+                parent_item.setText(7, str(total_images))  # Total images for this object
                 
                 # Show resource summary for parent
                 if total_light_sessions > 0:
                     cal_percentage = (calibrated_sessions / total_light_sessions) * 100
                     cal_summary = f"{calibrated_sessions}/{total_light_sessions} ({cal_percentage:.0f}%)"
-                    parent_item.setText(7, cal_summary)
-                    parent_item.setToolTip(7, f"Resource Coverage: {calibrated_sessions} of {total_light_sessions} sessions have calibration resources")
+                    parent_item.setText(8, cal_summary)
+                    parent_item.setToolTip(8, f"Resource Coverage: {calibrated_sessions} of {total_light_sessions} sessions have calibration resources")
                 else:
-                    parent_item.setText(7, "")
+                    parent_item.setText(8, "")
                 
                 # Style parent item differently
                 font = parent_item.font(0)
@@ -1473,7 +1520,7 @@ class SessionsWidget(QWidget):
                     
                     child_item = QTreeWidgetItem()
                     # Show (master) for calibration sessions that have created masters
-                    if has_master and session.fitsSessionObjectName in ['Bias', 'Dark', 'Flat']:
+                    if has_master and session.fitsSessionObjectName in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                         child_item.setText(0, "(master)")
                     else:
                         child_item.setText(0, "")  # Empty object name for child
@@ -1482,13 +1529,15 @@ class SessionsWidget(QWidget):
                     child_item.setText(3, session.fitsSessionTelescope or "Unknown")
                     child_item.setText(4, session.fitsSessionImager or "Unknown")
                     child_item.setText(5, session.fitsSessionFilter or "Unknown")
-                    child_item.setText(6, str(session_image_count))  # Image count for this session
+                    binning = f"{session.fitsSessionBinningX}x{session.fitsSessionBinningY}" if session.fitsSessionBinningX and session.fitsSessionBinningY else ""
+                    child_item.setText(6, binning)  # Binning
+                    child_item.setText(7, str(session_image_count))  # Image count for this session
                     
                     # Store session ID in the item for later retrieval
                     child_item.setData(0, Qt.UserRole, session.fitsSessionId)
 
                     # Attach thumbnail icon if it exists (light sessions only)
-                    if session.fitsSessionObjectName not in ['Bias', 'Dark', 'Flat']:
+                    if session.fitsSessionObjectName not in ['Bias', 'Dark', 'Flat', 'FlatDark']:
                         thumb_path = self._get_thumbnail_path(str(session.fitsSessionId))
                         if thumb_path and os.path.exists(thumb_path):
                             pix = QPixmap(thumb_path)
@@ -1499,15 +1548,15 @@ class SessionsWidget(QWidget):
                     
                     # Set resources status as simple text only
                     if calibration_info["text"]:
-                        child_item.setText(7, calibration_info["text"])
-                        child_item.setToolTip(7, calibration_info["tooltip"])
+                        child_item.setText(8, calibration_info["text"])
+                        child_item.setToolTip(8, calibration_info["tooltip"])
                     else:
-                        child_item.setText(7, "")
+                        child_item.setText(8, "")
                     
                     # Build quality metrics tooltip for all columns
                     quality_tooltip = self._build_quality_tooltip(session)
-                    for col in range(8):  # Apply tooltip to all columns
-                        if col == 7 and calibration_info["tooltip"]:
+                    for col in range(9):  # Apply tooltip to all columns
+                        if col == 8 and calibration_info["tooltip"]:
                             # Combine calibration tooltip with quality metrics
                             combined_tooltip = f"{calibration_info['tooltip']}\n\n{quality_tooltip}"
                             child_item.setToolTip(col, combined_tooltip)
@@ -1538,7 +1587,7 @@ class SessionsWidget(QWidget):
         try:
             import configparser
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             repo_path = config.get('DEFAULT', 'repo', fallback='')
         except Exception:
             repo_path = ''
@@ -1689,14 +1738,20 @@ class SessionsWidget(QWidget):
                 self._matched_master_types_by_session_id[sid] = set()
                 return set()
 
-        if session.fitsSessionObjectName in ['Bias', 'Dark', 'Flat']:
+        if session.fitsSessionObjectName in ['Bias', 'Dark', 'Flat', 'FlatDark']:
             # Calibration session row: show which masters exist for this session.
             mtypes = _masters_for_source_session(getattr(session, 'fitsSessionId', None))
             if not mtypes:
                 # Fallback for imported masters (no source_session_id): match by session metadata.
                 # For calibration sessions, only show the master type relevant to that session.
                 cal_obj = (session.fitsSessionObjectName or '').strip().lower()
-                if cal_obj in ('bias', 'dark', 'flat'):
+                if cal_obj in ('flatdark', 'darkflat'):
+                    from astrofiler.core.master_manager import get_master_manager
+                    flatdark_criteria = session_to_calibration_criteria(session)
+                    matched_flatdark = get_master_manager().find_matching_master(flatdark_criteria, 'flatdark')
+                    if matched_flatdark and getattr(matched_flatdark, 'master_path', None) and os.path.exists(matched_flatdark.master_path):
+                        mtypes = {'flatdark'}
+                elif cal_obj in ('bias', 'dark', 'flat'):
                     matched = _matching_masters_for_session(session)
                     if cal_obj in matched:
                         mtypes = {cal_obj}
@@ -1903,6 +1958,9 @@ class SessionsWidget(QWidget):
             
             # Delete all sessions
             deleted_count = FitsSessionModel.delete().execute()
+
+            # Delete all masters records
+            Masters.delete().execute()
             
             logger.info(f"Cleared {deleted_count} sessions from database")
             
@@ -2046,6 +2104,9 @@ class SessionsWidget(QWidget):
                 
                 # Delete all sessions
                 deleted_count = FitsSessionModel.delete().execute()
+
+                # Delete all masters records
+                Masters.delete().execute()
                 logger.info(f"Cleared {deleted_count} existing sessions")
                 
                 # Refresh display immediately to show empty sessions

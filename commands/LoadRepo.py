@@ -12,7 +12,7 @@ Usage:
 Options:
     -h, --help          Show this help message and exit
     -v, --verbose       Enable verbose logging
-    -c, --config        Path to configuration file (default: astrofiler.ini)
+    -c, --config        Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)
     --source            Override source folder path
     -r, --repo          Override repository folder path
     -s, --single-mapping CARD/INPUT/OUTPUT
@@ -61,6 +61,7 @@ src_path = os.path.join(project_root, 'src')
 if src_path in sys.path:
     sys.path.remove(src_path)
 sys.path.insert(0, src_path)
+from astrofiler.paths import DEFAULT_CONFIG_PATH, get_log_path, default_repo_folder, default_source_folder
 
 def ensure_astrofiler_imports():
     """Ensure astrofiler package can be imported correctly from src directory"""
@@ -163,7 +164,7 @@ def setup_logging(verbose=False):
         level=level,
         format=format_str,
         handlers=[
-            logging.FileHandler('astrofiler.log', mode='a'),
+            logging.FileHandler(get_log_path(), mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -219,8 +220,8 @@ Note:
     
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose logging')
-    parser.add_argument('-c', '--config', default='astrofiler.ini',
-                        help='Path to configuration file (default: astrofiler.ini)')
+    parser.add_argument('-c', '--config', default=DEFAULT_CONFIG_PATH,
+                        help='Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)')
     parser.add_argument('--source', 
                         help='Override source folder path')
     parser.add_argument('-r', '--repo',
@@ -245,8 +246,8 @@ Note:
         config = load_config(args.config)
         
         # Get folder paths
-        source_folder = args.source or config.get('DEFAULT', 'source', fallback='.')
-        repo_folder = args.repo or config.get('DEFAULT', 'repo', fallback='.')
+        source_folder = args.source or config.get('DEFAULT', 'source', fallback=default_source_folder())
+        repo_folder = args.repo or config.get('DEFAULT', 'repo', fallback=default_repo_folder())
         
         # Convert to absolute paths
         source_folder = os.path.abspath(source_folder)
@@ -349,7 +350,38 @@ Note:
             # Backward compatibility for old return format
             registered_files = result
             duplicate_count = 0
-        
+
+        # Register any master calibration frames found in the source folder.
+        # registerFitsImages() skips master files, so they must be handled separately.
+        logger.info("Scanning for master calibration frames...")
+        try:
+            master_ids = processor.registerMasters(
+                moveFiles=True,
+                source_folder=source_folder,
+                progress_callback=None,
+            )
+            if master_ids:
+                logger.info(f"Registered {len(master_ids)} master calibration frame(s)")
+            else:
+                logger.info("No master calibration frames found")
+        except Exception as e:
+            logger.warning(f"Master calibration frame registration failed: {e}")
+            if args.verbose:
+                import traceback
+                logger.warning(traceback.format_exc())
+
+        # Remove the Masters subfolder from the source folder if it is now empty.
+        masters_source_dir = os.path.join(source_folder, 'Masters')
+        if os.path.isdir(masters_source_dir):
+            try:
+                if not os.listdir(masters_source_dir):
+                    os.rmdir(masters_source_dir)
+                    logger.info(f"Removed empty Masters folder: {masters_source_dir}")
+                else:
+                    logger.warning(f"Masters folder not empty, skipping removal: {masters_source_dir}")
+            except Exception as e:
+                logger.warning(f"Could not remove Masters folder {masters_source_dir}: {e}")
+
         # Report results
         logger.info(f"=== Processing Complete ===")
         logger.info(f"Files processed: {len(registered_files)}")

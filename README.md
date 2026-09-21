@@ -4,13 +4,13 @@
 
 **A comprehensive astronomical image file management tool**
 
-[![Python3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Python3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
 [![AstroPy](https://img.shields.io/badge/astronomy-AstroPy-orange.svg)](https://www.astropy.org/)
 
-AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki. Astrofiler is a tool to manage FITS files (currently, XISF files and other non-FITS images are coming in the next version!) using FITS header data. FITS Headers are embedded with the image when created as metadata. Astrofiler reads this information to rename the file and file it appropriately in the Repository.
+AstroFiler is a powerful application designed for astronomers and astrophotographers to efficiently manage, organize, and catalog their FITS image files. With an intuitive graphical interface, it provides tools for batch processing, file organization, metadata extraction, session analysis, and direct integration with smart telescopes for seamless data acquisition. Detailed documentation is in the Github Wiki. 
 
-**Current Status**: Release V1.2.0
+**Current Status**: Release V1.2.2
 
 Getting started guide [here](https://github.com/gordtulloch/astrofiler-gui/wiki/Getting-Started!)
 
@@ -47,7 +47,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
   - **Detailed Duplicate Reports**: Shows duplicate groups, wasted space, and optimization opportunities
 - **Smart Upload Logic**: Three-tier decision system (skip identical files, upload new files, overwrite changed content)
 - **Enhanced File Matching**: Multi-tier local file matching using exact filename, partial filename, and hash-based verification
-- **Database Integration**: Tracks cloud URLs for all files with `fitsFileCloudURL` field enabling future remote access features
+- **Database Integration**: Tracks cloud URLs for all files with `fitsFileCloudURL` field enabling cloud integration
 - **Images View Integration**: Local/Cloud status icons show file storage locations at a glance
 - **Real-time Progress**: Live progress tracking with efficiency statistics and detailed completion summaries
 - **Command-Line Automation**: Complete command-line interface (`CloudSync.py`) with automation scripts for cron/Task Scheduler
@@ -90,13 +90,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
   - Optional remote file deletion after successful processing
   - Automatic header standardization and metadata extraction
 - **External Viewer Support**: Launch your favorite FITS viewer directly from AstroFiler
-- **Comprehensive Siril CLI Integration**: Full integration with Siril for professional-grade image processing
-  - Master calibration frame creation (bias, dark, flat)
-  - Automated light frame calibration workflows
-  - Progress monitoring with real-time status updates
-  - Quality validation and error handling
-  - Batch processing capabilities for large datasets
-- **Professional Calibration System**: Complete auto-calibration workflow from raw frames to calibrated images
+- **Auto-Calibration System**: Complete auto-calibration workflow from raw frames to calibrated images
   - Intelligent session detection and grouping
   - Automatic master frame creation with optimal parameters
   - Smart calibration file matching based on camera settings
@@ -109,7 +103,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Smart Session Linking**: Automatically link calibration sessions to light sessions based on camera, binning, and temperature matching
 - **Professional Session Export**: Export sessions with organized folder structures ready for external processing
 - **Master Frame Management**: Complete master calibration frame lifecycle management
-  - Create master frames with optimal Siril parameters
+  - Create master frames 
   - Validate master frame quality and integrity
   - Track master frame usage and relationships
   - Browse and manage master frame files
@@ -119,7 +113,7 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Progress Tracking**: Real-time status updates for all session operations with detailed progress monitoring
 
 ### 🚀 **Auto-Calibration System**
-- **Intelligent Master Frame Creation**: Automatically creates master bias, dark, and flat frames using Siril CLI
+- **Intelligent Master Frame Creation**: Automatically creates master bias, dark, and flat frames
 - **Smart Session Linking**: Automatically links calibration sessions to light frame sessions based on camera, binning, and temperature
 - **Calibration Workflow**: One-click calibration of light frames using appropriate master calibration files
 - **Advanced Quality Assessment**: SEP-based image analysis with FWHM, HFR, eccentricity, and SNR calculations
@@ -133,14 +127,10 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **Database Integration**: Quality metrics stored in database for analysis and filtering (Migration 009)
 - **Modular Architecture**: Comprehensive refactoring with dedicated `enhanced_quality.py` module for professional-grade quality analysis
 
-### **Future Versions**
-- **XISF import**: Load XISF files, extract headers and data, save to FITS format (optional)
-- **Thumbnails/Stacks**: Use Siril to create stacked images, stretch, and create thumbnail
-
 ## 🔧 Technical Requirements
 
 ### System Requirements
-- **Python**: 3.8 or higher
+- **Python**: 3.12 or higher
 - **Operating System**: Windows 10+, Linux (Ubuntu 18.04+), macOS 10.14+
 - **Memory**: 4GB RAM minimum, 8GB+ recommended for large datasets
 - **Storage**: Variable (depends on FITS repository size)
@@ -159,26 +149,17 @@ See discussion thread on Cloudy Nights [here](https://www.cloudynights.com/topic
 - **google-cloud-storage**: Google Cloud Storage integration for cloud sync features
 - **google-auth**: Authentication library for Google Cloud services
 - **Pillow**: Image processing for thumbnails and previews
-- **Siril**: Command-line integration for master frame creation and calibration workflows
 - **SEP**: Source Extractor Python library for advanced star detection and quality analysis
 
 ### Optional Dependencies
 - **Git**: Required for auto-update functionality
-- **Siril**: Required for auto-calibration features (must be in system PATH)
 
 ## 🚀 Quick Installation
 
 AstroFiler includes automated installation scripts for all major platforms:
 
 ### Windows - Easy Setup
-Download SETUP.ZIP, unzip it, and run it. It will download everything needed and install it, putting an icon on your desktop.
-
-You will need to install and run Git for updates however. Download git, and from the astrofiler-gui folder run
-
-```bash
-git fetch origin
-git reset --hard origin/main
-```
+Download [SETUP.ZIP](https://github.com/gordtulloch/astrofiler-gui/releases/download/V1.2.0/setup.zip), unzip it, and run it. It will download everything needed and install it, putting an icon on your desktop.
 
 ### Windows - Install Script
 Install Git - There are also a few ways to install Git on Windows. The most official build is available for download on the Git website. Just go to https://git-scm.com/download/win and the download will start automatically. Note that this is a project called Git for Windows, which is separate from Git itself; for more information on it, go to https://gitforwindows.org.
@@ -203,7 +184,7 @@ sudo yum install git # CentOS distros
 cd $HOME
 git clone https://github.com/gordtulloch/astrofiler-gui.git
 cd astrofiler-gui
-chmod +x install/install.sh && ./install/install.sh
+./install/install.sh
 ```
 
 ### macOS
@@ -213,19 +194,18 @@ There are several ways to install Git on macOS. The easiest is probably to insta
 git --version # If you don’t have it installed already, it will prompt you to install it.
 git clone https://github.com/gordtulloch/astrofiler-gui.git
 cd astrofiler-gui
-chmod +x install/install_macos.sh && ./install/install_macos.sh
+./install/install_macos.sh
 ```
 
 **What the installer does:**
-- Checks for Python 3.8+ (installs if needed)
+- Checks for Python 3.12+ (installs if needed)
 - Creates virtual environment
 - Installs all dependencies
-- **Automatically downloads and installs pysiril** from GitLab CI/CD artifacts
 - Creates desktop shortcuts and application menu entries
 - Sets up automatic update checking from GitHub
 
 **Auto-Update Feature:**
-Desktop launchers automatically check for and install updates from GitHub when starting AstroFiler (if installed via git clone).
+Desktop launchers automatically check for and install updates from GitHub when starting AstroFiler
 
 📖 **See the Wiki for detailed installation instructions and troubleshooting.**
 

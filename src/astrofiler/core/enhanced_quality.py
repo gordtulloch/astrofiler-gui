@@ -21,6 +21,7 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from astropy.wcs import FITSFixedWarning
 from astropy.stats import sigma_clipped_stats, mad_std
+from .utils import fits_image_data
 import datetime
 
 # Suppress warnings for cleaner output
@@ -86,8 +87,10 @@ class EnhancedQualityAnalyzer:
             
             # Load FITS file
             with fits.open(fits_file_path) as hdul:
-                header = hdul[0].header
-                data = hdul[0].data.astype(np.float64)
+                raw_data, header = fits_image_data(hdul)
+                if raw_data is None:
+                    return {"status": "error", "message": "No image data found in FITS file"}
+                data = raw_data.astype(np.float64)
                 
                 results = {
                     "file_path": fits_file_path,

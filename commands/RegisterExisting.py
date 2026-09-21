@@ -17,7 +17,7 @@ Usage:
     python RegisterExisting.py [options]
 
 Options:
-    --config PATH          Configuration file path (default: astrofiler.ini)
+    --config PATH          Configuration file path (default: astrofiler.ini in the AstroFiler app directory)
     --no-subdirs          Don't scan subdirectories recursively
     --no-header-verify    Skip FITS header verification (faster but less accurate)
     --verbose, -v         Enable verbose logging
@@ -54,6 +54,7 @@ from pathlib import Path
 # Add the parent directory to the Python path so we can import astrofiler modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import setup_path  # Configure Python path for new package structure
+from astrofiler.paths import DEFAULT_CONFIG_PATH, get_log_path
 
 def setup_logging(verbose=False, quiet=False, log_file=None):
     """Setup logging configuration"""
@@ -98,7 +99,7 @@ def setup_logging(verbose=False, quiet=False, log_file=None):
     
     return logging.getLogger(__name__)
 
-def load_config(config_path='astrofiler.ini'):
+def load_config(config_path=DEFAULT_CONFIG_PATH):
     """Load configuration from file"""
     import configparser
     
@@ -219,8 +220,8 @@ def main():
     )
     
     parser.add_argument('--config', 
-                       default='astrofiler.ini',
-                       help='Configuration file path (default: astrofiler.ini)')
+                       default=DEFAULT_CONFIG_PATH,
+                       help='Configuration file path (default: astrofiler.ini in the AstroFiler app directory)')
     
     parser.add_argument('--no-subdirs',
                        action='store_true',
@@ -243,8 +244,8 @@ def main():
                        help='Show what would be done without making changes')
     
     parser.add_argument('--log-file',
-                       default='astrofiler.log',
-                       help='Write log output to file (default: astrofiler.log)')
+                       default=str(get_log_path()),
+                       help='Write log output to file (default: astrofiler.log in the AstroFiler app directory)')
     
     args = parser.parse_args()
     

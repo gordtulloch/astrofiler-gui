@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                                QGroupBox, QLineEdit, QPushButton, QCheckBox, 
                                QComboBox, QSpinBox, QFileDialog, QMessageBox,
                                QApplication, QTabWidget)
+from ..credentials import ITELESCOPE_PASSWORD, get_ini_secret, protect_config_file, store_ini_secret
+from ..paths import get_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -400,7 +402,7 @@ class ConfigWidget(QWidget):
         self.tab_widget.addTab(calibration_tab, "Calibration")
 
     def create_smart_telescopes_tab(self):
-        """Create the Smart Telescopes tab with iTelescope Configuration."""
+        """Create the Smart Telescopes tab with iTelescope and Celestron Origin Configuration."""
         smart_telescopes_tab = QWidget()
         layout = QVBoxLayout(smart_telescopes_tab)
 
@@ -431,6 +433,24 @@ class ConfigWidget(QWidget):
         itelescope_layout.addRow("Password:", self.itelescope_password)
 
         layout.addWidget(itelescope_group)
+        
+        # Celestron Origin settings group
+        celestron_group = QGroupBox("Celestron Origin Configuration")
+        celestron_layout = QFormLayout(celestron_group)
+
+        # Celestron Origin Hostname/IP
+        self.celestron_hostname = QLineEdit()
+        self.celestron_hostname.setPlaceholderText("Telescope IP address (e.g., 192.168.1.100)")
+        self.celestron_hostname.setToolTip(
+            "IP address or hostname of your Celestron Origin telescope.\n\n"
+            "This is required to connect to your telescope via FTP\n"
+            "and download raw FITS files from imaging sessions.\n"
+            "Default credentials (celestron/celestron) are used for authentication."
+        )
+
+        celestron_layout.addRow("Hostname/IP:", self.celestron_hostname)
+
+        layout.addWidget(celestron_group)
         layout.addStretch()
 
         self.tab_widget.addTab(smart_telescopes_tab, "Smart Telescopes")
@@ -441,7 +461,7 @@ class ConfigWidget(QWidget):
             config = configparser.ConfigParser()
             
             # Read existing config first to preserve any other settings
-            config.read('astrofiler.ini')
+            config.read(get_config_path())
             
             # Ensure DEFAULT section exists
             if 'DEFAULT' not in config:
@@ -486,7 +506,11 @@ class ConfigWidget(QWidget):
             
             # iTelescope settings
             config.set('DEFAULT', 'itelescope_username', self.itelescope_username.text().strip())
-            config.set('DEFAULT', 'itelescope_password', self.itelescope_password.text().strip())
+            # The password goes to the system keyring when available (not into astrofiler.ini)
+            store_ini_secret(config, ITELESCOPE_PASSWORD, self.itelescope_password.text())
+            
+            # Celestron Origin settings
+            config.set('DEFAULT', 'celestron_hostname', self.celestron_hostname.text().strip())
             
             # FITS compression settings
             config.set('DEFAULT', 'compress_fits', str(self.compress_fits.isChecked()))
@@ -496,8 +520,9 @@ class ConfigWidget(QWidget):
             config.set('DEFAULT', 'min_compression_size', str(self.min_compression_size.value()))
             
             # Write to the astrofiler.ini file
-            with open('astrofiler.ini', 'w') as configfile:
+            with open(get_config_path(), 'w') as configfile:
                 config.write(configfile)
+            protect_config_file()
             
             logger.info("Settings saved to astrofiler.ini!")
             QMessageBox.information(self, "Success", "Settings saved successfully!")
@@ -510,7 +535,26 @@ class ConfigWidget(QWidget):
         """Load configuration settings from astrofiler.ini file"""
         try:
             config = configparser.ConfigParser()
-            config.read('astrofiler.ini')
+            config_path = str(get_config_path())
+            file_exists = os.path.exists(config_path)
+            config.read(config_path)
+
+            # First-run defaults: ensure source/repo are present and persisted.
+            defaults_updated = False
+            if 'DEFAULT' not in config:
+                config['DEFAULT'] = {}
+
+            if not config.has_option('DEFAULT', 'source'):
+                config.set('DEFAULT', 'source', 'REPOSITORY.incoming/')
+                defaults_updated = True
+
+            if not config.has_option('DEFAULT', 'repo'):
+                config.set('DEFAULT', 'repo', 'REPOSITORY/')
+                defaults_updated = True
+
+            if defaults_updated or not file_exists:
+                with open(config_path, 'w') as configfile:
+                    config.write(configfile)
             
             # Load path settings
             if config.has_option('DEFAULT', 'source'):
@@ -639,9 +683,12 @@ class ConfigWidget(QWidget):
                 itelescope_username = config.get('DEFAULT', 'itelescope_username')
                 self.itelescope_username.setText(itelescope_username)
             
-            if config.has_option('DEFAULT', 'itelescope_password'):
-                itelescope_password = config.get('DEFAULT', 'itelescope_password')
-                self.itelescope_password.setText(itelescope_password)
+            self.itelescope_password.setText(get_ini_secret(config, ITELESCOPE_PASSWORD))
+            
+            # Load Celestron Origin settings
+            if config.has_option('DEFAULT', 'celestron_hostname'):
+                celestron_hostname = config.get('DEFAULT', 'celestron_hostname')
+                self.celestron_hostname.setText(celestron_hostname)
             
             # Load FITS compression settings
             if config.has_option('DEFAULT', 'compress_fits'):
@@ -679,8 +726,8 @@ class ConfigWidget(QWidget):
     
     def reset_settings(self):
         # Reset to default values
-        self.source_path.setText("")
-        self.repo_path.setText("")
+        self.source_path.setText("REPOSITORY.incoming/")
+        self.repo_path.setText("REPOSITORY/")
         self.refresh_on_startup.setChecked(True)
         self.save_modified_headers.setChecked(False)
         self.theme.setCurrentIndex(0)

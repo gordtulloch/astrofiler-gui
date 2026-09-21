@@ -39,7 +39,7 @@ function Test-PythonInstalled {
 # Function to check Python version
 function Test-PythonVersion {
     try {
-        python -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>$null
+        python -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>$null
         return $LASTEXITCODE -eq 0
     } catch {
         return $false
@@ -59,8 +59,8 @@ function Install-Python {
     if ($installChoice -match "^[Yy].*" -or $installChoice -eq "") {
         Write-Host "Downloading Python installer..." -ForegroundColor Yellow
         
-        # Get latest Python 3.11 installer URL
-        $pythonUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+        # Python 3.12 installer URL (3.12 is the minimum supported version)
+        $pythonUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
         $installerPath = "$env:TEMP\python-installer.exe"
         
         try {
@@ -111,7 +111,7 @@ if (-not (Test-PythonInstalled)) {
 }
 
 if (-not (Test-PythonVersion)) {
-    Write-Host "Error: Python 3.8 or higher is required." -ForegroundColor Red
+    Write-Host "Error: Python 3.12 or higher is required." -ForegroundColor Red
     Write-Host "Please upgrade your Python installation." -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 1

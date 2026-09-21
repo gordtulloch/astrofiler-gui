@@ -12,7 +12,7 @@ Usage:
 Options:
     -h, --help       Show this help message and exit
     -v, --verbose    Enable verbose logging
-    -c, --config     Path to configuration file (default: astrofiler.ini)
+    -c, --config     Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)
     -l, --lights     Only create light sessions
     -C, --calibs     Only create calibration sessions
     -r, --regenerate Clear all existing sessions first, then regenerate all session data
@@ -62,6 +62,7 @@ src_path = os.path.join(project_root, 'src')
 if src_path in sys.path:
     sys.path.remove(src_path)
 sys.path.insert(0, src_path)
+from astrofiler.paths import DEFAULT_CONFIG_PATH, get_log_path
 
 def ensure_astrofiler_imports():
     """Ensure astrofiler package can be imported correctly from src directory"""
@@ -83,7 +84,7 @@ def setup_logging(verbose=False):
         level=level,
         format=format_str,
         handlers=[
-            logging.FileHandler('astrofiler.log', mode='a'),
+            logging.FileHandler(get_log_path(), mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -182,8 +183,8 @@ Examples:
     
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose logging')
-    parser.add_argument('-c', '--config', default='astrofiler.ini',
-                        help='Path to configuration file (default: astrofiler.ini)')
+    parser.add_argument('-c', '--config', default=DEFAULT_CONFIG_PATH,
+                        help='Path to configuration file (default: astrofiler.ini in the AstroFiler app directory)')
     parser.add_argument('-l', '--lights', action='store_true',
                         help='Only create light sessions')
     parser.add_argument('-C', '--calibs', action='store_true',

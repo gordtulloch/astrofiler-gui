@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from astropy.io import fits
 import hashlib
+from ..paths import DEFAULT_CONFIG_PATH
 
 # Import config for temp folder
 try:
@@ -52,7 +53,7 @@ class FitsCompressor:
     Handles FITS file compression and decompression using advanced lossless algorithms.
     """
     
-    def __init__(self, config_path: str = 'astrofiler.ini'):
+    def __init__(self, config_path: str = DEFAULT_CONFIG_PATH):
         """
         Initialize the FITS compressor.
         
@@ -494,7 +495,7 @@ class FitsCompressor:
             try:
                 if temp_path is not None and os.path.exists(temp_path):
                     os.remove(temp_path)
-            except:
+            except OSError:
                 pass
     
     def _select_optimal_compression(self, fits_path: str) -> Optional[str]:
@@ -546,6 +547,25 @@ class FitsCompressor:
             logger.error(f"Error analyzing FITS file for compression: {e}")
             return 'fits_gzip2'  # Safe fallback
     
+    # FITS tile-compression type for each internal algorithm.
+    FITS_TILE_TYPES = {
+        'fits_rice': 'RICE_1',
+        'fits_gzip1': 'GZIP_1',
+        'fits_gzip2': 'GZIP_2',
+    }
+
+    @staticmethod
+    def _effective_tile_type(requested_type: str, data) -> str:
+        """Return the tile type to use for this image data.
+
+        RICE is only lossless for integer data (for floats it needs quantization, which
+        discards information), so fall back to GZIP_2 for non-integer data.
+        """
+        if requested_type.startswith('RICE') and getattr(getattr(data, 'dtype', None), 'kind', '') not in ('i', 'u'):
+            logger.warning("RICE compression is only lossless for integer data; using GZIP_2 instead")
+            return 'GZIP_2'
+        return requested_type
+
     def _compress_fits_internal(self, input_path: str, replace_original: bool, algorithm: str) -> Optional[str]:
         """
         Compress FITS file using internal FITS compression (tile compression).
@@ -560,9 +580,9 @@ class FitsCompressor:
             Path to compressed FITS file
         """
         try:
-            # For imports we require FITS tile compression using GZIP_2.
-            # (Other algorithms are not used for this workflow.)
-            compression_type = 'GZIP_2'
+            # Map the selected algorithm to its FITS tile-compression type. 'auto' has already
+            # been resolved to a concrete algorithm by compress_fits_file().
+            requested_type = self.FITS_TILE_TYPES.get(algorithm, 'GZIP_2')
             
             # Determine output path
             # When replacing the original (auto-import), keep the filename unchanged.
@@ -626,9 +646,11 @@ class FitsCompressor:
                     new_hdus.append(primary)
 
                     src_hdu = hdul[0]
+                    compression_type = self._effective_tile_type(requested_type, src_hdu.data)
                     compressed_hdu = fits.CompImageHDU(
                         data=src_hdu.data,
                         compression_type=compression_type,
+                        quantize_level=0,  # never quantize floats: keep compression lossless
                     )
 
                     # Copy metadata from original header, but do NOT copy structural keywords.
@@ -680,9 +702,11 @@ class FitsCompressor:
                             continue
 
                         src_hdu = hdul[idx]
+                        compression_type = self._effective_tile_type(requested_type, src_hdu.data)
                         compressed_hdu = fits.CompImageHDU(
                             data=src_hdu.data,
                             compression_type=compression_type,
+                            quantize_level=0,  # never quantize floats: keep compression lossless
                         )
 
                         skip_comp = {
@@ -873,7 +897,7 @@ class FitsCompressor:
 # Global compressor instance
 _compressor_instance = None
 
-def get_fits_compressor(config_path: str = 'astrofiler.ini') -> FitsCompressor:
+def get_fits_compressor(config_path: str = DEFAULT_CONFIG_PATH) -> FitsCompressor:
     """
     Get a global FitsCompressor instance.
     
