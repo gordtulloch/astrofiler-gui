@@ -112,7 +112,19 @@ class fitsProcessing:
             except Exception:
                 return False
         
-        for root, dirs, files in os.walk(scan_folder):
+        # When scanning the repository itself, the Masters folder is handled by
+        # registerMasters, so don't walk it again here.
+        repo_masters = os.path.normcase(os.path.abspath(os.path.join(self.repoFolder, 'Masters')))
+        scanning_repo = os.path.normcase(os.path.abspath(scan_folder)) == os.path.normcase(os.path.abspath(self.repoFolder))
+
+        def _walk():
+            for root, dirs, files in os.walk(scan_folder):
+                if scanning_repo:
+                    dirs[:] = [d for d in dirs
+                               if os.path.normcase(os.path.abspath(os.path.join(root, d))) != repo_masters]
+                yield root, dirs, files
+
+        for root, dirs, files in _walk():
             for file in files:
                 # Use the comprehensive FITS file detection that includes compressed files
                 file_path = os.path.join(root, file)
@@ -122,7 +134,7 @@ class fitsProcessing:
                     total_files += 1
         
         current_file = 0
-        for root, dirs, files in os.walk(scan_folder):
+        for root, dirs, files in _walk():
             for file in files:
                 # Use the comprehensive FITS file detection that includes compressed files
                 file_path = os.path.join(root, file)

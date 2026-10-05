@@ -1030,9 +1030,16 @@ class ImagesWidget(QWidget):
                     except Exception:
                         return True
 
+                # Prefer the repo's Masters folder; fall back to scanning the whole repo if absent
+                masters_folder = os.path.join(fits_processor.repoFolder, 'Masters')
+                if os.path.isdir(masters_folder):
+                    master_scan_folder = masters_folder
+                else:
+                    master_scan_folder = fits_processor.repoFolder
+                    logger.info(f"No Masters folder at {masters_folder}; scanning entire repository for masters")
                 master_ids = fits_processor.registerMasters(
                     progress_callback=update_master_progress,
-                    source_folder=fits_processor.repoFolder,
+                    source_folder=master_scan_folder,
                     precount=False,
                 )
 
