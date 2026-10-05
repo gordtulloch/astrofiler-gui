@@ -82,6 +82,7 @@ class FileProcessor:
         moveFiles: bool = False,
         destination_folder: Optional[str] = None,
         precount: bool = False,
+        master_callback=None,
     ) -> List[str]:
         """Scan a folder for existing master calibration FITS files and register them.
 
@@ -89,8 +90,10 @@ class FileProcessor:
         'DARK'/'FLAT'/'BIAS' (case-insensitive).
 
         Args:
-            progress_callback: Optional callback(current, total, filename) -> bool.
-                If it returns False, scanning stops.
+            progress_callback: Optional callback(current, total, filename) -> bool,
+                called for every file examined. If it returns False, scanning stops.
+            master_callback: Optional callback(filename), called only when a file is
+                identified as a master and is about to be registered.
             source_folder: Folder to scan; defaults to configured sourceFolder.
 
         Returns:
@@ -141,6 +144,18 @@ class FileProcessor:
                 try:
                     candidate_path = file_path
                     cleanup_source_path = None
+
+                    # Cheap pre-check: astropy reads .fits/.gz/.fz headers directly, so
+                    # non-masters are rejected without decompressing/extracting anything.
+                    try:
+                        pre_imagetyp = str(fits.getheader(file_path, 0).get('IMAGETYP', '')).upper()
+                        if 'MASTER' not in pre_imagetyp or not any(
+                            token in pre_imagetyp for token in ('DARK', 'FLAT', 'BIAS')
+                        ):
+                            continue
+                    except Exception:
+                        pass  # Not directly readable (e.g. zip/xisf); fall through to full processing
+
                     if self.format_processor.can_process(candidate_path):
                         candidate_path = self.format_processor.process_file(candidate_path)
                         # For externally compressed FITS (e.g. .fits.gz), remove the source
@@ -156,6 +171,12 @@ class FileProcessor:
                         continue
                     if not any(token in imagetyp for token in ('DARK', 'FLAT', 'BIAS')):
                         continue
+
+                    if master_callback:
+                        try:
+                            master_callback(file_path)
+                        except Exception:
+                            pass
 
                     final_path = candidate_path
                     if moveFiles and dest_root:

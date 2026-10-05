@@ -817,7 +817,7 @@ class ImagesWidget(QWidget):
                             was_cancelled = True
                             return False
                         if progress_dialog:
-                            progress_dialog.setLabelText(f"Registering master: {os.path.basename(filename)}")
+                            progress_dialog.setLabelText(f"Scanning for masters: {os.path.basename(filename)}")
                             QApplication.processEvents()
                             if progress_dialog.wasCanceled():
                                 was_cancelled = True
@@ -826,8 +826,14 @@ class ImagesWidget(QWidget):
                     except Exception:
                         return True
 
+                def on_master_found(filename):
+                    if progress_dialog:
+                        progress_dialog.setLabelText(f"Registering master: {os.path.basename(filename)}")
+                        QApplication.processEvents()
+
                 master_ids = fits_processor.registerMasters(
                     progress_callback=update_master_progress,
+                    master_callback=on_master_found,
                     source_folder=fits_processor.sourceFolder,
                     moveFiles=True,
                     precount=False,
@@ -1021,7 +1027,7 @@ class ImagesWidget(QWidget):
                             was_cancelled = True
                             return False
                         if progress_dialog:
-                            progress_dialog.setLabelText(f"Registering master: {os.path.basename(filename)}")
+                            progress_dialog.setLabelText(f"Scanning for masters: {os.path.basename(filename)}")
                             QApplication.processEvents()
                             if progress_dialog.wasCanceled():
                                 was_cancelled = True
@@ -1029,6 +1035,11 @@ class ImagesWidget(QWidget):
                         return True
                     except Exception:
                         return True
+
+                def on_master_found(filename):
+                    if progress_dialog:
+                        progress_dialog.setLabelText(f"Registering master: {os.path.basename(filename)}")
+                        QApplication.processEvents()
 
                 # Prefer the repo's Masters folder; fall back to scanning the whole repo if absent
                 masters_folder = os.path.join(fits_processor.repoFolder, 'Masters')
@@ -1039,6 +1050,7 @@ class ImagesWidget(QWidget):
                     logger.info(f"No Masters folder at {masters_folder}; scanning entire repository for masters")
                 master_ids = fits_processor.registerMasters(
                     progress_callback=update_master_progress,
+                    master_callback=on_master_found,
                     source_folder=master_scan_folder,
                     precount=False,
                 )

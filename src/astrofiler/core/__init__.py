@@ -77,9 +77,11 @@ class fitsProcessing:
         moveFiles: bool = False,
         destination_folder: Optional[str] = None,
         precount: bool = False,
+        master_callback=None,
     ):
         """Scan for existing master FITS files and register them in the Masters table."""
         return self.file_processor.registerMasters(
+            master_callback=master_callback,
             progress_callback=progress_callback,
             source_folder=source_folder,
             moveFiles=moveFiles,
