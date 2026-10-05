@@ -134,5 +134,7 @@ def test_build_resources_status_flatdark_uses_master_manager_without_name_error(
 
     result = widget._build_resources_status(session)
 
-    assert result == {"text": "", "tooltip": "", "percentage": 0}
+    assert result["text"] == ""
+    assert result["tooltip"] == ""
+    assert result["percentage"] == 0
     assert master_manager.calls == 1

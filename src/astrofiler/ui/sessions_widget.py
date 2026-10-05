@@ -1755,8 +1755,8 @@ class SessionsWidget(QWidget):
                         matched_flatdark = get_master_manager().find_matching_master(flatdark_criteria, 'flatdark')
                         if matched_flatdark and getattr(matched_flatdark, 'master_path', None) and os.path.exists(matched_flatdark.master_path):
                             mtypes = {'flatdark'}
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed FlatDark master lookup for session resources: {e}")
                 elif cal_obj in ('bias', 'dark', 'flat'):
                     matched = _matching_masters_for_session(session)
                     if cal_obj in matched:
