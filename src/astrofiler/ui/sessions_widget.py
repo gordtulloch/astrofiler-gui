@@ -1749,10 +1749,14 @@ class SessionsWidget(QWidget):
                 # For calibration sessions, only show the master type relevant to that session.
                 cal_obj = (session.fitsSessionObjectName or '').strip().lower()
                 if cal_obj in ('flatdark', 'darkflat'):
-                    flatdark_criteria = session_to_calibration_criteria(session)
-                    matched_flatdark = master_manager.find_matching_master(flatdark_criteria, 'flatdark')
-                    if matched_flatdark and getattr(matched_flatdark, 'master_path', None) and os.path.exists(matched_flatdark.master_path):
-                        mtypes = {'flatdark'}
+                    try:
+                        from astrofiler.core.master_manager import get_master_manager
+                        flatdark_criteria = session_to_calibration_criteria(session)
+                        matched_flatdark = get_master_manager().find_matching_master(flatdark_criteria, 'flatdark')
+                        if matched_flatdark and getattr(matched_flatdark, 'master_path', None) and os.path.exists(matched_flatdark.master_path):
+                            mtypes = {'flatdark'}
+                    except Exception as e:
+                        logger.warning(f"Failed FlatDark master lookup for session resources: {e}")
                 elif cal_obj in ('bias', 'dark', 'flat'):
                     matched = _matching_masters_for_session(session)
                     if cal_obj in matched:
