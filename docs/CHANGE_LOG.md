@@ -1,5 +1,16 @@
 # AstroFiler Change Log
 
+## Version 1.2.4
+
+### New Features
+
+- **CI/CD installers**: `.github/workflows/release.yml` runs the tests, then freezes AstroFiler with PyInstaller on native runners and builds a Windows installer (`.exe`, Inno Setup), macOS disk images (`.dmg`, arm64 and x86_64) and Linux AppImages (x86_64 and aarch64). Pushing a `v*` tag attaches them to a GitHub release. Build scripts live in `packaging/`
+- **Frozen-app launcher**: installed builds run from a per-user data folder (`%APPDATA%\AstroFiler`, `~/Library/Application Support/AstroFiler`, `~/.local/share/AstroFiler`) holding the database, `astrofiler.ini` and log, since the install folder is not writable. The launcher also provides `--selftest <file>`, which CI uses to verify the bundle
+
+### Other
+
+- Version bump to 1.2.4
+
 ## Version 1.2.3
 
 ### New Features

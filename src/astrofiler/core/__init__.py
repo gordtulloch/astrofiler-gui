@@ -17,7 +17,7 @@ from typing import Optional, Union, Any
 
 from ..types import FilePath
 
-__version__ = "1.2.3"
+__version__ = "1.2.4"
 
 # Import key classes and functions for convenient access
 from .file_processing import FileProcessor

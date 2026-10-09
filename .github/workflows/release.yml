@@ -1,0 +1,129 @@
+name: Build installers
+
+# One self-contained installer per platform, built natively on each runner (PyInstaller cannot cross-compile).
+# Push a tag like v1.2.4 to build and attach them to a GitHub release; run manually to just get the artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Qt runtime libraries
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo -E apt-get -o Acquire::Retries=3 update
+          sudo -E apt-get -o Acquire::Retries=3 install -y --no-install-recommends libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libdbus-1-3
+      - name: Install AstroFiler with test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest pytest-cov pytest-qt
+          pip install -e .
+      - name: Test suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: windows-x64 }
+          - { os: macos-14, name: macos-arm64 }
+          - { os: macos-15-intel, name: macos-x86_64 }
+          - { os: ubuntu-22.04, name: linux-x86_64 }
+          - { os: ubuntu-22.04-arm, name: linux-aarch64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Read version
+        id: ver
+        shell: bash
+        run: echo "v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/astrofiler/__init__.py)" >> "$GITHUB_OUTPUT"
+      - name: Linux system libraries (Qt runtime, AppImage)
+        if: runner.os == 'Linux'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo -E apt-get -o Acquire::Retries=3 update
+          sudo -E apt-get -o Acquire::Retries=3 install -y --no-install-recommends libfuse2 libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libdbus-1-3
+      - name: Install AstroFiler and PyInstaller
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          # cryptography >= 49 ships no macOS wheel, so pip compiles it against Homebrew's OpenSSL and the frozen app
+          # then bundles a different, older libssl ("Symbol not found: _SSL_get0_group_name"). 48.x has a prebuilt wheel.
+          if [ "$RUNNER_OS" = "macOS" ]; then echo "cryptography<49" > "$RUNNER_TEMP/constraints.txt"; export PIP_CONSTRAINT="$RUNNER_TEMP/constraints.txt"; fi
+          pip install -r requirements.txt pyinstaller
+          pip install -e .
+      - name: Freeze
+        run: python packaging/build.py
+      - name: Self-test the frozen app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "selftest.txt"
+          $p = Start-Process dist\AstroFiler\AstroFiler.exe -ArgumentList "--selftest", $report -Wait -PassThru
+          if (Test-Path $report) { Get-Content $report } else { Write-Host "No self-test report was written" }
+          if ($p.ExitCode -ne 0) { exit 1 }
+      - name: Self-test the frozen app (macOS, Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then EXE=dist/AstroFiler.app/Contents/MacOS/AstroFiler; else EXE=dist/AstroFiler/AstroFiler; fi
+          "$EXE" --selftest "$RUNNER_TEMP/selftest.txt" || true
+          cat "$RUNNER_TEMP/selftest.txt"
+          grep -q "SELFTEST OK" "$RUNNER_TEMP/selftest.txt"
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.ver.outputs.v }}" packaging\windows\astrofiler.iss
+      - name: macOS dmg
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: bash packaging/macos/build_dmg.sh "${{ steps.ver.outputs.v }}"
+      - name: Linux AppImage
+        if: runner.os == 'Linux'
+        run: bash packaging/linux/build_appimage.sh "${{ steps.ver.outputs.v }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: astrofiler-${{ matrix.name }}
+          path: |
+            dist/AstroFiler-*.exe
+            dist/AstroFiler-*.dmg
+            dist/AstroFiler-*.AppImage
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
