@@ -1,8 +1,9 @@
 import os
 import logging
+from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtGui import QColor, QFont, QPalette, QPixmap
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class AboutWidget(QWidget):
             title = f"AstroFiler Version {self._version}"
         self.title_label = QLabel(title)
         title_font = QFont()
-        title_font.setPointSize(32)
+        title_font.setPointSize(26)
         title_font.setBold(True)
         self.title_label.setFont(title_font)
         self.title_label.setAlignment(Qt.AlignCenter)
@@ -51,10 +52,42 @@ class AboutWidget(QWidget):
             }
         """)
         
-        # Subtitle
-        self.subtitle_label = QLabel("By Gord Tulloch\nCopyright (C) 2025\nALL RIGHTS RESERVED\n\nPlease submit questions and bug reports to\nGithub: https://github.com/gordtulloch/astrofiler-gui\n\nContributions gratefully accepted via\nPaypal to the above email address.")
+        # Starseekers.ca logo (same branding as the Galileo About dialog)
+        self.logo_label = QLabel()
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        self.logo_label.setStyleSheet("background-color: transparent;")
+        logo = Path(__file__).resolve().parents[3] / "images" / "starseekers.png"
+        logo_pixmap = QPixmap(str(logo))
+        if not logo_pixmap.isNull():
+            self.logo_label.setPixmap(logo_pixmap.scaledToWidth(
+                340, Qt.SmoothTransformation))
+
+        # Details: rich text so the links are clickable
+        accent = "#4a9eff"
+        paypal = ("https://www.paypal.com/donate/?business=gord.tulloch%40gmail.com"
+                  "&no_recurring=0&item_name=Support+AstroFiler&currency_code=USD")
+        self.subtitle_label = QLabel(
+            "<p>A comprehensive astronomical image file management tool.</p>"
+            f"<p>A <a href='https://starseekers.ca' style='color:{accent}'>Starseekers.ca</a> "
+            "project &mdash; software for the amateur astronomer.</p>"
+            "<p>By Gord Tulloch<br>Copyright &copy; 2025-2026 Gord Tulloch<br>"
+            "Licensed under GPL-3.0</p>"
+            "<p>Questions and bug reports: "
+            f"<a href='https://github.com/gordtulloch/astrofiler-gui' style='color:{accent}'>"
+            "github.com/gordtulloch/astrofiler-gui</a></p>"
+            "<p><b>Support us</b> &mdash; "
+            f"<a href='{paypal}' style='color:{accent}'>Donate with PayPal</a> &middot; "
+            f"<a href='https://www.patreon.com/cw/starseekersca' style='color:{accent}'>"
+            "Become a patron on Patreon</a></p>"
+        )
+        self.subtitle_label.setTextFormat(Qt.RichText)
+        self.subtitle_label.setOpenExternalLinks(True)
+        subtitle_pal = self.subtitle_label.palette()
+        subtitle_pal.setColor(QPalette.Link, QColor(accent))
+        subtitle_pal.setColor(QPalette.LinkVisited, QColor(accent))
+        self.subtitle_label.setPalette(subtitle_pal)
         subtitle_font = QFont()
-        subtitle_font.setPointSize(16)
+        subtitle_font.setPointSize(11)
         self.subtitle_label.setFont(subtitle_font)
         self.subtitle_label.setAlignment(Qt.AlignCenter)
         self.subtitle_label.setStyleSheet("""
@@ -66,7 +99,8 @@ class AboutWidget(QWidget):
                 margin: 10px;
             }
         """)
-        
+
+        text_layout.addWidget(self.logo_label)
         text_layout.addWidget(self.title_label)
         text_layout.addWidget(self.subtitle_label)
         
