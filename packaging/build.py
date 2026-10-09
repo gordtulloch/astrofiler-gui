@@ -51,8 +51,6 @@ def main() -> None:
         # The launcher runs the real entry point (astrofiler.py) from the bundle root, so ship it as data.
         "--add-data", f"{ROOT / 'astrofiler.py'}{SEP}.",
         "--add-data", f"{ROOT / 'astrofiler.png'}{SEP}.",
-        # astrofiler.py reads the version from this file by path.
-        "--add-data", f"{ROOT / 'src' / 'astrofiler' / '__init__.py'}{SEP}src/astrofiler",
         # peewee-migrate loads these .py files from a directory at run time, so they are data, not imports.
         "--add-data", f"{ROOT / 'migrations'}{SEP}migrations",
         # Stylesheets and images are opened by relative path; the launcher copies them to the user data folder.

@@ -42,7 +42,11 @@ def prepare_workdir() -> Path:
 
 def selftest(report: Path) -> int:
     lines, ok = [], True
-    for mod in ("PySide6.QtWidgets", "astropy.io.fits", "peewee", "peewee_migrate", "numpy", "scipy",
+    # A stray bundle/src would be put first on sys.path by astrofiler.py and shadow the frozen package.
+    shadow = (BUNDLE / "src").exists()
+    ok &= not shadow
+    lines.append(f"{'FAIL ' if shadow else 'ok   '} no src/ shadow folder in bundle")
+    for mod in ("astrofiler.exceptions", "astrofiler.types", "PySide6.QtWidgets", "astropy.io.fits", "peewee", "peewee_migrate", "numpy", "scipy",
                 "matplotlib", "PIL", "lz4.frame", "smb.SMBConnection", "google.cloud.storage",
                 "reproject", "sep", "astroalign", "photutils", "astrofiler.database",
                 "astrofiler.ui.main_window"):

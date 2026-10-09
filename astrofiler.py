@@ -15,9 +15,11 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 src_path = os.path.join(project_root, 'src')
 
 # Ensure src path is first in path to avoid conflicts with root astrofiler.py
-if src_path in sys.path:
-    sys.path.remove(src_path)
-sys.path.insert(0, src_path)
+# (not when frozen: the package is already bundled and there is no src/ folder)
+if not getattr(sys, 'frozen', False):
+    if src_path in sys.path:
+        sys.path.remove(src_path)
+    sys.path.insert(0, src_path)
 
 def rotate_log_file():
     """Rotate log file if it's larger than 5MB"""
@@ -60,6 +62,9 @@ logger = logging.getLogger(__name__)
 
 def _read_version() -> str:
     """Read AstroFiler version without importing the full package."""
+    if getattr(sys, 'frozen', False):
+        from astrofiler import __version__
+        return __version__
     init_path = os.path.join(project_root, 'src', 'astrofiler', '__init__.py')
     try:
         with open(init_path, 'r', encoding='utf-8') as f:
