@@ -45,6 +45,7 @@ def main() -> None:
         "--noconfirm", "--clean",
         "--windowed",
         "--paths", str(ROOT / "src"),
+        "--paths", str(ROOT),
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),
@@ -67,6 +68,8 @@ def main() -> None:
         "--copy-metadata", "photutils",
         "--copy-metadata", "astropy",
         "--copy-metadata", "reproject",
+        # Three UI modules still do `import setup_path` (a repo-root dev helper).
+        "--hidden-import", "setup_path",
         "--hidden-import", "sep",
         "--hidden-import", "astroalign",
         "--hidden-import", "lz4.frame",

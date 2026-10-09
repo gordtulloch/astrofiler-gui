@@ -56,6 +56,21 @@ def selftest(report: Path) -> int:
         except Exception as exc:  # noqa: BLE001 - report every failure, not just the first
             ok = False
             lines.append(f"FAIL  {mod}: {exc!r}")
+    # Import every astrofiler module, as the running app eventually does, so a missing one fails CI.
+    import importlib
+    import pkgutil
+    import astrofiler
+    bad = []
+    for info in pkgutil.walk_packages(astrofiler.__path__, "astrofiler."):
+        if ".file_formats.xisfFile.example" in info.name:
+            continue
+        try:
+            importlib.import_module(info.name)
+        except Exception as exc:  # noqa: BLE001
+            bad.append(f"{info.name}: {exc!r}")
+    ok &= not bad
+    lines.extend(f"FAIL  {b}" for b in bad)
+    lines.append(f"{'FAIL ' if bad else 'ok   '} all astrofiler submodules import")
     mig = Path(os.environ["ASTROFILER_MIGRATIONS_DIR"])
     n = len(list(mig.glob("[0-9]*.py"))) if mig.is_dir() else 0
     if n == 0:
