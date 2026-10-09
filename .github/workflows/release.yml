@@ -6,6 +6,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Build only the Windows installer
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -33,6 +38,7 @@ jobs:
 
   build:
     needs: test
+    if: ${{ !inputs.windows_only || matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
