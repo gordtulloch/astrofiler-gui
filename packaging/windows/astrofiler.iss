@@ -26,6 +26,11 @@ WizardStyle=modern
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; Flags: unchecked
 
+; Inno never deletes files a previous version installed, so clear the bundled runtime before copying.
+; (A stale _internal\srcstrofiler folder from an older build shadows the real package and crashes start-up.)
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 Source: "..\..\dist\AstroFiler\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 

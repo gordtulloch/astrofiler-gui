@@ -9,7 +9,7 @@
 
 ### Bug Fixes
 
-- **Installed app failed to start** (`No module named 'astrofiler.types'`): the launcher bundled a lone `src/astrofiler/__init__.py` that shadowed the real package. It is no longer bundled; the version is read from the package when frozen, and the self-test now checks for the shadow folder
+- **Installed app failed to start** (`No module named 'astrofiler.types'`): the launcher bundled a lone `src/astrofiler/__init__.py` that shadowed the real package. It is no longer bundled; the version is read from the package when frozen, and the self-test now checks for the shadow folder. The Windows installer also deletes the previous `_internal` folder before copying, so upgrading over an earlier build no longer leaves the stale shadow folder behind
 
 ### Other
 
