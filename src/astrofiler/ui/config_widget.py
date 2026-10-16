@@ -431,6 +431,32 @@ class ConfigWidget(QWidget):
         itelescope_layout.addRow("Password:", self.itelescope_password)
 
         layout.addWidget(itelescope_group)
+
+        # SFTP server settings group
+        sftp_group = QGroupBox("SFTP Server Configuration")
+        sftp_layout = QFormLayout(sftp_group)
+        self.sftp_username = QLineEdit()
+        self.sftp_password = QLineEdit()
+        self.sftp_password.setEchoMode(QLineEdit.Password)
+        self.sftp_password.setToolTip("Stored in the OS keychain, not in astrofiler.ini.")
+        self.sftp_key_path = QLineEdit()
+        self.sftp_key_path.setPlaceholderText("Optional private key file")
+        self.sftp_remote_path = QLineEdit("/")
+        self.sftp_remote_path.setToolTip("Remote folder searched (recursively) for FITS files.")
+        self.sftp_port = QSpinBox()
+        self.sftp_port.setRange(1, 65535)
+        self.sftp_port.setValue(22)
+        self.sftp_strict_host_keys = QCheckBox("Reject servers whose host key is not in known_hosts")
+        self.sftp_strict_host_keys.setToolTip(
+            "Off: an unknown host key is accepted and its fingerprint logged (fine on a LAN).\n"
+            "On: refuse unknown servers - use this for anything reachable over the internet.")
+        sftp_layout.addRow("Username:", self.sftp_username)
+        sftp_layout.addRow("Password:", self.sftp_password)
+        sftp_layout.addRow("Key file:", self.sftp_key_path)
+        sftp_layout.addRow("Remote folder:", self.sftp_remote_path)
+        sftp_layout.addRow("Port:", self.sftp_port)
+        sftp_layout.addRow("", self.sftp_strict_host_keys)
+        layout.addWidget(sftp_group)
         
         # Celestron Origin settings group
         celestron_group = QGroupBox("Celestron Origin Configuration")
@@ -508,6 +534,15 @@ class ConfigWidget(QWidget):
             from ..services.credentials import set_itelescope_password
             set_itelescope_password(self.itelescope_password.text().strip())
             config.remove_option('DEFAULT', 'itelescope_password')
+
+            # SFTP settings (password in the keychain)
+            from ..services.credentials import set_sftp_password
+            config.set('DEFAULT', 'sftp_username', self.sftp_username.text().strip())
+            set_sftp_password(self.sftp_password.text().strip())
+            config.set('DEFAULT', 'sftp_key_path', self.sftp_key_path.text().strip())
+            config.set('DEFAULT', 'sftp_remote_path', self.sftp_remote_path.text().strip() or '/')
+            config.set('DEFAULT', 'sftp_port', str(self.sftp_port.value()))
+            config.set('DEFAULT', 'sftp_strict_host_keys', str(self.sftp_strict_host_keys.isChecked()))
             
             # Celestron Origin settings
             config.set('DEFAULT', 'celestron_hostname', self.celestron_hostname.text().strip())
@@ -684,6 +719,16 @@ class ConfigWidget(QWidget):
             
             from ..services.credentials import get_itelescope_password
             self.itelescope_password.setText(get_itelescope_password())
+
+            # Load SFTP settings
+            from ..services.credentials import get_sftp_settings
+            sftp = get_sftp_settings()
+            self.sftp_username.setText(sftp['username'])
+            self.sftp_password.setText(sftp['password'])
+            self.sftp_key_path.setText(sftp['key_path'])
+            self.sftp_remote_path.setText(sftp['remote_path'])
+            self.sftp_port.setValue(sftp['port'])
+            self.sftp_strict_host_keys.setChecked(sftp['strict_host_keys'])
             
             # Load Celestron Origin settings
             if config.has_option('DEFAULT', 'celestron_hostname'):
@@ -753,6 +798,14 @@ class ConfigWidget(QWidget):
         # iTelescope defaults
         self.itelescope_username.setText("")
         self.itelescope_password.setText("")
+
+        # SFTP defaults
+        self.sftp_username.setText("")
+        self.sftp_password.setText("")
+        self.sftp_key_path.setText("")
+        self.sftp_remote_path.setText("/")
+        self.sftp_port.setValue(22)
+        self.sftp_strict_host_keys.setChecked(False)
         
         # FITS compression defaults
         self.compress_fits.setChecked(False)

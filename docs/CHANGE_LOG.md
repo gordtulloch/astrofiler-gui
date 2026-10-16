@@ -1,5 +1,24 @@
 # AstroFiler Change Log
 
+## Unreleased
+
+Changes back-ported from the Galileo project's copy of the library.
+
+### New Features
+
+- **SFTP downloads**: a new "SFTP" entry in the Download dialog lists and fetches FITS files from any SSH/SFTP server (remote observatory, data server). Account, password, key file, remote folder, port and host-key policy are set under Config > Smart Telescopes
+- **Verify File Integrity**: a new button on the Duplicates tab re-hashes every catalogued file and reports files that are missing or no longer match the hash recorded at import
+
+### Security
+
+- **Passwords in the OS keychain**: the iTelescope and SFTP passwords are stored in the operating-system keychain instead of plaintext in `astrofiler.ini`. An existing plaintext iTelescope password is moved into the keychain and removed from the file the first time it is read. New dependencies: `keyring`, `paramiko`
+
+### Bug Fixes
+
+- **FITS compression could destroy the original**: the file was overwritten first and verified afterwards, so a failed verification left the user with a bad file. It now compresses to a temporary file, verifies it, and only then replaces the original. Verification compares every data HDU exactly (previously only the first array, with a tolerance) and fails if any HISTORY/COMMENT card would be lost; floating-point images are no longer quantized (lossy) by astropy's default; already-compressed HDUs are skipped
+- **`fitsSession` model missing its master columns**: `fitsBiasMaster`, `fitsDarkMaster` and `fitsFlatMaster` exist in the database (migration 002) and are used by auto-calibration and the Sessions view but were not declared on the model
+- Hash calculator errors keep their traceback (`logger.exception`, `raise ... from`), and MD5/SHA-1 checksums are flagged as not security-relevant
+
 ## Version 1.2.4
 
 ### New Features

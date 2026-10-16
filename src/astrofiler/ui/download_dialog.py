@@ -133,6 +133,8 @@ class TelescopeDownloadWorker(QThread):
                 protocol_info = "SMB"
             elif self.telescope_type == "iTelescope":
                 protocol_info = "FTPS"
+            elif self.telescope_type == "SFTP":
+                protocol_info = "SFTP"
             else:
                 protocol_info = "FTP"
             self.progress_updated.emit(f"Scanning network for {self.telescope_type} telescope ({protocol_info})...")
@@ -344,6 +346,7 @@ class SmartTelescopeDownloadDialog(QDialog):
         self.telescope_list.addItem("DWARF 3")
         self.telescope_list.addItem("iTelescope")
         self.telescope_list.addItem("Celestron Origin")
+        self.telescope_list.addItem("SFTP")
         self.telescope_list.setCurrentRow(0)
         self.telescope_list.setMaximumHeight(100)
         
@@ -455,6 +458,9 @@ class SmartTelescopeDownloadDialog(QDialog):
                 self.hostname_edit.setText("dwarf.local")
             elif telescope_type == "iTelescope":
                 self.hostname_edit.setText("data.itelescope.net")
+            elif telescope_type == "SFTP":
+                self.hostname_edit.setText("")  # the server's name or IP; account is in Config
+                self.hostname_edit.setPlaceholderText("SFTP server hostname or IP")
             elif telescope_type == "Celestron Origin":
                 # Load hostname from config if available
                 hostname = smart_telescope_manager.get_celestron_hostname()

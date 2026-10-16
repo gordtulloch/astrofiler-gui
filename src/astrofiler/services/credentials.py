@@ -61,3 +61,47 @@ def get_itelescope_password(ini_path: str = _INI_PATH) -> str:
     except OSError:
         logger.warning("Could not strip the legacy iTelescope password from %s", ini_path, exc_info=True)
     return legacy
+
+
+_SFTP_USER = "sftp"
+
+
+def get_sftp_password() -> str:
+    """The SFTP server password from the OS keychain ('' if unset or unavailable)."""
+    try:
+        import keyring
+        return keyring.get_password(_KEYRING_SERVICE, _SFTP_USER) or ""
+    except Exception:
+        logger.warning("Could not read the SFTP password from the OS keychain", exc_info=True)
+        return ""
+
+
+def set_sftp_password(password: str) -> None:
+    """Store the SFTP server password in the OS keychain (an empty string clears it)."""
+    try:
+        import keyring
+        if password:
+            keyring.set_password(_KEYRING_SERVICE, _SFTP_USER, password)
+        else:
+            try:
+                keyring.delete_password(_KEYRING_SERVICE, _SFTP_USER)
+            except Exception:
+                logger.debug("Nothing to delete from the OS keychain", exc_info=True)
+    except Exception:
+        logger.warning("Could not save the SFTP password to the OS keychain", exc_info=True)
+
+
+def get_sftp_settings(ini_path: str = _INI_PATH) -> dict:
+    """The SFTP server's connection settings (Config > Smart Telescopes); the password is from the keychain."""
+    config = configparser.ConfigParser()
+    config.read(ini_path)
+    port_text = config.get("DEFAULT", "sftp_port", fallback="22").strip()
+    return {
+        "username": config.get("DEFAULT", "sftp_username", fallback="").strip(),
+        "password": get_sftp_password(),
+        "key_path": config.get("DEFAULT", "sftp_key_path", fallback="").strip(),
+        "remote_path": config.get("DEFAULT", "sftp_remote_path", fallback="/").strip() or "/",
+        "port": int(port_text) if port_text.isdigit() else 22,
+        "strict_host_keys": config.get("DEFAULT", "sftp_strict_host_keys", fallback="False").strip().lower()
+        in ("true", "1", "yes", "on"),
+    }

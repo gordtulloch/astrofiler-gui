@@ -41,6 +41,14 @@ class DuplicatesWidget(QWidget):
         refresh_button.setStyleSheet("QPushButton { font-size: 11px; }")
         refresh_button.clicked.connect(self.refresh_duplicates)
         layout.addWidget(refresh_button)
+
+        # Integrity check: re-hash catalogued files and report any that are missing or changed
+        verify_button = QPushButton("Verify File Integrity")
+        verify_button.setStyleSheet("QPushButton { font-size: 11px; }")
+        verify_button.setToolTip("Re-hash every catalogued file on disk and report files that are "
+                                 "missing or no longer match the hash recorded when they were imported.")
+        verify_button.clicked.connect(self.verify_integrity)
+        layout.addWidget(verify_button)
         
         # Duplicates tree widget
         self.duplicates_tree = QTreeWidget()
@@ -84,6 +92,27 @@ class DuplicatesWidget(QWidget):
         
         layout.addLayout(button_layout)
     
+    def verify_integrity(self):
+        """Report catalogued files that are missing from disk or whose content has changed."""
+        from astrofiler.core.duplicates import verify_integrity
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            problems = verify_integrity()
+        except Exception as e:
+            logger.exception("Integrity check failed")
+            QMessageBox.critical(self, "Integrity Check", f"The check failed: {e}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not problems:
+            QMessageBox.information(self, "Integrity Check", "Every catalogued file is present and unchanged.")
+            return
+        lines = [f"{p.reason.upper()}: {p.file.fitsFileName}" for p in problems[:25]]
+        if len(problems) > 25:
+            lines.append(f"... and {len(problems) - 25} more")
+        QMessageBox.warning(self, "Integrity Check",
+                            f"{len(problems)} file(s) have problems:\n\n" + "\n".join(lines))
+
     def refresh_duplicates(self):
         """Refresh the list of duplicate files"""
         self.duplicates_tree.clear()

@@ -25,6 +25,11 @@ class fitsSession(BaseModel):
     fitsBiasSession = pw.TextField(null=True)
     fitsDarkSession = pw.TextField(null=True)
     fitsFlatSession = pw.TextField(null=True)
+
+    # Master frames applied to this light session (columns added by migration 002)
+    fitsBiasMaster = pw.TextField(null=True)
+    fitsDarkMaster = pw.TextField(null=True)
+    fitsFlatMaster = pw.TextField(null=True)
     
     # Auto-calibration tracking fields
     is_auto_calibration = pw.BooleanField(null=True, default=False)
