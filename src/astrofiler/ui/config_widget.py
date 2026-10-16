@@ -504,7 +504,10 @@ class ConfigWidget(QWidget):
             
             # iTelescope settings
             config.set('DEFAULT', 'itelescope_username', self.itelescope_username.text().strip())
-            config.set('DEFAULT', 'itelescope_password', self.itelescope_password.text().strip())
+            # The password goes to the OS keychain, never the ini file
+            from ..services.credentials import set_itelescope_password
+            set_itelescope_password(self.itelescope_password.text().strip())
+            config.remove_option('DEFAULT', 'itelescope_password')
             
             # Celestron Origin settings
             config.set('DEFAULT', 'celestron_hostname', self.celestron_hostname.text().strip())
@@ -679,9 +682,8 @@ class ConfigWidget(QWidget):
                 itelescope_username = config.get('DEFAULT', 'itelescope_username')
                 self.itelescope_username.setText(itelescope_username)
             
-            if config.has_option('DEFAULT', 'itelescope_password'):
-                itelescope_password = config.get('DEFAULT', 'itelescope_password')
-                self.itelescope_password.setText(itelescope_password)
+            from ..services.credentials import get_itelescope_password
+            self.itelescope_password.setText(get_itelescope_password())
             
             # Load Celestron Origin settings
             if config.has_option('DEFAULT', 'celestron_hostname'):

@@ -86,7 +86,8 @@ class SmartTelescopeManager:
             config.read('astrofiler.ini')
             
             username = config.get('DEFAULT', 'itelescope_username', fallback='')
-            password = config.get('DEFAULT', 'itelescope_password', fallback='')
+            from .credentials import get_itelescope_password
+            password = get_itelescope_password()
             
             return username.strip(), password.strip()
         except Exception as e:

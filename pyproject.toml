@@ -41,6 +41,7 @@ dependencies = [
     "scipy>=1.7",
     "lz4>=3.0.0",
     "reproject>=0.12",
+    "keyring>=23.0",
 ]
 
 [project.optional-dependencies]

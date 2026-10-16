@@ -23,6 +23,8 @@ Set 'compress_fits=true' in astrofiler.ini to enable automatic compression
 for new files during download and repository loading.
 """
 
+from __future__ import annotations
+
 import os
 import gzip
 import lzma
@@ -35,6 +37,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 from astropy.io import fits
 import hashlib
+from collections import Counter
+
+import numpy as np
 
 # Import config for temp folder
 try:
@@ -45,6 +50,142 @@ except ImportError:
         return tempfile.gettempdir()
 
 logger = logging.getLogger(__name__)
+
+# The project convention for FITS tile compression; every ``fits_*`` setting maps to it.
+_TILE_COMPRESSION = 'GZIP_2'
+
+_STRUCTURAL_KEYWORDS = {'SIMPLE', 'BITPIX', 'NAXIS', 'EXTEND', 'PCOUNT', 'GCOUNT', 'CHECKSUM', 'DATASUM'}
+# Keywords a CompImageHDU (a BINTABLE extension) must not inherit from the source image header.
+_PRIMARY_SKIP = _STRUCTURAL_KEYWORDS | {f'NAXIS{i}' for i in range(1, 10)}
+_COMP_SKIP = _STRUCTURAL_KEYWORDS | {
+    'BSCALE', 'BZERO', 'XTENSION', 'TFIELDS', 'ZIMAGE', 'ZCMPTYPE', 'ZBITPIX', 'ZNAXIS',
+} | {
+    f'{prefix}{i}'
+    for i in range(1, 100)
+    for prefix in ('NAXIS', 'ZNAXIS', 'TTYPE', 'TFORM', 'TUNIT', 'TDIM')
+}
+
+
+def _compression_ratio(original_size: int, compressed_size: int) -> float:
+    """Percentage reduction; 0 for an empty original rather than a ZeroDivisionError."""
+    return (1 - compressed_size / original_size) * 100 if original_size else 0.0
+
+
+def _remove_quietly(path: str) -> None:
+    """Delete a temporary file, logging (not raising) if the OS refuses."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("Could not remove temporary file %s: %s", path, exc)
+
+
+def _find_image_hdu_index(hdul: fits.HDUList) -> int | None:
+    """Index of the first uncompressed image HDU that holds data (tables and CompImageHDUs don't count)."""
+    for idx, hdu in enumerate(hdul):
+        if isinstance(hdu, fits.CompImageHDU) or not isinstance(hdu, (fits.PrimaryHDU, fits.ImageHDU)):
+            continue
+        try:
+            if hdu.data is not None:
+                return idx
+        except Exception:  # an HDU whose data can't be read is not a candidate
+            logger.debug("HDU %d has unreadable data", idx, exc_info=True)
+    return None
+
+
+def _copy_header_cards(dst: fits.Header, src: fits.Header, skip: set[str]) -> list[str]:
+    """Copy every non-structural card from *src* to *dst*; return the keywords that could not be copied."""
+    failed: list[str] = []
+    for card in src.cards:
+        key = card.keyword
+        if not key or key in skip:
+            continue
+        try:
+            if key == 'COMMENT':
+                dst.add_comment(card.value)
+            elif key == 'HISTORY':
+                dst.add_history(card.value)
+            else:
+                dst[key] = (card.value, card.comment)
+        except Exception:
+            failed.append(key)
+    return failed
+
+
+def _tile_compress_hdu(src_hdu: fits.PrimaryHDU | fits.ImageHDU) -> fits.CompImageHDU:
+    """Build a tile-compressed copy of an image HDU, keeping its non-structural header cards."""
+    # quantize_level=0 disables quantization: astropy's default (16) makes floating-point
+    # images lossy, which would silently corrupt the photometry.
+    compressed_hdu = fits.CompImageHDU(
+        data=src_hdu.data, compression_type=_TILE_COMPRESSION, quantize_level=0,
+    )
+    failed = _copy_header_cards(compressed_hdu.header, src_hdu.header, _COMP_SKIP)
+    if failed:
+        raise ValueError(f"header cards could not be copied to the compressed HDU: {sorted(set(failed))}")
+
+    # Preserve EXTNAME when present
+    if 'EXTNAME' in src_hdu.header and 'EXTNAME' not in compressed_hdu.header:
+        compressed_hdu.header['EXTNAME'] = src_hdu.header['EXTNAME']
+
+    # Older astropy exposes the raw table header, already holding the tile-compression (Z*)
+    # keywords, and needs them to match the original image. Newer astropy derives them itself
+    # and would write our copies as stray reserved keywords (a VerifyWarning on every read).
+    if 'ZCMPTYPE' in compressed_hdu.header:
+        naxis = int(src_hdu.header.get('NAXIS', src_hdu.data.ndim))
+        compressed_hdu.header['ZIMAGE'] = (True, 'Tile-compressed image')
+        compressed_hdu.header['ZCMPTYPE'] = (_TILE_COMPRESSION, 'Compression algorithm')
+        compressed_hdu.header['ZNAXIS'] = (naxis, 'Number of uncompressed axes')
+        compressed_hdu.header['ZBITPIX'] = (int(src_hdu.header.get('BITPIX', -32)), 'Uncompressed data type')
+        for axis in range(1, naxis + 1):
+            n_key = f'NAXIS{axis}'
+            length = int(src_hdu.header[n_key]) if n_key in src_hdu.header else int(src_hdu.data.shape[-axis])
+            compressed_hdu.header[f'ZNAXIS{axis}'] = (length, f'Axis {axis} length (uncompressed)')
+    return compressed_hdu
+
+
+def _rebuild_with_compressed_image(hdul: fits.HDUList, target_idx: int) -> list[fits.hdu.base._BaseHDU]:
+    """The HDU list for the compressed file: *hdul* with its image at *target_idx* tile-compressed.
+
+    Raises if any extension or header card can't be carried over — a compressed copy that
+    silently lacks part of the original must never replace it.
+    """
+    if target_idx == 0:
+        # The image is in the PrimaryHDU; rewrite as an empty PrimaryHDU with the global
+        # metadata followed by a CompImageHDU holding the image.
+        primary = fits.PrimaryHDU()
+        failed = _copy_header_cards(primary.header, hdul[0].header, _PRIMARY_SKIP)
+        if failed:
+            raise ValueError(f"header cards could not be copied to the primary HDU: {sorted(set(failed))}")
+        return [primary, _tile_compress_hdu(hdul[0]), *(ext.copy() for ext in hdul[1:])]
+
+    return [
+        _tile_compress_hdu(hdu) if idx == target_idx else hdu.copy()
+        for idx, hdu in enumerate(hdul)
+    ]
+
+
+def _data_hdus(hdul: fits.HDUList) -> list[fits.hdu.base._BaseHDU]:
+    return [hdu for hdu in hdul if hdu.data is not None]
+
+
+def _data_equal(a: np.ndarray, b: np.ndarray) -> bool:
+    """Exact equality (NaN == NaN); handles table (record) arrays column by column."""
+    if a.shape != b.shape:
+        return False
+    names = a.dtype.names
+    if names or b.dtype.names:
+        if names is None or names != b.dtype.names:
+            return False
+        return all(_data_equal(np.asarray(a[name]), np.asarray(b[name])) for name in names)
+    both_float = a.dtype.kind in 'fc' and b.dtype.kind in 'fc'
+    return bool(np.array_equal(a, b, equal_nan=both_float))
+
+
+def _commentary_counts(hdul: fits.HDUList) -> Counter:
+    return Counter(
+        card.keyword for hdu in hdul for card in hdu.header.cards if card.keyword in ('COMMENT', 'HISTORY')
+    )
 
 
 class FitsCompressor:
@@ -547,318 +688,91 @@ class FitsCompressor:
             logger.error(f"Error analyzing FITS file for compression: {e}")
             return 'fits_gzip2'  # Safe fallback
     
-    def _compress_fits_internal(self, input_path: str, replace_original: bool, algorithm: str) -> Optional[str]:
+    def _compress_fits_internal(self, input_path: str, replace_original: bool, algorithm: str) -> str | None:
         """
         Compress FITS file using internal FITS compression (tile compression).
-        
+
+        The compressed copy is written to a temporary file, verified against the untouched
+        original, and only then moved into place, so the original survives any failure.
+
         Args:
             input_path: Path to input FITS file
-            replace_original: Whether to replace the original file
-            algorithm: FITS compression algorithm (auto, fits_rice, fits_gzip1, fits_gzip2)
-                      'auto' = smart selection based on data type
-            
+            replace_original: Whether to replace the original file (keeping its name)
+            algorithm: The ``fits_*`` setting; all of them produce GZIP_2 (the project convention)
+
         Returns:
             Path to compressed FITS file
         """
+        # When replacing the original (auto-import), keep the filename unchanged.
+        output_path = input_path if replace_original else f"{input_path}.fz"
+        temp_path = f"{output_path}.tmp"
         try:
-            # For imports we require FITS tile compression using GZIP_2.
-            # (Other algorithms are not used for this workflow.)
-            compression_type = 'GZIP_2'
-            
-            # Determine output path
-            # When replacing the original (auto-import), keep the filename unchanged.
-            if replace_original:
-                output_path = input_path
-                temp_path = input_path + '.tmp'
-            else:
-                output_path = f"{input_path}.fz"
-                temp_path = output_path + '.tmp'
-
             original_size = os.path.getsize(input_path)
-            
-            def _find_first_image_hdu_index(hdul: fits.HDUList) -> Optional[int]:
-                for idx, hdu in enumerate(hdul):
-                    try:
-                        if getattr(hdu, 'data', None) is not None:
-                            return idx
-                    except Exception:
-                        continue
+
+            with fits.open(input_path, memmap=False) as hdul:
+                target_idx = _find_image_hdu_index(hdul)
+                if target_idx is None:
+                    logger.debug("No image data found to compress: %s", input_path)
+                    return input_path
+                fits.HDUList(_rebuild_with_compressed_image(hdul, target_idx)).writeto(temp_path, overwrite=True)
+
+            if self.verify_compression and not self._verify_fits_internal_compression(temp_path, input_path):
+                logger.error("FITS %s compression verification failed for %s; original left untouched",
+                             algorithm, input_path)
                 return None
 
-            def _merge_nonstructural_header(dst: fits.Header, src: fits.Header, skip: set[str]) -> None:
-                for card in src.cards:
-                    key = card.keyword
-                    if not key or key in skip:
-                        continue
-                    if key in ('COMMENT', 'HISTORY'):
-                        # Preserve free-form cards
-                        try:
-                            dst.add_comment(card.value)
-                        except Exception:
-                            pass
-                        continue
-                    try:
-                        dst[key] = (card.value, card.comment)
-                    except Exception:
-                        # Some cards may be invalid for the destination HDU
-                        continue
+            os.replace(temp_path, output_path)
 
-            # Load and compress the FITS file
-            with fits.open(input_path, memmap=False) as hdul:
-                target_idx = _find_first_image_hdu_index(hdul)
-                if target_idx is None:
-                    logger.debug(f"No image data found to compress: {input_path}")
-                    return input_path
-
-                new_hdus: list[fits.hdu.base.ExtensionHDU | fits.PrimaryHDU] = []
-
-                if target_idx == 0:
-                    # Original image is in the PrimaryHDU; rewrite as:
-                    # - PrimaryHDU (no data) with global metadata
-                    # - CompImageHDU holding the image
-                    primary = fits.PrimaryHDU()
-                    skip_primary = {
-                        'SIMPLE', 'BITPIX', 'NAXIS', 'EXTEND', 'PCOUNT', 'GCOUNT',
-                        'CHECKSUM', 'DATASUM'
-                    }
-                    for i in range(1, 10):
-                        skip_primary.add(f'NAXIS{i}')
-                    _merge_nonstructural_header(primary.header, hdul[0].header, skip_primary)
-                    new_hdus.append(primary)
-
-                    src_hdu = hdul[0]
-                    compressed_hdu = fits.CompImageHDU(
-                        data=src_hdu.data,
-                        compression_type=compression_type,
-                    )
-
-                    # Copy metadata from original header, but do NOT copy structural keywords.
-                    # CompImageHDU is a BINTABLE extension and must not contain SIMPLE/NAXIS/...
-                    skip_comp = {
-                        'SIMPLE', 'BITPIX', 'NAXIS', 'EXTEND', 'PCOUNT', 'GCOUNT',
-                        'CHECKSUM', 'DATASUM', 'BSCALE', 'BZERO',
-                        'XTENSION', 'TFIELDS',
-                        'ZIMAGE', 'ZCMPTYPE', 'ZBITPIX', 'ZNAXIS'
-                    }
-                    for i in range(1, 100):
-                        skip_comp.add(f'NAXIS{i}')
-                        skip_comp.add(f'ZNAXIS{i}')
-                        skip_comp.add(f'TTYPE{i}')
-                        skip_comp.add(f'TFORM{i}')
-                        skip_comp.add(f'TUNIT{i}')
-                        skip_comp.add(f'TDIM{i}')
-                    _merge_nonstructural_header(compressed_hdu.header, src_hdu.header, skip_comp)
-
-                    # Ensure required FITS tile-compression keywords exist and match the original image.
-                    original_naxis = int(src_hdu.header.get('NAXIS', src_hdu.data.ndim))
-                    original_bitpix = int(src_hdu.header.get('BITPIX', -32))
-                    compressed_hdu.header['ZIMAGE'] = (True, 'Tile-compressed image')
-                    compressed_hdu.header['ZCMPTYPE'] = (compression_type, 'Compression algorithm')
-                    compressed_hdu.header['ZNAXIS'] = (original_naxis, 'Number of uncompressed axes')
-                    compressed_hdu.header['ZBITPIX'] = (original_bitpix, 'Uncompressed data type')
-                    for axis in range(1, original_naxis + 1):
-                        zn_key = f'ZNAXIS{axis}'
-                        n_key = f'NAXIS{axis}'
-                        if n_key in src_hdu.header:
-                            compressed_hdu.header[zn_key] = (int(src_hdu.header[n_key]), f'Axis {axis} length (uncompressed)')
-                        else:
-                            compressed_hdu.header[zn_key] = (int(src_hdu.data.shape[-axis]), f'Axis {axis} length (uncompressed)')
-
-                    new_hdus.append(compressed_hdu)
-
-                    # Preserve any additional extensions
-                    for ext in hdul[1:]:
-                        try:
-                            new_hdus.append(ext.copy())
-                        except Exception:
-                            pass
-                else:
-                    # Preserve primary HDU and compress the first image extension
-                    new_hdus.append(hdul[0].copy())
-                    for idx in range(1, len(hdul)):
-                        if idx != target_idx:
-                            new_hdus.append(hdul[idx].copy())
-                            continue
-
-                        src_hdu = hdul[idx]
-                        compressed_hdu = fits.CompImageHDU(
-                            data=src_hdu.data,
-                            compression_type=compression_type,
-                        )
-
-                        skip_comp = {
-                            'SIMPLE', 'BITPIX', 'NAXIS', 'EXTEND', 'PCOUNT', 'GCOUNT',
-                            'CHECKSUM', 'DATASUM', 'BSCALE', 'BZERO',
-                            'XTENSION', 'TFIELDS',
-                            'ZIMAGE', 'ZCMPTYPE', 'ZBITPIX', 'ZNAXIS'
-                        }
-                        for i in range(1, 100):
-                            skip_comp.add(f'NAXIS{i}')
-                            skip_comp.add(f'ZNAXIS{i}')
-                            skip_comp.add(f'TTYPE{i}')
-                            skip_comp.add(f'TFORM{i}')
-                            skip_comp.add(f'TUNIT{i}')
-                            skip_comp.add(f'TDIM{i}')
-                        _merge_nonstructural_header(compressed_hdu.header, src_hdu.header, skip_comp)
-
-                        # Preserve EXTNAME when present
-                        if 'EXTNAME' in src_hdu.header and 'EXTNAME' not in compressed_hdu.header:
-                            compressed_hdu.header['EXTNAME'] = src_hdu.header['EXTNAME']
-
-                        original_naxis = int(src_hdu.header.get('NAXIS', src_hdu.data.ndim))
-                        original_bitpix = int(src_hdu.header.get('BITPIX', -32))
-                        compressed_hdu.header['ZIMAGE'] = (True, 'Tile-compressed image')
-                        compressed_hdu.header['ZCMPTYPE'] = (compression_type, 'Compression algorithm')
-                        compressed_hdu.header['ZNAXIS'] = (original_naxis, 'Number of uncompressed axes')
-                        compressed_hdu.header['ZBITPIX'] = (original_bitpix, 'Uncompressed data type')
-                        for axis in range(1, original_naxis + 1):
-                            zn_key = f'ZNAXIS{axis}'
-                            n_key = f'NAXIS{axis}'
-                            if n_key in src_hdu.header:
-                                compressed_hdu.header[zn_key] = (int(src_hdu.header[n_key]), f'Axis {axis} length (uncompressed)')
-                            else:
-                                compressed_hdu.header[zn_key] = (int(src_hdu.data.shape[-axis]), f'Axis {axis} length (uncompressed)')
-
-                        new_hdus.append(compressed_hdu)
-
-                new_hdul = fits.HDUList(new_hdus)
-                new_hdul.writeto(temp_path, overwrite=True)
-
-            # Atomically move into place
-            try:
-                os.replace(temp_path, output_path)
-            except Exception:
-                # Fallback for filesystems where replace fails
-                if os.path.exists(output_path) and output_path != temp_path:
-                    os.remove(output_path)
-                shutil.move(temp_path, output_path)
             compressed_size = os.path.getsize(output_path)
-            compression_ratio = (1 - compressed_size / original_size) * 100
-            
-            logger.info(f"{algorithm} FITS compression complete: {original_size:,} bytes -> "
-                       f"{compressed_size:,} bytes ({compression_ratio:.1f}% reduction)")
-            
-            # Verify compression if enabled
-            if self.verify_compression:
-                if not self._verify_fits_internal_compression(output_path, input_path):
-                    logger.error(f"FITS {algorithm} compression verification failed")
-                    if os.path.exists(output_path) and output_path != input_path:
-                        os.remove(output_path)
-                    return None
-            
-            # If replacing original, we already overwrote it in-place.
-            
+            logger.info("%s FITS compression complete: %s bytes -> %s bytes (%.1f%% reduction)",
+                        algorithm, f"{original_size:,}", f"{compressed_size:,}",
+                        _compression_ratio(original_size, compressed_size))
             return output_path
-            
-        except Exception as e:
-            logger.error(f"Error in FITS internal compression {algorithm}: {input_path} - {e}")
+
+        except Exception:  # reported and turned into a None result; original is untouched
+            logger.exception("Error in FITS internal compression %s: %s", algorithm, input_path)
             return None
-    
+        finally:
+            if os.path.exists(temp_path):
+                _remove_quietly(temp_path)
+
     def _verify_fits_internal_compression(self, compressed_path: str, original_path: str) -> bool:
         """
-        Verify FITS internal compression by checking that data can be read and is approximately equal.
-        Note: FITS internal compression may involve dtype conversions (e.g., big-endian to little-endian)
-        which can cause minor floating-point differences.
-        
+        Verify FITS internal compression: every data HDU must decompress to exactly the
+        original values (NaN == NaN) and no HISTORY/COMMENT card may be lost.
+
         Args:
             compressed_path: Path to compressed FITS file
             original_path: Path to original FITS file
-            
+
         Returns:
             True if verification successful
         """
         try:
-            def _first_data_array(hdul: fits.HDUList):
-                for hdu in hdul:
-                    try:
-                        if getattr(hdu, 'data', None) is not None:
-                            return hdu.data
-                    except Exception:
-                        continue
-                return None
-
-            # Read both files and compare data
-            with fits.open(original_path, memmap=False) as orig_hdul:
-                with fits.open(compressed_path, memmap=False) as comp_hdul:
-                    orig_data = _first_data_array(orig_hdul)
-                    comp_data = _first_data_array(comp_hdul)
-
-                    if orig_data is None or comp_data is None:
-                        logger.error("Missing data when verifying FITS compression")
-                        return False
-
-                    # Check if data shapes match
-                    if orig_data.shape != comp_data.shape:
-                        logger.error(f"Shape mismatch: original {orig_data.shape} vs compressed {comp_data.shape}")
-                        return False
-
-                    import numpy as np
-                    if not np.allclose(orig_data, comp_data, rtol=1e-6, atol=1e-8):
-                        diff = np.abs(orig_data - comp_data)
-                        max_diff = float(np.max(diff))
-                        mean_diff = float(np.mean(diff))
-
-                        if max_diff < 1e-4 and mean_diff < 1e-5:
-                            logger.info(f"FITS compression: small differences due to dtype conversion (max: {max_diff:.2e}, mean: {mean_diff:.2e})")
-                            return True
-
-                        logger.error(f"FITS compression verification failed: max_diff={max_diff:.2e}, mean_diff={mean_diff:.2e}")
-                        return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error verifying FITS internal compression: {e}")
-            return False
-        """
-        Verify that a compressed file can be decompressed to match the original.
-        
-        Args:
-            compressed_path: Path to the compressed file
-            original_path: Path to the original file
-            algorithm: Compression algorithm used
-            
-        Returns:
-            True if verification passes, False otherwise
-        """
-        try:
-            # Create temporary file for decompression test using configured temp folder
-            temp_folder = get_temp_folder()
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.fits', dir=temp_folder) as temp_file:
-                temp_path = temp_file.name
-            
-            try:
-                # Decompress to temporary file using specific algorithm
-                if algorithm == 'gzip':
-                    with gzip.open(compressed_path, 'rb') as f_in:
-                        with open(temp_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                elif algorithm == 'lzma':
-                    with lzma.open(compressed_path, 'rb') as f_in:
-                        with open(temp_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                elif algorithm == 'bzip2':
-                    with bz2.open(compressed_path, 'rb') as f_in:
-                        with open(temp_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                else:
+            with fits.open(original_path, memmap=False) as orig_hdul, \
+                    fits.open(compressed_path, memmap=False) as comp_hdul:
+                orig_hdus = _data_hdus(orig_hdul)
+                comp_hdus = _data_hdus(comp_hdul)
+                if len(orig_hdus) != len(comp_hdus):
+                    logger.error("HDU count mismatch: original has %d data HDUs, compressed has %d",
+                                 len(orig_hdus), len(comp_hdus))
                     return False
-                
-                # Compare file hashes
-                original_hash = self.calculate_file_hash(original_path)
-                decompressed_hash = self.calculate_file_hash(temp_path)
-                
-                return original_hash == decompressed_hash
-                
-            finally:
-                # Clean up temporary file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                    
-        except Exception as e:
-            logger.error(f"Error verifying compressed file {compressed_path}: {e}")
+
+                for number, (orig, comp) in enumerate(zip(orig_hdus, comp_hdus, strict=True)):
+                    if not _data_equal(np.asarray(orig.data), np.asarray(comp.data)):
+                        logger.error("Data mismatch in data HDU %d after compression", number)
+                        return False
+
+                lost = _commentary_counts(orig_hdul) - _commentary_counts(comp_hdul)
+                if lost:
+                    logger.error("Header cards lost in compression: %s", dict(lost))
+                    return False
+            return True
+
+        except Exception:  # any failure to verify counts as "not verified"
+            logger.exception("Error verifying FITS internal compression")
             return False
-    
+
     def should_compress_file(self, file_path: str) -> bool:
         """
         Determine if a file should be compressed based on configuration and file properties.
