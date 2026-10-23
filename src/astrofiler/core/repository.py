@@ -71,13 +71,18 @@ class RepositoryManager:
                 logger.error(f"File does not exist: {file_path}")
                 return None
             
-            # Determine file type and destination
+            # Determine file type and destination metadata
             imagetyp = hdr.get('IMAGETYP', '').upper()
             object_name = hdr.get('OBJECT', 'Unknown')
             telescope = hdr.get('TELESCOP', 'Unknown')
             instrument = hdr.get('INSTRUME', 'Unknown')
+            focallen = hdr.get('FOCALLEN', 0)
             
-            # Sanitize names for filesystem
+            # Normalize Seestar telescope and instrument metadata
+            from ..models.fits_file import fitsFile
+            telescope, instrument = fitsFile.normalize_seestar_metadata(telescope, instrument, focallen)
+
+            # Sanitize names for filesystem and enforce underscores for telescope/instrument folders
             from .utils import (
                 sanitize_filesystem_name,
                 is_dark_image_type,
@@ -85,8 +90,8 @@ class RepositoryManager:
                 is_flat_image_type,
             )
             object_safe = sanitize_filesystem_name(object_name)
-            telescope_safe = sanitize_filesystem_name(telescope)
-            instrument_safe = sanitize_filesystem_name(instrument)
+            telescope_safe = sanitize_filesystem_name(telescope).replace(' ', '_')
+            instrument_safe = sanitize_filesystem_name(instrument).replace(' ', '_')
             
             # Determine destination directory
             if 'LIGHT' in imagetyp:
