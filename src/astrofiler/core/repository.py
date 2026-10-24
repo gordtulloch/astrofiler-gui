@@ -89,10 +89,14 @@ class RepositoryManager:
                 is_flat_dark_image_type,
                 is_flat_image_type,
             )
-            object_safe = sanitize_filesystem_name(object_name)
-            telescope_safe = sanitize_filesystem_name(telescope).replace(' ', '_')
-            instrument_safe = sanitize_filesystem_name(instrument).replace(' ', '_')
             
+            import re
+            # Preserve spaces in object names (like "M 42"), only strip illegal characters
+            object_safe = re.sub(r'[\\/*?:"<>|]', '', object_name).strip() if object_name else 'Unknown'
+            
+            telescope_safe = sanitize_filesystem_name(telescope).replace(' ', '_')
+            instrument_safe = sanitize_filesystem_name(instrument).replace(' ', '_')        
+                
             # Determine destination directory
             if 'LIGHT' in imagetyp:
                 # Light frames: Light/{OBJECT}/{TELESCOPE}/{INSTRUMENT}/{DATE}/
