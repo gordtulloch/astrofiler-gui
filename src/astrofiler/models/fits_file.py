@@ -46,7 +46,57 @@ class fitsFile(BaseModel):
 
     class Meta:
         table_name = 'fitsFile'
-    
+
+    @staticmethod
+    def normalize_seestar_metadata(telescop_raw, instrume_raw, focallen=0):
+        """
+        Normalize TELESCOP and INSTRUME metadata for Seestar series telescopes (S50, S50 Pro, S30, S30 Pro).
+        Strips serial numbers and determines Tele vs Wide camera selection.
+        """
+        t_str = str(telescop_raw or '').strip()
+        i_str = str(instrume_raw or '').strip()
+
+        if not t_str:
+            return telescop_raw, instrume_raw
+
+        # Identify telescope model
+        if 'S50 Pro' in t_str or 'S50_Pro' in t_str:
+            new_telescop = 'Seestar S50 Pro'
+        elif 'S50' in t_str:
+            new_telescop = 'Seestar S50'
+        elif 'S30 Pro' in t_str or 'S30_Pro' in t_str:
+            new_telescop = 'Seestar S30 Pro'
+        elif 'S30' in t_str:
+            new_telescop = 'Seestar S30'
+        elif 'seestar' in t_str.lower():
+            new_telescop = 'Seestar S50'  # Fallback for legacy generic Seestar headers
+        else:
+            return telescop_raw, instrume_raw
+
+        # Determine Tele vs Wide instrument selection
+        camera_type = "Tele"
+        if new_telescop != 'Seestar S50':
+            try:
+                focallen_val = float(focallen or 0)
+            except (ValueError, TypeError):
+                focallen_val = 0
+
+            if 'Wide' in i_str or 'WIDE' in i_str.upper() or (0 < focallen_val < 100):
+                camera_type = "Wide"
+
+        new_instrume = f"{new_telescop} {camera_type}"
+        return new_telescop, new_instrume
+
+    def apply_seestar_normalization(self, focallen=0):
+        """Standardizes telescope and instrument fields directly on this instance."""
+        norm_t, norm_i = self.normalize_seestar_metadata(
+            self.fitsFileTelescop, 
+            self.fitsFileInstrument, 
+            focallen
+        )
+        self.fitsFileTelescop = norm_t
+        self.fitsFileInstrument = norm_i
+
     def is_calibration_frame(self):
         """
         Check if this file is a calibration frame (bias, dark, flat).

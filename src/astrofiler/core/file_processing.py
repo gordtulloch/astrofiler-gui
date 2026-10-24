@@ -283,7 +283,7 @@ class FileProcessor:
         try:
             # Import here to avoid circular imports
             try:
-                from ..models import Masters
+                from ..models import Masters, fitsFile as FitsFileModel
             except ImportError:
                 raise DatabaseError(
                     "Masters table not available yet. Run migrations to create Masters table.",
@@ -316,10 +316,17 @@ class FileProcessor:
                     file_path=file_path
                 )
             
+            # Normalize Seestar telescope and instrument metadata
+            norm_telescope, norm_instrument = FitsFileModel.normalize_seestar_metadata(
+                hdr.get('TELESCOP', 'Unknown'),
+                hdr.get('INSTRUME', 'Unknown'),
+                hdr.get('FOCALLEN', 0)
+            )
+
             # Extract session data from header
             session_data = {
-                'telescope': hdr.get('TELESCOP', 'Unknown'),
-                'instrument': hdr.get('INSTRUME', 'Unknown'),
+                'telescope': norm_telescope,
+                'instrument': norm_instrument,
                 'binning_x': str(hdr.get('XBINNING', '1')),
                 'binning_y': str(hdr.get('YBINNING', '1')),
                 'ccd_temp': str(hdr.get('CCD-TEMP', '')),
@@ -514,19 +521,24 @@ class FileProcessor:
                     file_path=fileName
                 )
             
-            # Get telescope and instrument
-            telescope = hdr.get("TELESCOP", "Unknown")
-            instrument = hdr.get("INSTRUME", "Unknown")
+            # Get telescope and instrument and normalize Seestar metadata
+            raw_telescope = hdr.get("TELESCOP", "Unknown")
+            raw_instrument = hdr.get("INSTRUME", "Unknown")
+            focallen = hdr.get("FOCALLEN", 0)
             
-            # Check if telescope is iTelescope or instrument is SeeStar - mark as calibrated
+            telescope, instrument = FitsFileModel.normalize_seestar_metadata(
+                raw_telescope, raw_instrument, focallen
+            )
+            
+            # Check if telescope or instrument is pre-calibrated (iTelescope or Seestar)
             is_precalibrated = False
-            if (telescope and "itelescope" in telescope.lower()) or \
+            if (telescope and ("itelescope" in telescope.lower() or "seestar" in telescope.lower())) or \
                (instrument and "seestar" in instrument.lower()):
                 is_precalibrated = True
                 if telescope and "itelescope" in telescope.lower():
                     logger.debug(f"Marking file as pre-calibrated from iTelescope: {telescope}")
                 else:
-                    logger.debug(f"Marking file as pre-calibrated from SeeStar instrument: {instrument}")
+                    logger.debug(f"Marking file as pre-calibrated from SeeStar: {instrument or telescope}")
             
             # Determine filter: blank for DARK and BIAS frames
             image_type_upper = image_type.upper()
@@ -739,6 +751,21 @@ class FileProcessor:
         if mapping_modified:
             header_modified = True
         
+        # Normalize Seestar telescope and instrument metadata
+        from ..models import fitsFile as FitsFileModel
+        raw_telescope = hdr.get("TELESCOP", "")
+        raw_instrument = hdr.get("INSTRUME", "")
+        focallen = hdr.get("FOCALLEN", 0)
+
+        norm_telescope, norm_instrument = FitsFileModel.normalize_seestar_metadata(
+            raw_telescope, raw_instrument, focallen
+        )
+
+        if norm_telescope != raw_telescope or norm_instrument != raw_instrument:
+            hdr["TELESCOP"] = norm_telescope
+            hdr["INSTRUME"] = norm_instrument
+            header_modified = True
+
         # Validate required header fields
         if not (hdr.get("IMAGETYP") or hdr.get("FRAME")):
             raise ValidationError(
